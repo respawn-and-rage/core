@@ -511,6 +511,8 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
     }
     Pad({FVector2D(Base)-SpawnSize*.5,FVector2D(Base)+SpawnSize*.5},180);
     if(T.SizingTeamSize>0)
+        PairBox(Base+FVector(0,-50,330),{1000,20,300},V.WallSurface);
+    if(T.SizingTeamSize>0)
     {
         // A lateral mouth used to assume sea-level ground. Compact districts
         // can bring a foundation close to it: meet the actual final terrain,
@@ -529,13 +531,26 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
             if(Point.X>=Ramp.Bounds.Min.X-.01 && Point.X<=Ramp.Bounds.Max.X+.01 && Point.Y>=Ramp.Bounds.Min.Y-.01 && Point.Y<=Ramp.Bounds.Max.Y+.01)
                 Point.Z=AlleyRampHeight(Ramp,FVector2D(Point))+100;
     }
+    auto StandingHeight=[&](FVector2D P)
+    {
+        double Centre=100+AlleyGroundHeight(L,P);
+        // On a slope the lower hemisphere lifts the capsule above the
+        // vertical floor sample. Keep the same 7.5cm route clearance as on flat ground.
+        for(int32 Sample=0;Sample<8;++Sample)
+        {
+            const double Angle=2*PI*Sample/8;
+            const FVector2D Offset=FVector2D(FMath::Cos(Angle),FMath::Sin(Angle))*24;
+            Centre=FMath::Max(Centre,AlleyGroundHeight(L,P+Offset)+(92.5-34)+FMath::Sqrt(34.0*34.0-24.0*24.0)+7.5);
+        }
+        return Centre;
+    };
     auto Elevate=[&](TArray<FVector> Path)
     {
         TArray<FVector> Out;
         for(int32 I=0;I<Path.Num();++I)
         {
-            const FVector A=I ? Path[I-1]:Path[I],B=Path[I];const int32 N=I ? FMath::Max(1,FMath::CeilToInt(FVector::Dist2D(A,B)/100)):1;
-            for(int32 J=I ? 1:0;J<=N;++J){auto P=FMath::Lerp(A,B,float(J)/N);P.Z=100+AlleyGroundHeight(L,FVector2D(P));Out.Add(P);}
+            const FVector A=I ? Path[I-1]:Path[I],B=Path[I];const int32 N=I ? FMath::Max(1,FMath::CeilToInt(FVector::Dist2D(A,B)/25)):1;
+            for(int32 J=I ? 1:0;J<=N;++J){auto P=FMath::Lerp(A,B,float(J)/N);P.Z=StandingHeight(FVector2D(P));Out.Add(P);}
         }
         return Out;
     };
@@ -578,8 +593,16 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
     Patrol=BotPath(L.DistrictRoutes[0]);const auto Return=BotPath(L.DistrictRoutes.Last());for(int32 I=Return.Num()-2;I>0;--I)Patrol.Add(Return[I]);
     for(int32 I=0;I<10;++I)
     {
-        FVector P=Base+FVector((I%5-2)*140,(I/5 ? 1:-1)*90,100);P.Z+=AlleyGroundHeight(L,FVector2D(P));
+        FVector P=Base+FVector((I%5-2)*140,(I/5 ? 1:-1)*(T.SizingTeamSize==1 ? 60:90)-(T.SizingTeamSize==1 ? 180:T.SizingTeamSize>0 ? 200:0),100);P.Z+=AlleyGroundHeight(L,FVector2D(P));
         L.AlphaSpawns.Add(FTransform(FRotator(0,90,0),P));L.OmegaSpawns.Add(FTransform(FRotator(0,270,0),Opposite(P)));
+    }
+    if(T.SizingTeamSize>0)
+    {
+        // The bank sits behind the screen; the existing road junction stays
+        // in front. A reserved lateral exit keeps access independent of its door.
+        TArray<FVector> Exit{L.AlphaSpawns[0].GetLocation(),Base+FVector(-650,-200,100),Base+FVector(-650,100,100),Base+FVector(0,100,100),Base+FVector(0,0,100)};
+        Exit=Elevate(Exit);L.SpawnExitRoutes.Add(Exit);L.RoomAccessRoutes.Add(Exit);
+        for(auto& Point:Exit)Point=Opposite(Point);L.SpawnExitRoutes.Add(Exit);L.RoomAccessRoutes.Add(Exit);
     }
     if(V.ProceduralHouses)FinishAlleyHouseModules(T,Pieces,L);
     if(T.SizingTeamSize>0)
@@ -592,7 +615,8 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
             const int32 Samples=FMath::Max(1,FMath::CeilToInt(FVector::Dist2D(Path[I-1],Path[I])/35));
             for(int32 J=0;J<=Samples;++J)
             {
-                const FVector2D RouteCenter(FMath::Lerp(Path[I-1],Path[I],float(J)/Samples));
+                const FVector RoutePoint=FMath::Lerp(Path[I-1],Path[I],float(J)/Samples);
+                const FVector2D RouteCenter(RoutePoint);
                 for(float DX:{-34.f,0.f,34.f})for(float DY:{-34.f,0.f,34.f})
                 {
                     const FVector2D P=RouteCenter+FVector2D(DX,DY);

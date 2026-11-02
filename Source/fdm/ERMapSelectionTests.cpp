@@ -64,7 +64,7 @@ bool FERMapSelectionDecideTest::RunTest(const FString&)
     TestEqual(TEXT("nothing clean falls back to the plain seed"),ERMapSelection::Decide({Candidate(0,true,false,0),Candidate(1,true,false,3)},1,Fallback),0);
     TestTrue(TEXT("fallback is explicit"),Fallback);
     TestEqual(TEXT("an unbuilt plain seed falls back to the first layout"),ERMapSelection::Decide({Candidate(0,false,false,0),Candidate(1,true,false,0)},1,Fallback),1);
-    TestEqual(TEXT("nothing built stays on the plain seed"),ERMapSelection::Decide({Candidate(0,false,false,0)},1,Fallback),0);
+    TestEqual(TEXT("nothing built fails closed"),ERMapSelection::Decide({Candidate(0,false,false,0)},1,Fallback),INDEX_NONE);
     TestEqual(TEXT("the plain seed keeps a tie"),ERMapSelection::Decide({Candidate(0,true,true,1),Candidate(1,true,true,1)},1,Fallback),0);
     TSet<int32> Picked;
     for(int32 Seed=0;Seed<32;++Seed)Picked.Add(ERMapSelection::Decide({Candidate(0,true,false,1),Candidate(1,true,true,1),Candidate(2,true,true,1),Candidate(3,true,true,1)},Seed,Fallback));
@@ -93,7 +93,9 @@ bool FERMapSelectionDecideTest::RunTest(const FString&)
     TestEqual(TEXT("ranges still count, without rescuing the candidate"),C.Preference,1);
     R.Graph.Coverage=EERGraphCoverage::Routes;R.Find(TEXT("INITIAL_SPAWN_LOS"))->Status=EERPlayabilityStatus::NotEvaluated;
     ERMapSelection::Judge(C,R,P);
-    TestEqual(TEXT("a route graph and undecided sight are not rejections"),C.Rejected.Num(),1);
+    TestEqual(TEXT("undecided sight with exposed pairs still rejects the candidate"),C.Rejected.Num(),2);
+    FERMapCandidate Exposed;Exposed.bBuilt=true;Exposed.Rejected.Add(TEXT("spawn_sight_1"));
+    TestEqual(TEXT("fallback cannot accept exposed spawns"),ERMapSelection::Decide({Exposed},42,Fallback),INDEX_NONE);
     return true;
 }
 

@@ -48,6 +48,8 @@ public:
     virtual void UpdateCharacterStateAfterMovement(float DeltaSeconds) override {}
     virtual void SimulateMovement(float DeltaSeconds) override;
     virtual bool ClientUpdatePositionAfterServerUpdate() override;
+    // Owner: carry this frame's view in the same packet as a trigger pull.
+    void SendMoveThisFrame() {bSendMoveNow=true;}
     virtual bool CanAttemptJump() const override {return IsOnLadder() || Super::CanAttemptJump();}
     virtual bool DoJump(bool bReplayingMoves, float DeltaTime) override;
     UFUNCTION() void OnRep_Locomotion();
@@ -71,7 +73,10 @@ public:
     FVector TraversalStart = FVector::ZeroVector, TraversalEnd = FVector::ZeroVector;
     float TraversalElapsed = 0, TraversalDuration = 0;
     double RetryAfter = 0;
+protected:
+    virtual bool CanDelaySendingMove(const FSavedMovePtr& NewMove) override;
 private:
+    bool bSendMoveNow = false;
     bool bMeasuringFall=false;
     float FallFrameZ=0,FallFrameVelocityZ=0;
     double ServerTime() const;

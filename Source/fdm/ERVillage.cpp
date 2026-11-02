@@ -242,6 +242,22 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
         auto ClosedBay=[&](TArray<FVector2D> Polygon)
         {
             const float Height=Z-6,Thickness=12;
+            if(T->ReflectionBuild && Plan.SelfSymmetric)
+            {
+                // Keep an orthogonal 80cm seam through each dogleg. The
+                // diagonal approaches remain outside the reflection plane.
+                TArray<FVector2D> Seamed;
+                for(int32 I=0;I<Polygon.Num();++I)
+                {
+                    const auto A=Polygon[I],Bend=Polygon[(I+1)%Polygon.Num()];Seamed.Add(A);
+                    if(A.Y*Bend.Y<0 && A.X!=Bend.X)
+                    {
+                        const double X=FMath::Lerp(A.X,Bend.X,-A.Y/(Bend.Y-A.Y));
+                        const double Sign=A.Y<0 ? -1:1;Seamed.Add({X,Sign*40});Seamed.Add({X,-Sign*40});
+                    }
+                }
+                Polygon=MoveTemp(Seamed);
+            }
             for(auto& P:Polygon)P={BX+P.X*SX,BY+P.Y*SY};
             for(int32 I=0;I<Polygon.Num();++I)
             {
@@ -348,6 +364,8 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     {
         Wood({X,GalleryFront-5,GalleryHeight+55},{GalleryWidth*.28f,20,110});GraySheet({X,GalleryFront+5.1f,GalleryHeight+55},{GalleryWidth*.28f,.2f,110});
     }
+    if(T->SizingTeamSize>0)
+        Wood({0,GalleryFront-5,GalleryHeight+150},{1300,20,300});
     Wood({0,-HY+40,GalleryHeight+55},{GalleryWidth-20,20,110});
     FERTemplateBase Gallery;Gallery.Frame=FTransform(FVector(0,GalleryY,0));Gallery.Size={GalleryWidth,GalleryDepth,GalleryHeight};Gallery.RoofZ=GalleryHeight;
     L.Bases.Add(Gallery);Gallery.Frame=Gallery.Frame*HalfTurn;L.Bases.Add(Gallery);

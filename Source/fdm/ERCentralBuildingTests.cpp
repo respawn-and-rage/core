@@ -17,7 +17,7 @@
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERCentralBuildingLayoutTest,"EclipseRecoil.Destruction.CentralBuildingLayout",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FERCentralBuildingLayoutTest::RunTest(const FString& Parameters)
 {
-    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central");T->Archetype=EERMapArchetype::CentralBuilding;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize=FVector(8000,10000,1600);
+    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central");T->Archetype=EERMapArchetype::CentralBuilding;T->CentralBuilding.CircularTerrain=false;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize=FVector(8000,10000,1600);
     T->CentralBuilding.SteelSurface=NewObject<UMaterial>(T,TEXT("TestGraySteel"));
     for(int32 I=0;I<4;++I)T->CentralBuilding.ContainerSurfaces.Add(NewObject<UMaterial>(T,*FString::Printf(TEXT("TestPaint%d"),I)));
     FERProceduralConfig C;C.TemplateAsset=T;FERBlockRoomConfig B;FERProceduralLayout L,Again;
@@ -114,7 +114,7 @@ bool FERCentralBuildingLayoutTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERCentralBuildingFinishesTest,"EclipseRecoil.Destruction.CentralBuildingFinishes",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FERCentralBuildingFinishesTest::RunTest(const FString& Parameters)
 {
-    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central.finishes");T->Archetype=EERMapArchetype::CentralBuilding;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize=FVector(8000,10000,1600);
+    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central.finishes");T->Archetype=EERMapArchetype::CentralBuilding;T->CentralBuilding.CircularTerrain=false;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize=FVector(8000,10000,1600);
     FERProceduralConfig C;C.TemplateAsset=T;FERBlockRoomConfig B;
     auto& V=T->CentralBuilding;
     TSet<int32> GroundIndices;
@@ -155,7 +155,7 @@ bool FERCentralBuildingFinishesTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERCentralBuildingCollisionTest,"EclipseRecoil.Destruction.CentralBuildingCollision",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FERCentralBuildingCollisionTest::RunTest(const FString& Parameters)
 {
-    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central.physics");T->Archetype=EERMapArchetype::CentralBuilding;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize=FVector(8000,10000,1600);
+    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central.physics");T->Archetype=EERMapArchetype::CentralBuilding;T->CentralBuilding.CircularTerrain=false;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize=FVector(8000,10000,1600);
     T->CentralBuilding.FenceModule=LoadObject<UStaticMesh>(nullptr,TEXT("/Game/EclipseRecoil/Art/Industrial/SM_ER_AluminiumFenceModule.SM_ER_AluminiumFenceModule"));
     if(!TestNotNull(TEXT("imported single aluminium module"),T->CentralBuilding.FenceModule.Get()))return false;
     UWorld::InitializationValues V;V.AllowAudioPlayback(false).CreateNavigation(false).CreateAISystem(false).CreateFXSystem(false).EnableTraceCollision(true);
@@ -290,7 +290,7 @@ bool FERCentralBuildingCollisionTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERCentralBuildingEvolutionTest,"EclipseRecoil.Destruction.CentralBuildingEvolution",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FERCentralBuildingEvolutionTest::RunTest(const FString& Parameters)
 {
-    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central.evolution");T->Archetype=EERMapArchetype::CentralBuilding;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize={8000,10000,1600};
+    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central.evolution");T->Archetype=EERMapArchetype::CentralBuilding;T->CentralBuilding.CircularTerrain=false;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize={8000,10000,1600};
     UWorld::InitializationValues V;V.AllowAudioPlayback(false).CreateNavigation(false).CreateAISystem(false).CreateFXSystem(false).EnableTraceCollision(true);
     auto* World=UWorld::CreateWorld(EWorldType::Game,false,NAME_None,nullptr,true,ERHIFeatureLevel::Num,&V);if(!World)return false;
     auto* Map=World->SpawnActor<AERProceduralMap>();Map->LayoutConfig.TemplateAsset=T;Map->LayoutConfig.CrossingOverride=2;Map->bCeilings=false;Map->Collapse.DebrisPerStep=0;

@@ -24,7 +24,12 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
     switch(T.Archetype)
     {
     case EERMapArchetype::CentralBuilding:
-        Envelope(1.f,3000,3400);
+        if(T.CentralBuilding.CircularTerrain)
+        {
+            const float Diameter=FMath::GridSnap(FMath::Sqrt(Area*40000/PI),50.f);
+            T.SizingArena={Diameter,Diameter};
+        }
+        else Envelope(1.f,3000,3400);
         T.CentralBuilding.ArenaMin=T.CentralBuilding.ArenaMax=T.SizingArena;
         T.CentralBuilding.BuildingWidth={1800,Grid(1800,2400)};
         T.CentralBuilding.BuildingDepth={2200,Grid(2200,3000)};
@@ -109,5 +114,5 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
     }
     default:break;
     }
-    return T.Archetype==EERMapArchetype::Rooms || T.Archetype==EERMapArchetype::Village || T.Archetype==EERMapArchetype::FireTraining || T.Archetype==EERMapArchetype::LegacyAssembly || ValidTeamArea(FVector(T.SizingArena,0),TeamSize);
+    return T.Archetype==EERMapArchetype::Rooms || T.Archetype==EERMapArchetype::Village || T.Archetype==EERMapArchetype::FireTraining || T.Archetype==EERMapArchetype::LegacyAssembly || (T.Archetype==EERMapArchetype::CentralBuilding && T.CentralBuilding.CircularTerrain ? FMath::Abs(PI*FMath::Square(T.SizingArena.X*.5)/10000-Area)<=Area*.1:ValidTeamArea(FVector(T.SizingArena,0),TeamSize));
 }

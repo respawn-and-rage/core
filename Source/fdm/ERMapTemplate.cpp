@@ -12,7 +12,7 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
     if(!T || T->TemplateId.IsEmpty() || T->Revision<1 || C.Floors!=1 || B.BlockSize!=FVector(50,20,25) ||
         !FMath::IsFinite(B.ChunkSize) || B.ChunkSize<100 || T->Pieces.Num()>256 ||
         T->ArenaSize.ContainsNaN() || T->ArenaSize.X<2000 || T->ArenaSize.Y<3000 || T->ArenaSize.Z<400 ||
-        T->ArenaSize.X>10000 || T->ArenaSize.Y>16000 || T->ArenaSize.Z>1600 || uint8(T->Symmetry)>1 ||
+        T->ArenaSize.X>10000 || T->ArenaSize.Y>16000 || T->ArenaSize.Z>1600 || uint8(T->Symmetry)>uint8(EERTemplateSymmetry::Mirror) ||
         uint8(T->Archetype)>uint8(EERMapArchetype::FireTraining)) return false;
     const bool Central=T->Archetype==EERMapArchetype::CentralBuilding;
     const bool Alleys=T->Archetype==EERMapArchetype::MiddleEasternAlleys;
@@ -20,7 +20,7 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
     if(Alleys && (!T->Town.Enabled || T->Variation.Enabled))return false;
     if(Fire && (T->Town.Enabled || T->Variation.Enabled || T->RoofMesh || T->ShellWallMesh || C.LayoutAttempt<0 || C.LayoutAttempt>=FireTrainingAttempts))return false;
     if(!Central && !Alleys && !Fire && (T->Pieces.IsEmpty() || T->AlphaSpawns.IsEmpty() || T->AlphaSpawns.Num()>32 || T->OmegaSpawns.Num()>32 || T->PatrolRoute.Num()<2 || T->PatrolRoute.Num()>128))return false;
-    const bool Symmetric=T->Symmetry==EERTemplateSymmetry::HalfTurn;
+
     auto ValidMesh=[](UStaticMesh* M){return !M || (!M->GetBoundingBox().GetSize().ContainsNaN() && M->GetBoundingBox().GetSize().GetMin()>.1);};
     if(!ValidMesh(T->ShellWallMesh) || !ValidMesh(T->RoofMesh))return false;
     FERProceduralLayout L;L.ArenaSize=T->ArenaSize;L.AlphaSpawns=T->AlphaSpawns;L.OmegaSpawns=T->OmegaSpawns;
@@ -39,6 +39,9 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
     const bool BreakArchitecture=Alleys && T->Town.DestructibleArchitecture;
     if(BreakArchitecture && !T->Town.ProceduralHouses)for(const auto& Mesh:T->Town.BuildingMeshes)
         if(!T->Town.BuildingStructures.ContainsByPredicate([&](const auto& S){return S && S->Source==Mesh && S->GeometryCRC && S->Corners.Num()%3==0;}))return false;
+    if(L.LayoutSymmetry==EERTemplateSymmetry::None)L.LayoutSymmetry=T->Symmetry;
+    const bool Mirror=L.LayoutSymmetry==EERTemplateSymmetry::Mirror;
+    const bool Symmetric=L.LayoutSymmetry!=EERTemplateSymmetry::None;
     const FVector Size=L.ArenaSize,Half=Size*.5;
     L.Corridors.Add({FVector2D(-Half.X,-Half.Y),FVector2D(Half.X,Half.Y)});
     TArray<FBox> Volumes;TArray<FTransform> VolumeFrames;int32 Wall=0;
@@ -57,15 +60,15 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
             (Piece.Roof && (Piece.Destructible || !Piece.FixedMesh)) ||
             (Piece.Destructible && (Piece.VisualOnly || Piece.FixedSurface)) || (!Piece.Destructible && (Piece.CellSurface || Piece.MirroredCellSurface))) return false;
         if(Piece.SymmetryCenter.ContainsNaN() || (!Central && !Piece.SymmetryCenter.IsNearlyZero()) || Piece.SymmetryCenter.Y!=0 || Piece.SymmetryCenter.Z!=0 || FMath::Abs(Piece.SymmetryCenter.X)>1000)return false;
-        if(Symmetric && !Piece.Mirrored && (!FMath::IsNearlyEqual(Piece.Center.X,Piece.SymmetryCenter.X) || !FMath::IsNearlyZero(Piece.Center.Y) || !Piece.Jitter.IsNearlyZero()))return false;
+        if(Symmetric && !Piece.Mirrored && ((!Mirror && !FMath::IsNearlyEqual(Piece.Center.X,Piece.SymmetryCenter.X)) || !FMath::IsNearlyZero(Piece.Center.Y) || !Piece.Jitter.IsNearlyZero()))return false;
         FRandomStream Random(int32(HashCombine(uint32(C.Seed),uint32(Piece.Group))));
         const float OffsetX=Random.RandRange(-int32(Piece.Jitter.X/50),int32(Piece.Jitter.X/50))*50;
         const float OffsetY=Random.RandRange(-int32(Piece.Jitter.Y/50),int32(Piece.Jitter.Y/50))*50;
         const FVector Original=Piece.Center+FVector(OffsetX,OffsetY,0);
         for(int32 Copy=0;Copy<(Symmetric && Piece.Mirrored ? 2:1);++Copy)
         {
-            const FVector Center=Copy ? FVector(2*Piece.SymmetryCenter.X-Original.X,-Original.Y,Original.Z):Original;
-            const FQuat PhysicalRotation=FRotator(0,Piece.RotationYaw+(Copy ? 180:0),0).Quaternion();
+            const FVector Center=Copy ? FVector(Mirror ? Original.X:2*Piece.SymmetryCenter.X-Original.X,-Original.Y,Original.Z):Original;
+            const FQuat PhysicalRotation=FRotator(0,Copy ? (Mirror ? -Piece.RotationYaw:Piece.RotationYaw+180):Piece.RotationYaw,0).Quaternion();
             const FBox Bounds=FBox(-Piece.Size*.5,Piece.Size*.5).TransformBy(FTransform(Piece.RotationYaw!=0 ? PhysicalRotation:FQuat::Identity,Center));
             const FVector Min=Bounds.Min,Max=Bounds.Max;
             const float FloorLimit=Alleys && T->Town.LowCoverAndUnderpass ? -420.f:0.f;
@@ -90,7 +93,7 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
             if(!Piece.VisualOnly && !Piece.MeshCollision){Volumes.Add(Box);VolumeFrames.Add(Frame);}
             if(!Piece.Destructible)
             {
-                FRotator Rotation=Piece.MeshRotation;Rotation.Yaw+=Copy && Piece.RotationYaw==0 ? 180:0;
+                FRotator Rotation=Piece.MeshRotation;if(Copy){if(Mirror){Rotation.Yaw=-Rotation.Yaw;Rotation.Roll=-Rotation.Roll;}else if(Piece.RotationYaw==0)Rotation.Yaw+=180;}
                 // Legacy axis-aligned paired pieces keep their old physical
                 // transform; only explicit town leaves rotate their boxes.
                 const FQuat R=Piece.RotationYaw!=0 ? PhysicalRotation:FQuat::Identity;
@@ -113,12 +116,12 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
                     else ERMeshCells::BoxSkin(P);
                     continue;
                 }
-                L.FixedPieces.Add({FTransform(R,Center,Piece.Size/100),Piece.Material,Piece.FixedMesh,Rotation,Piece.Roof,Piece.VisualOnly,Piece.FixedSurface,Piece.PawnBarrier,Piece.MeshCollision,Piece.CollisionOnly});continue;
+                L.FixedPieces.Add({FTransform(R,Center,Piece.Size/100),Piece.Material,Piece.FixedMesh,Rotation,Piece.Roof,Piece.VisualOnly,Piece.FixedSurface,Piece.PawnBarrier,Piece.MeshCollision,Piece.CollisionOnly,Copy!=0 && Mirror});continue;
             }
             // Generate in an orthonormal local grid, then rotate the entire
             // construction. Its cells/collision/support never use a world AABB.
             const FTransform Placement(PhysicalRotation,Center);
-            const bool Ground=Center.Z-Piece.Size.Z*.5<=.01;
+            const bool Ground=Center.Z-Piece.Size.Z*.5<=(L.CircularArena ? CentralGroundHeight(L,FVector2D(Center))+.01:.01);
             const int32 First=L.Panels.Num();
             if(Piece.WalkableSurface)
             {
@@ -193,6 +196,7 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
     }
     auto Clear=[&](FVector P)
     {
+        if(L.CircularArena && FVector2D(P).Size()>Half.X-50)return false;
         if(P.ContainsNaN() || FMath::Abs(P.X)>Half.X-40 || FMath::Abs(P.Y)>Half.Y-40 || P.Z<94 || P.Z>Size.Z-94)return false;
         for(const auto& Frame:VolumeFrames)
         {
@@ -201,7 +205,7 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
         }
         return true;
     };
-    if(Symmetric){L.OmegaSpawns.Reset();for(const auto& S:L.AlphaSpawns){auto P=S.GetLocation();P.X=-P.X;P.Y=-P.Y;L.OmegaSpawns.Add(FTransform(FRotator(0,S.Rotator().Yaw+180,0),P));}}
+    if(Symmetric){L.OmegaSpawns.Reset();for(const auto& S:L.AlphaSpawns){auto P=S.GetLocation();if(!Mirror)P.X=-P.X;P.Y=-P.Y;L.OmegaSpawns.Add(FTransform(FRotator(0,Mirror ? -S.Rotator().Yaw:S.Rotator().Yaw+180,0),P));}}
     if(L.OmegaSpawns.IsEmpty())return false;
     for(const auto* Starts:{&L.AlphaSpawns,&L.OmegaSpawns})for(const auto& Start:*Starts)if(Start.ContainsNaN() || !Clear(Start.GetLocation()))
     {UE_LOG(LogTemp,Warning,TEXT("ER_TEMPLATE_SPAWN_REJECT seed=%d point=%s"),C.Seed,*Start.GetLocation().ToString());return false;}
@@ -228,7 +232,7 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
     if(!ClearPath(Patrol,true))return false;
     for(const auto& Route:L.RoomAccessRoutes)if(!ClearPath(Route,false))return false;
     for(const auto& Route:L.CrossingRoutes)if(!ClearPath(Route,false))return false;
-    L.Spawn=L.AlphaSpawns[0].GetLocation();L.Routes.Add({L.Spawn,Patrol[0]});L.Routes.Add(Patrol);L.Routes.Add({L.OmegaSpawns[0].GetLocation(),Patrol.Last()});
+    L.Spawn=L.AlphaSpawns[0].GetLocation();L.Routes.Add(L.SpawnExitRoutes.Num()==2 ? L.SpawnExitRoutes[0]:TArray<FVector>{L.Spawn,Patrol[0]});L.Routes.Add(Patrol);L.Routes.Add(L.SpawnExitRoutes.Num()==2 ? L.SpawnExitRoutes[1]:TArray<FVector>{L.OmegaSpawns[0].GetLocation(),Patrol.Last()});
     if(L.Panels.IsEmpty() || L.FixedPieces.Num()>(Fire ? 8192:2048))return false;
     Out=MoveTemp(L);return true;
 }

@@ -606,7 +606,12 @@ void AERPlayerController::FirePressed()
     if (bMenuOpen) return;
     // Started fires once per physical press. Returning here consumes the respawn click.
     if (bAwaitingRespawn) { ServerRequestRespawn(); return; }
-    if (auto* PlayerCharacter = Cast<AERCharacter>(GetPawn())) { PlayerCharacter->SetGrenadeInputHeld(true);PlayerCharacter->ServerStartFire(); }
+    if (auto* PlayerCharacter = Cast<AERCharacter>(GetPawn()))
+    {
+        PlayerCharacter->SetGrenadeInputHeld(true);
+        CastChecked<UERMovement>(PlayerCharacter->GetCharacterMovement())->SendMoveThisFrame();
+        PlayerCharacter->ServerStartFire();
+    }
 }
 void AERPlayerController::FireReleased() { if (auto* PlayerCharacter = Cast<AERCharacter>(GetPawn())) { PlayerCharacter->SetGrenadeInputHeld(false);PlayerCharacter->ServerStopFire(); } }
 void AERPlayerController::JumpPressed()

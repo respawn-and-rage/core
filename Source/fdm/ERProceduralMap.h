@@ -7,7 +7,7 @@
 struct FERLayoutRect { FVector2D Min, Max; int32 Room = INDEX_NONE; float Z=0; int32 Level=0; };
 struct FERLayoutWall { FVector Start; FVector Direction; float Length = 0; EERBlockMaterial Material; };
 struct FERLayoutOpening { int32 Wall = INDEX_NONE; float Along = 0, Width = 0, Sill = 0, Height = 0; bool bWindow = false; };
-struct FERLayoutFixedPiece { FTransform Transform; EERBlockMaterial Material; class UStaticMesh* Mesh=nullptr; FRotator MeshRotation=FRotator::ZeroRotator; bool Roof=false; bool VisualOnly=false; class UMaterialInterface* Surface=nullptr; bool PawnBarrier=false; bool MeshCollision=false; bool CollisionOnly=false; };
+struct FERLayoutFixedPiece { FTransform Transform; EERBlockMaterial Material; class UStaticMesh* Mesh=nullptr; FRotator MeshRotation=FRotator::ZeroRotator; bool Roof=false; bool VisualOnly=false; class UMaterialInterface* Surface=nullptr; bool PawnBarrier=false; bool MeshCollision=false; bool CollisionOnly=false; bool ReflectedGeometry=false; };
 struct FERLayoutHouse
 {
     FTransform Frame; class UStaticMesh* Mesh=nullptr; bool RoofAccess=false;
@@ -74,6 +74,7 @@ struct FERProceduralLayout
     TArray<FERTemplateBase> Bases;
     TArray<EERTemplateModule> ModuleKinds;
     TArray<TArray<FVector>> RoomAccessRoutes;
+    TArray<TArray<FVector>> SpawnExitRoutes; // Optional screened-base doglegs, alpha then omega.
     TArray<FBox> TownBuildings,TownCourts;
     TArray<FName> TownStreetNames;
     TArray<FERLayoutTownGate> TownGates;
@@ -83,6 +84,11 @@ struct FERProceduralLayout
     TArray<TArray<FVector>> RoofTransfers;
     TArray<FBox> TerrainPads;
     bool GradedTerrain=false;
+    EERTemplateSymmetry LayoutSymmetry=EERTemplateSymmetry::None;
+    bool CircularArena=false;
+    bool CentralHill=false;
+    FVector HillCenter=FVector::ZeroVector;
+    float HillHeight=0,HillPlateau=0,HillFalloff=0;
     bool SeededDistrict=false;
     int32 DistrictAccesses=0,DistrictBends=0;
     int32 DistrictWallCount=0;
@@ -150,6 +156,11 @@ namespace ERProcedural
     inline float TargetAreaM2(int32 ExpectedTeamSize) { return ExpectedTeamSize*1000.f; }
     inline bool ValidTeamArea(FVector Size,int32 ExpectedTeamSize)
     { const double Area=Size.X*Size.Y/10000.,Target=TargetAreaM2(ExpectedTeamSize);return FMath::IsFinite(Area) && Area>=Target*.9-.01 && Area<=Target*1.1+.01; }
+    bool FoldLayoutToMirror(FERProceduralLayout& Layout,const FERCellSettings& Cells);
+    double PlayableAreaM2(const FERProceduralLayout& Layout);
+    bool BuildCircularCentralBuilding(const UERMapTemplate& Template,int32 Seed,TArray<FERMapTemplatePiece>& Pieces,FERProceduralLayout& Layout,TArray<FVector>& Patrol);
+    float CentralGroundHeight(const FERProceduralLayout& Layout,FVector2D Position);
+    void BuildCentralTerrain(class UDynamicMeshComponent* Component,const FERProceduralLayout& Layout);
     bool ApplyMapTheme(const FERProceduralConfig& Config,FERProceduralLayout& Layout);
     bool Build(const FERProceduralConfig& Config, const FERBlockRoomConfig& Blocks, FERProceduralLayout& Out, const FERCellSettings& Cells = FERCellSettings());
     // Axis-aligned destructible box as cell panels: massive slabs, boards in thin
@@ -203,6 +214,7 @@ public:
 protected:
     virtual bool GenerateLogicalWorld() override;
     virtual void ConfigureFloors() override;
+    virtual bool ValidateGeneratedCollision() const override;
     virtual void OnGenerationFinished() override;
     virtual FString GetLayoutStatistics() const override;
     virtual SIZE_T GetLayoutBytes() const override;

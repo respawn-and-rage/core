@@ -97,6 +97,8 @@ bool BuildRooms(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERProc
         // a through-room on one of the two attack paths; there are no stubs.
         L.RoomNodes[0].Center={-X,-Y,0};L.RoomNodes[1].Center={X,Y,0};
         L.RoomNodes[2].Center={X,-Y,0};L.RoomNodes[3].Center={-X,Y,0};
+        if(T->SizingTeamSize>0)for(int32 BaseIndex:{AlphaBase,OmegaBase})
+            L.RoomNodes[BaseIndex].Polygon=Outline(L.RoomNodes[BaseIndex].Size,100);
         const auto BaseSize=L.RoomNodes[0].Size;
         const float HX=X+S*.5f+R.PlanMargin,HY=Y+S*.5f+200;
         const float Cut=L.RoomNodes[2].Polygon.Num()==8 ? L.RoomNodes[2].Polygon[0].X+L.RoomNodes[2].Size.X*.5f:0;
@@ -419,6 +421,27 @@ bool BuildRooms(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERProc
         L.LowCovers.Add(FBox(-Size*.5,Size*.5).TransformBy(Frame));
         L.RoomScreens.Add({Frame,Size,Link,Room});
     };
+    if(T->SizingTeamSize>0)
+    {
+        for(int32 BaseIndex:{AlphaBase,OmegaBase})
+        {
+            const auto& Base=L.RoomNodes[BaseIndex];const float Sign=BaseIndex==AlphaBase ? 1.f:-1.f;
+            auto At=[&](float PX,float PY){return Base.Center+FVector(Sign*PX,Sign*PY,150);};
+            const float Yaw=Sign>0 ? 0:180;
+            if(N==1)
+            {
+                // Corner bases have two perpendicular mouths. An L-shaped
+                // timber baffle screens both without sealing either exit.
+                AddScreen(At(50,0),Yaw+90,{600,Cells.WoodDepth,300},INDEX_NONE,BaseIndex);
+                AddScreen(At(-150.5f,300),Yaw,{399,Cells.WoodDepth,300},INDEX_NONE,BaseIndex);
+            }
+            else
+            {
+                const float Width=FMath::Min(1000.f,float(Base.Size.X)-400);
+                AddScreen(At(0,100),Yaw,{Width,Cells.WoodDepth,300},INDEX_NONE,BaseIndex);
+            }
+        }
+    }
     // Long runs alone get screens at five-metre intervals. Self-symmetric
     // links use an even count so reverse order and side remain half-turn paired.
     L.RoomAccessRoutes.SetNum(L.RoomLinks.Num());
@@ -432,7 +455,26 @@ bool BuildRooms(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERProc
         auto Entry=[&](int32 NodeIndex,FVector Portal)
         {
             const auto& V=L.RoomNodes[NodeIndex];TArray<FVector> Route{V.Center+FVector(0,0,100)};
-            if(Portal.Z>V.Center.Z+200 && GalleryPaths.Contains(NodeIndex))
+            if(T->SizingTeamSize>0 && V.Base)
+            {
+                const float Sign=NodeIndex==AlphaBase ? 1.f:-1.f;
+                const FVector Local=(Portal-V.Center)*Sign;
+                auto At=[&](float PX,float PY){return V.Center+FVector(Sign*PX,Sign*PY,100);};
+                if(N==1)
+                {
+                    if(Local.Y>300)
+                    {Route.Add(At(-390,0));Route.Add(At(-390,350));Route.Add(At(Local.X,350));}
+                    else
+                    {Route.Add(At(0,-350));Route.Add(At(150,-350));Route.Add(At(150,0));}
+                }
+                else if(Local.Y>100)
+                {
+                    const float Width=FMath::Min(1000.f,float(V.Size.X)-400);
+                    const float Bypass=FMath::Min(Width*.5f+120,float(V.Size.X)*.5f-100);
+                    Route.Add(At(Bypass,0));Route.Add(At(Bypass,200));Route.Add(At(Local.X,200));
+                }
+            }
+            else if(Portal.Z>V.Center.Z+200 && GalleryPaths.Contains(NodeIndex))
             {
                 Route.Append(GalleryPaths[NodeIndex]);const float Sign=NodeIndex<2+N ? 1.f:-1.f;
                 auto P=[&](float X0,float Y0){return V.Center+FVector(X0*Sign,Y0*Sign,720);};

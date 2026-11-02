@@ -316,7 +316,10 @@ void UERMovement::ApplyPosturePresentation()
     C->Camera->SetRelativeLocation(FVector(0,0,C->BaseEyeHeight));
     const float Blend = Locomotion.ProneBlend;
     C->ProneHitVolume->SetCollisionEnabled(Blend > .5f && !C->Health->bDead ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
-    const float FeetOffset = C->GetTeamAppearance().Mesh ? C->GetTeamAppearance().FeetOffset : -92.5f;
+    // FeetOffset seats the idle clip on the capsule bottom. Walking hovers that bottom
+    // 2.15cm and the live idle stands about .85cm taller, so seat soles on the real floor.
+    constexpr float FloorContact = 3.f;
+    const float FeetOffset = (C->GetTeamAppearance().Mesh ? C->GetTeamAppearance().FeetOffset : -92.5f) - FloorContact;
     const FVector MeshLocation = FMath::Lerp(FVector(0,0,FeetOffset + 92.5f - Locomotion.HalfHeight), FVector(-55,0,-18), Blend);
     const FQuat Rotation = FQuat(FVector::YAxisVector, Blend * PI * .5f) * FRotator(0,-90,0).Quaternion();
     C->GetMesh()->SetRelativeLocationAndRotation(MeshLocation, Rotation);
@@ -325,6 +328,13 @@ void UERMovement::ApplyPosturePresentation()
     if (!C->IsLocallyControlled() && NetworkSmoothingMode != ENetworkSmoothingMode::Disabled &&
         (C->GetLocalRole() == ROLE_SimulatedProxy || GetNetMode() == NM_ListenServer))
         SmoothClientPosition_UpdateVisuals();
+}
+bool UERMovement::CanDelaySendingMove(const FSavedMovePtr& NewMove)
+{
+    // Stationary moves otherwise wait up to 83ms, and the shot would use an older view.
+    const bool bDelay=!bSendMoveNow && Super::CanDelaySendingMove(NewMove);
+    bSendMoveNow=false;
+    return bDelay;
 }
 void UERMovement::OnRep_Locomotion()
 {

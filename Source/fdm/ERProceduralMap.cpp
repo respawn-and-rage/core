@@ -115,6 +115,18 @@ static bool BuildLevel(const FERProceduralConfig& C, const FERBlockRoomConfig& B
 }
 bool ERProcedural::BuildGeometry(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERProceduralLayout& Out,const FERCellSettings& Cells)
 {
+    if(C.TemplateAsset && C.TemplateAsset->Symmetry==EERTemplateSymmetry::Mirror &&
+       C.TemplateAsset->Archetype!=EERMapArchetype::LegacyAssembly &&
+       (C.TemplateAsset->Archetype!=EERMapArchetype::CentralBuilding || !C.TemplateAsset->CentralBuilding.CircularTerrain))
+    {
+        TStrongObjectPtr<UERMapTemplate> Canonical(DuplicateObject<UERMapTemplate>(C.TemplateAsset,GetTransientPackage()));
+        Canonical->Symmetry=Canonical->Archetype==EERMapArchetype::MiddleEasternAlleys ? EERTemplateSymmetry::None:EERTemplateSymmetry::HalfTurn;
+        Canonical->ReflectionBuild=true;
+        Canonical->SizingTeamSize=C.TemplateAsset->SizingTeamSize;Canonical->SizingRoomsGroundOnly=C.TemplateAsset->SizingRoomsGroundOnly;Canonical->SizingArena=C.TemplateAsset->SizingArena;
+        FERProceduralConfig Paired=C;Paired.TemplateAsset=Canonical.Get();FERProceduralLayout Next;
+        if(!BuildGeometry(Paired,B,Next,Cells) || !FoldLayoutToMirror(Next,Cells))return false;
+        Out=MoveTemp(Next);return true;
+    }
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::Village) return BuildVillage(C,B,Out,Cells);
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::Rooms) return BuildRooms(C,B,Out,Cells);
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::FireTraining)
@@ -181,19 +193,22 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
         TStrongObjectPtr<UERMapTemplate> Recipe(DuplicateObject<UERMapTemplate>(C.TemplateAsset,GetTransientPackage()));
         // Bounded deterministic composition retries, with unchanged requested
         // seed and cosmetic stream. Every peer selects the same accepted plan.
-        const int32 Attempts=C.TemplateAsset->Archetype==EERMapArchetype::MiddleEasternAlleys ? 256:16;
+        const int32 Attempts=C.TemplateAsset->Archetype==EERMapArchetype::MiddleEasternAlleys ? 1024:16;
         const uint32 Plan=C.MapCandidate ? HashCombine(uint32(C.Seed),uint32(C.MapCandidate)*0x2f0b4a87u):uint32(C.Seed);
+        int32 GeometryRejected=0,SpawnRejected=0;
         for(int32 Attempt=0;Attempt<Attempts;++Attempt)
         {
             FERProceduralConfig Sized=C;
             Sized.Seed=Attempt ? int32(HashCombine(Plan,uint32(Attempt)*0x9e3779b9u)):int32(Plan);
             if(!ConfigureTeamSize(*Recipe,C.ExpectedTeamSize,Sized.Seed))return false;
             Sized.TemplateAsset=Recipe.Get();FERProceduralLayout Next;
-            if(!BuildGeometry(Sized,B,Next,Cells))continue;
-            if(C.TemplateAsset->Archetype!=EERMapArchetype::LegacyAssembly && !ValidTeamArea(Next.ArenaSize,C.ExpectedTeamSize))continue;
+            if(!BuildGeometry(Sized,B,Next,Cells)){++GeometryRejected;continue;}
+            if(C.TemplateAsset->Archetype!=EERMapArchetype::LegacyAssembly && FMath::Abs(PlayableAreaM2(Next)-TargetAreaM2(C.ExpectedTeamSize))>TargetAreaM2(C.ExpectedTeamSize)*.1+.01)continue;
+            if(!ERPlayability::InitialSpawnsOccluded(Next)){++SpawnRejected;continue;}
             if(!ApplyMapTheme(C,Next))return false;
             Out=MoveTemp(Next);return true;
         }
+        UE_LOG(LogTemp,Warning,TEXT("ER_MAP_BUILD_EXHAUSTED seed=%d team=%d geometry_rejected=%d spawn_rejected=%d"),C.Seed,C.ExpectedTeamSize,GeometryRejected,SpawnRejected);
         return false;
     }
     FERProceduralLayout Next;
@@ -362,8 +377,13 @@ void AERProceduralMap::ResolveMapCandidate()
     if(SelectedFor.IsSet() && SelectedFor.GetValue()==Request)return;
     const auto Profile=ERMapSelection::ProfileFor(LayoutConfig.TemplateAsset->Archetype,LayoutConfig.ExpectedTeamSize);
     const auto Selection=ERMapSelection::Select(LayoutConfig,Config,CellSettings,Profile);
-    LayoutConfig.MapCandidate=Selection.Chosen;SelectedFor=Request;
+    LayoutConfig.MapCandidate=FMath::Max(0,Selection.Chosen);SelectedFor=Request;
     UE_LOG(LogTemp,Display,TEXT("ER_MAP_SELECTION seed=%d template=%s %s"),LayoutConfig.Seed,*LayoutConfig.TemplateAsset->TemplateId,*Selection.Line());
+}
+bool AERProceduralMap::ValidateGeneratedCollision() const
+{
+    return !LayoutConfig.TemplateAsset || LayoutConfig.ExpectedTeamSize==0 ||
+        ERPlayability::InitialSpawnsOccludedInWorld(GetWorld(),GetActorTransform(),Layout);
 }
 void AERProceduralMap::OnGenerationFinished()
 {
@@ -486,7 +506,7 @@ void AERProceduralMap::ConfigureTemplateFloors()
         AlleyTerrain->SetCanEverAffectNavigation(false);AlleyTerrain->SetDeferredCollisionUpdatesEnabled(true,false);
         AlleyTerrain->SetComplexAsSimpleCollisionEnabled(true,false);AlleyTerrain->SetCollisionProfileName(TEXT("BlockAll"));
         AlleyTerrain->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
-        AlleyTerrain->SetMaterial(0,Layout.GroundSurface);AlleyTerrain->RegisterComponent();ERProcedural::BuildAlleyTerrain(AlleyTerrain,Layout);
+        AlleyTerrain->SetMaterial(0,Layout.GroundSurface);AlleyTerrain->RegisterComponent();if(Layout.CircularArena)ERProcedural::BuildCentralTerrain(AlleyTerrain,Layout);else ERProcedural::BuildAlleyTerrain(AlleyTerrain,Layout);
     }
     for(auto* Mesh:{TileFloors.Get(),WoodFloors.Get(),Ceilings.Get(),Stairs.Get()}){Mesh->ClearInstances();Mesh->SetStaticMesh(BlockMesh);}
     FixedCollision->SetStaticMesh(BlockMesh);
@@ -578,7 +598,8 @@ void AERProceduralMap::ConfigureTemplateFloors()
         {
             const FBox Box=Asset->GetBoundingBox();const FQuat MeshRotation=Piece.MeshRotation.Quaternion(),Rotation=T.GetRotation()*MeshRotation;
             const FVector Scale=MeshRotation.UnrotateVector(T.GetScale3D()*100).GetAbs()/Box.GetSize();
-            T.SetRotation(Rotation);T.SetScale3D(Scale);T.AddToTranslation(-Rotation.RotateVector(Box.GetCenter()*Scale));
+            const FVector ReflectedScale=Piece.ReflectedGeometry ? Scale*FVector(1,-1,1):Scale;
+            T.SetRotation(Rotation);T.SetScale3D(ReflectedScale);T.AddToTranslation(-Rotation.RotateVector(Box.GetCenter()*ReflectedScale));
             if(!Piece.VisualOnly && !Piece.PawnBarrier && !Piece.MeshCollision)FixedCollision->AddInstance(Piece.Transform);
         }
         Group->AddInstance(T);
@@ -663,6 +684,9 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
     }
     if(Layout.GroundSurface)H=HashCombine(H,FCrc::StrCrc32(*Layout.GroundSurface->GetPathName()));
     auto MixVector=[&](FVector V){for(int32 I=0;I<3;++I)H=HashCombine(H,GetTypeHash(FMath::RoundToInt(V[I]*100)));};
+    H=HashCombine(H,GetTypeHash(Layout.CircularArena));H=HashCombine(H,GetTypeHash(uint8(Layout.LayoutSymmetry)));
+    H=HashCombine(H,GetTypeHash(Layout.CentralHill));MixVector(Layout.HillCenter);
+    MixVector(FVector(Layout.HillHeight,Layout.HillPlateau,Layout.HillFalloff));
     MixVector(Layout.ArenaSize);H=HashCombine(H,GetTypeHash(bCeilings));H=HashCombine(H,GetTypeHash(uint8(LayoutConfig.TemplateAsset->Symmetry)));
     if(LayoutConfig.TemplateAsset->Archetype==EERMapArchetype::Rooms)
     {
@@ -687,6 +711,7 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
         H=HashCombine(H,GetTypeHash(P.MeshCollision));
         H=HashCombine(H,GetTypeHash(P.CollisionOnly));
         if(P.PawnBarrier)H=HashCombine(H,ERIndustrialFence::GeometryVersion);
+        H=HashCombine(H,GetTypeHash(P.ReflectedGeometry));
         MixVector(P.Transform.GetLocation());MixVector(P.Transform.GetScale3D());MixVector(FVector(P.MeshRotation.Pitch,P.MeshRotation.Yaw,P.MeshRotation.Roll));H=HashCombine(H,GetTypeHash(P.Roof));H=HashCombine(H,GetTypeHash(P.VisualOnly));H=HashCombine(H,GetTypeHash(uint8(P.Material)));
         MixVector(P.Transform.GetRotation().GetForwardVector());
         if(P.Surface)H=HashCombine(H,FCrc::StrCrc32(*P.Surface->GetPathName()));

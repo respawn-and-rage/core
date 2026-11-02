@@ -15,9 +15,9 @@ FString FERMapSelection::Line() const
 
 FERMapSelectionProfile ERMapSelection::ProfileFor(EERMapArchetype Archetype,int32 ExpectedTeamSize)
 {
-    // Numbers come from the calibration batch in the doc. A rule is hard only where the layout
-    // reading is conclusive and a clean candidate exists for the seeds measured.
-    FERMapSelectionProfile P;
+    // Initial spawn occlusion is mandatory for every archetype and team size.
+    // Optional candidate selection only optimizes the remaining tactical preferences.
+    FERMapSelectionProfile P;P.bForbidSpawnSight=true;P.SpawnSight=FFloatInterval(0,0);
     constexpr float MostPaths=8;
     switch(Archetype)
     {
@@ -27,9 +27,8 @@ FERMapSelectionProfile ERMapSelection::ProfileFor(EERMapArchetype Archetype,int3
         P.Paths=FFloatInterval(3,MostPaths);
         break;
     case EERMapArchetype::CentralBuilding:
-        // Known solids only, but small arenas keep a line open on every candidate.
-        P.Candidates=6;P.bForbidSpawnSight=ExpectedTeamSize>=8;
-        if(ExpectedTeamSize<8)P.SpawnSight=FFloatInterval(0,ExpectedTeamSize<=2 ? 12:11);
+        // The common generator already proved opaque cover between all starts.
+        P.Candidates=6;
         P.Paths=FFloatInterval(2,MostPaths);P.LateralRatio=FFloatInterval(.99f,1.6f);P.OpenShare=FFloatInterval(.3f,.9f);
         break;
     case EERMapArchetype::MiddleEasternAlleys:
@@ -62,7 +61,7 @@ void ERMapSelection::Judge(FERMapCandidate& C,const FERPlayabilityReport& R,cons
     if(P.bRequireWholeGraph && R.Graph.Coverage==EERGraphCoverage::Exact && (!Whole || Whole->Status==EERPlayabilityStatus::Fail))C.Rejected.Add(TEXT("split_graph"));
     if(P.MinPaths>0 && C.Paths<P.MinPaths)C.Rejected.Add(FString::Printf(TEXT("paths_%d"),C.Paths));
     // Layout sight overstates what real collision shows, so this rejects only what known solids leave open.
-    if(P.bForbidSpawnSight && Sight && Sight->Status==EERPlayabilityStatus::Warn)C.Rejected.Add(FString::Printf(TEXT("spawn_sight_%d"),C.VisiblePairs));
+    if(P.bForbidSpawnSight && (!Sight || C.VisiblePairs>0 || Sight->Value(TEXT("open_shot_pairs"),0)>0))C.Rejected.Add(FString::Printf(TEXT("spawn_sight_%d"),C.VisiblePairs));
     // Sight outweighs the rest together: no line on the layout means no line in real collision.
     constexpr int32 SightWeight=4;
     C.Preference=SightWeight*int32(P.SpawnSight.Contains(C.VisiblePairs))+int32(P.Paths.Contains(C.Paths))+int32(P.LateralRatio.Contains(C.LateralRatio))+int32(P.OpenShare.Contains(C.OpenShare));
@@ -80,8 +79,8 @@ int32 ERMapSelection::Decide(const TArray<FERMapCandidate>& Candidates,int32 See
     bFallback=Ties.IsEmpty();
     if(Ties.Contains(0))return 0;
     if(!Ties.IsEmpty())return Ties[GetTypeHash(Seed)%uint32(Ties.Num())];
-    for(const auto& C:Candidates)if(C.bBuilt)return C.Index;
-    return 0;
+    for(const auto& C:Candidates)if(C.bBuilt && !C.Rejected.ContainsByPredicate([](const FString& Why){return Why.StartsWith(TEXT("spawn_sight_"));}))return C.Index;
+    return INDEX_NONE;
 }
 
 void ERMapSelection::PreferBreachSafe(TArray<FERMapCandidate>& Candidates,TFunctionRef<int32(int32)> BreachPairs)

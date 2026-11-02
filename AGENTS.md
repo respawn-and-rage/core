@@ -110,9 +110,12 @@ Say which platforms were really compiled. Windows and Linux are only verified by
   saved moves. Cosmetic RNG never consumes gameplay or geometry RNG.
 - **Aim:** `GetEffectiveAimRotation` / `GetViewRotation` combine input, worksheet
   recoil and aim punch once. `ControlRotation`, capsule and hitboxes stay untouched.
-- **Maps:** templates are deterministic from a seed, half-turn paired, validated
+- **Maps:** templates are deterministic from a seed, paired by half-turn or reflection, validated
   atomically, 1000m² per team-size unit ±10% of area. Never scale meshes, doors,
-  stairs, materials or cells to fit. Sample one half, then rotate it.
+  stairs, materials or cells to fit. Sample one half, then transform it using the template symmetry.
+  Every gameplay layout must block visibility AND direct projectile lines between every opposing
+  spawn pair on the intact map, regardless of seed or team size. Validate before readiness;
+  no exposed fallback. Destruction may open these lines later.
 - **Destruction:** one path, logical 5cm cells. Server owns HP; clients reconstruct
   from the protocol descriptor and apply complete shard manifests only, failing
   closed. HP values are calibrated to cell size: changing resolution or thickness

@@ -5,7 +5,7 @@
 #include "ERMapTemplate.generated.h"
 
 UENUM(BlueprintType)
-enum class EERTemplateSymmetry : uint8 { None, HalfTurn };
+enum class EERTemplateSymmetry : uint8 { None, HalfTurn, Mirror };
 
 UENUM(BlueprintType)
 enum class EERMapArchetype : uint8 { LegacyAssembly, CentralBuilding, MiddleEasternAlleys, FireTraining, Rooms, Village };
@@ -100,6 +100,8 @@ USTRUCT(BlueprintType)
 struct FERCentralBuildingRecipe
 {
     GENERATED_BODY()
+    // Circular terrain and reflection across Y=0; false retains authored rectangular studies.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) bool CircularTerrain=true;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FVector2D ArenaMin=FVector2D(6400,8400);
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FVector2D ArenaMax=FVector2D(8000,10000);
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FVector2D BuildingWidth=FVector2D(1800,2400);
@@ -327,6 +329,7 @@ public:
     // Only set on an ephemeral per-build copy, never saved into an authored asset.
     UPROPERTY(Transient) int32 SizingTeamSize=0;
     UPROPERTY(Transient) bool SizingRoomsGroundOnly=false;
+    UPROPERTY(Transient) bool ReflectionBuild=false;
     UPROPERTY(Transient) FVector2D SizingArena=FVector2D::ZeroVector;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FERFireTrainingRecipe FireTraining;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<class UERMapThemeLibrary> ThemeLibrary;

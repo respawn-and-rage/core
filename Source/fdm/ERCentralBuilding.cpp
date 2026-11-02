@@ -19,6 +19,7 @@ namespace ERProcedural
 {
 bool BuildCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplatePiece>& Pieces,FERProceduralLayout& L,TArray<FVector>& Patrol,int32 CrossingOverride)
 {
+    if(T.CentralBuilding.CircularTerrain)return BuildCircularCentralBuilding(T,Seed,Pieces,L,Patrol);
     const auto& V=T.CentralBuilding;
     auto Range=[](FVector2D R,float Min,float Max)
     {return !R.ContainsNaN() && R.X>=Min && R.Y<=Max && R.X<=R.Y && FMath::Fmod(R.X,50)==0 && FMath::Fmod(R.Y,50)==0;};

@@ -53,7 +53,9 @@ Note that the gallery counts from 1: "gallery 8" is index 7. Role assignments ar
   hidden bones in `ERCorpseMeshComponent::FinalizeBoneTransform`.
 - Prone is procedural on team rigs through `UERPostureMesh`. Its extra hit volume stops at death.
 - Ground contact: `FeetOffset = -92.5 - soleHeight`, measured from foot vertices across the
-  idle clip by `setup_character_grounding.py`. Rerun after an explicit catalog rebuild. No terrain IK.
+  idle clip by `setup_character_grounding.py`. Rerun after an explicit catalog rebuild.
+  `UERMovement::ApplyPosturePresentation` lowers live pawns a further 3cm: the capsule walks 2.15cm
+  above the floor and the live idle stands about .85cm taller than the clip. No terrain IK.
 
 ## Clothing
 
@@ -79,4 +81,5 @@ do not claim cybernetic limbs became human.
 ## Verify
 
 `test-team-skins.py`, `test-target-skins.py`, `test-world-poses.py`, `test-field-clothing.py --render --preview`,
-`test-character-preview.py`, `verify_runtime_characters.py`, `test-network.py --skins`.
+`test-character-preview.py`, `verify_runtime_characters.py`, `test-network.py --skins`,
+`test-hit-fidelity.py` (live sole height against the floor).

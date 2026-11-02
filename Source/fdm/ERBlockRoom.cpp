@@ -97,6 +97,7 @@ bool AERBlockRoom::Regenerate()
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(ERBlock_Regenerate);
     const double Start = FPlatformTime::Seconds();
+    if(HasAuthority())bGenerationValid=false;
     if ((!CanMutateBlocks() && !bApplyingNetwork) || !BlockMesh || !GenerateLogicalWorld()) return false;
     if(HasAuthority())AERClaymore::RemoveFor(GetWorld());
     ClearCollapse();
@@ -115,6 +116,14 @@ bool AERBlockRoom::Regenerate()
     GenerationProfile.Quads=RebuildProfile.Quads; GenerationProfile.Boxes=RebuildProfile.Boxes; GenerationProfile.Groups=RebuildProfile.Groups;
     GenerationMs = float((FPlatformTime::Seconds() - Start) * 1000);
     GenerationProfile.TotalMs=GenerationMs;
+    if(HasAuthority())SetMapCollision(true);
+    if(HasAuthority() && !ValidateGeneratedCollision())
+    {
+        SetMapCollision(false);
+        UE_LOG(LogTemp,Error,TEXT("ER_MAP_INITIAL_SPAWN_REJECTED real visibility or projectile line remains open"));
+        return false;
+    }
+    bGenerationValid=true;
     if (HasAuthority() && GetNetMode()!=NM_Standalone) PublishCellGeneration();
     UE_LOG(LogTemp, Display, TEXT("ER_BLOCK_GENERATED %s support_contacts=%d support_build=%.2fms"), *GetStatistics(), Support.GetContactCount(), Support.BuildMs);
     OnGenerationFinished();

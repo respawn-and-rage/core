@@ -102,11 +102,8 @@ void AERIndustrialMapProbe::Tick(float Delta)
             for(TActorIterator<APawn> Pawn(GetWorld());Pawn;++Pawn)Q.AddIgnoredActor(*Pawn);
             Good&=ERIndustrialTest::FactoryPaletteMatches(*Map);
             Good&=ERIndustrialTest::IntermediateCoverMatches(*Map,Phase==2 || Phase==3);
-            const auto& L=Map->GetLayout();const float Edge=L.ArenaSize.X*.5;
-            const float Plinth=ERIndustrialFence::PlinthHeightCm,Top=Plinth+ERIndustrialFence::ModuleHeightCm;
-            Good&=GetWorld()->LineTraceSingleByChannel(Hit,{Edge-100,0,Plinth*.5f},{Edge+100,0,Plinth*.5f},ECC_Pawn,Q);
-            Good&=GetWorld()->LineTraceSingleByChannel(Hit,{Edge-100,0,Plinth+ERIndustrialFence::ModuleHeightCm*.5f},{Edge+100,0,Plinth+ERIndustrialFence::ModuleHeightCm*.5f},ECC_Pawn,Q);
-            Good&=!GetWorld()->LineTraceSingleByChannel(Hit,{Edge-100,0,Top+1},{Edge+100,0,Top+1},ECC_Pawn,Q);
+            const auto& L=Map->GetLayout();
+            Good&=ERIndustrialTest::PerimeterMatches(*Map,Q);
             Good&=ERIndustrialTest::FenceAperturesMatch(*Map,Q);
             if(!L.Containers.IsEmpty())Good&=ERIndustrialTest::ContainerBlocked(*GetWorld(),L.Containers[0],Q)==(Phase==1 || Phase==4);
             if(!L.WallBridges.IsEmpty())
@@ -146,7 +143,9 @@ void AERIndustrialMapProbe::Tick(float Delta)
         Check(ERIndustrialTest::IntermediateCoverMatches(*Map),TEXT("intermediate_cover_access_and_concealment"));
         int32 Crouched=0;for(const auto& Site:Map->GetLayout().CoverSites)Crouched+=Site.HalfHeight<70;
         UE_LOG(LogTemp,Display,TEXT("ER_INDUSTRIAL_COVER sites=%d standing=%d crouched=%d"),Map->GetLayout().CoverSites.Num(),Map->GetLayout().CoverSites.Num()-Crouched,Crouched);
-        Check(C->GetActorLocation().Z>90 && C->GetActorLocation().Z<102,TEXT("actual_spawn_supported"));
+        const auto SpawnPoint=C->GetActorLocation();
+        const float SpawnGround=Map->GetLayout().CircularArena ? ERProcedural::CentralGroundHeight(Map->GetLayout(),FVector2D(SpawnPoint)):0;
+        Check(SpawnPoint.Z-SpawnGround>90 && SpawnPoint.Z-SpawnGround<102,TEXT("actual_spawn_supported"));
         DamageTime=FMath::Max(Network ? 35.f:20.f,8+Map->GetLayout().StairRoutes.Num()*3.5f+Map->GetLayout().WallAccessFlights.Num()*2.5f);
         for(const auto& Desc:Map->GetLayout().Ladders)DamageTime+=Desc.Height/144.f+2.f;
         Capture(Map);Publish(1,Map);
@@ -206,7 +205,7 @@ void AERIndustrialMapProbe::Tick(float Delta)
         Check(LadderIndex==Map->GetLayout().Ladders.Num(),TEXT("all_generated_ladders_climbed"));
         // An actual authorized rifle shot after reducing a local band to 1HP.
         const float WallX=Map->GetLayout().CentralBuildingCenter.X-Map->GetLayout().CentralBuildingSize.X*.5;
-        C->TeleportTo({WallX+220,200,100},FRotator(0,180,0));C->GetCharacterMovement()->StopMovementImmediately();PC->SetControlRotation(FRotator(0,180,0));
+        C->TeleportTo({WallX+220,200,Map->GetLayout().CentralBuildingCenter.Z+100},FRotator(0,180,0));C->GetCharacterMovement()->StopMovementImmediately();PC->SetControlRotation(FRotator(0,180,0));
         FHitResult Hit;FERCellId Id;FCollisionQueryParams Q(SCENE_QUERY_STAT(ERIndustrialShot),false,C);
         const FVector Eye=C->GetPawnViewLocation();
         const bool Found=GetWorld()->LineTraceSingleByChannel(Hit,Eye,Eye-FVector(500,0,0),ECC_GameTraceChannel1,Q) && Map->ResolveCell(Hit,Id);

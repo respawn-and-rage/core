@@ -1,7 +1,8 @@
 # Procedural map playability
 
 Reads a generated map as a tactical graph and says why it is weak. Reports never change a layout.
-Only [candidate selection](#candidate-selection), off by default, acts on them.
+[Candidate selection](#candidate-selection), off by default, optimizes optional tactical metrics.
+Initial spawn occlusion is a separate mandatory gameplay-generation rule, including Shipping.
 
 **Code:** `ERMapPlayability.h/.cpp`, `ERMapPlayabilityTests.cpp`, `AERProceduralMap::GenerateLogicalWorld`
 and `OnGenerationFinished`. Rooms macro graph: `ERRoomsMacro.h/.cpp`, `ERRoomsMacroTests.cpp`, `BuildRooms`.
@@ -41,6 +42,24 @@ skins, mesh colliders and graded terrain are counted as `unknown_solids`. They c
 and known solids shrink by 1cm for sight, because rays that graze a cell edge can pass in real
 collision. So a clear sight verdict stands, but a visible pair over unknown solids stays
 `not_evaluated` until the physical stage.
+
+## Initial spawn rule
+
+Every gameplay template and positive team-size profile must block both visibility and direct
+projectile lines between **all** opposing starts on the intact map. No pair downsampling is
+allowed. Checks cover both directions, standing eye height before/after settling, and lateral
+head, chest and leg samples. Glass, invisible collision, perforated pawn barriers and unknown
+art cannot provide the opaque-cover proof.
+
+`ERProcedural::Build` retries deterministic compositions until known visible opaque solids
+prove occlusion. Authority repeats the check against real Visibility and Projectile collision
+before publishing an epoch or becoming ready. Failure blocks match start and player placement;
+there is no exposed-spawn fallback. Geometry-only editor studies (`ExpectedTeamSize=0`) do not
+approve a layout for gameplay. Matches always set a positive server team-size profile.
+
+Initial overflow and private bot starts pass the same current-collision test against every
+opposing registered start. After destruction, these lines may open and normal respawn-risk
+scoring applies; the rule does not make cover indestructible.
 
 ## Graph
 
@@ -82,7 +101,8 @@ Neighbouring common nodes group into one choke: both sides of a door are one. `a
 counts chokes inside the base, which is how a spawn room with one door surfaces behind two gates.
 
 `FERPlayabilityPolicy` carries only measuring parameters and the proposed minimum of two independent
-paths. A warning is a finding to read, not a rule: rules live in the selection profiles. Route sight
+paths. Initial spawn exposure is a hard generation failure on a fresh gameplay map. Other warnings
+are findings to read; optional tactical preferences live in the selection profiles. Route sight
 is bounded by `MaxVantages`, `MaxExits`, `MaxObservers` and `MaxRouteSamples`. With unknown solids it
 overstates a lot at the layout stage: compare it at the physical stage, which uses `ECC_Visibility`.
 
@@ -182,23 +202,22 @@ during play; each new seed or round selects once, sharing the result with the ea
 | Archetype | Candidates | Hard rules | Preferred ranges |
 | --- | --- | --- | --- |
 | Rooms | 6 | Whole exact graph, two independent paths, no spawn sight | Three paths |
-| Central Building | 6 | From 8v8: no spawn sight | Fewer sight pairs below 8v8, two paths, a lateral route, a partly open crossing |
-| Alleys | 4 | None | No spawn sight, three paths |
-| Village | 6 | None | No spawn sight, two paths, a lateral route, a partly open crossing |
-| Fire Training | 1 | None | None: it keeps the plain seed and pays nothing |
+| Central Building | 6 | No spawn sight at every size | Two paths, a lateral route, a partly open crossing |
+| Alleys | 4 | No spawn sight | No spawn sight, three paths |
+| Village | 6 | No spawn sight | No spawn sight, two paths, a lateral route, a partly open crossing |
+| Fire Training | 1 | No spawn sight | None: it keeps the plain seed and pays nothing |
 
-A rule is hard only where the layout reading is conclusive and clean candidates exist. Alleys and
-Village keep unknown solids, so a visible pair there may be hidden. Central Building below 8v8 leaves a
-line open on every candidate. Fire Training cannot tell candidates apart at the layout stage.
+Spawn occlusion applies to all archetypes, even when selection is disabled or has one
+candidate. The common generator rejects a plan that depends only on unknown art or terrain
+for cover. Real-collision validation remains mandatory before gameplay readiness.
 
 Each range met adds a point, and spawn sight outweighs the others together: no line on the layout
 means no line in real collision. Ranges never rescue a broken rule. The plain seed keeps any tie, so a
-map moves only for a reason, and the seed breaks other ties. With no clean candidate the first layout
-wins and the log says `fallback=1`. No candidate is ever regenerated during a match.
+map moves only for a reason, and the seed breaks other ties. With no tactically clean candidate, a built layout may be a `fallback=1` only if its initial
+spawn occlusion passed. No built safe candidate means generation fails. No candidate is ever regenerated during a match.
 
 `bPreferBreachSafe` then adds one point to the best clean candidates whose `central_breach` opens no
-new spawn sight, read on the layout stage (`breach=` in the log). It only separates plans that tie:
-Central Building's barrier is the same on every candidate, so there it changes nothing. It runs only
+new spawn sight, read on the layout stage (`breach=` in the log). It only separates plans that tie, and runs only
 when the budget was not hit, because a candidate left unread would make the choice depend on machine
 speed. It always reads the layout, so unknown solids can overstate a breach and move a plan needlessly,
 never the reverse.
@@ -237,7 +256,8 @@ stands, and real sight may exceed the abstract state only when other cells fell 
 Cell support is evaluated only after damage, so anything unsupported on a fresh map stands until the
 first cut anywhere on it. `EclipseRecoil.Maps.Stress.FreshSupport` lists those pieces in
 `fresh-support.csv`, per team size and seed, and fails if a Village plan has any. The other templates
-are only reported: Central Building's fences have a plan with loose panels.
+are only reported: Central Building’s rectangular authored studies include a fence plan with loose panels; the
+circular builder also has a dedicated fresh-support regression test.
 
 ## Verify
 

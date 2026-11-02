@@ -89,7 +89,10 @@ TSharedPtr<FJsonValue> Points(const TArray<FVector>& Path)
 TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralConfig& C,const FString& Id,int32 TeamSize,int32 Seed)
 {
     auto O=MakeShared<FJsonObject>();O->SetStringField(TEXT("template"),Id);O->SetNumberField(TEXT("team_size"),TeamSize);O->SetNumberField(TEXT("seed"),Seed);
-    O->SetNumberField(TEXT("target_area_m2"),ERProcedural::TargetAreaM2(TeamSize));O->SetNumberField(TEXT("area_m2"),L.ArenaSize.X*L.ArenaSize.Y/10000.);O->SetNumberField(TEXT("area_tolerance_percent"),10);
+    O->SetNumberField(TEXT("target_area_m2"),ERProcedural::TargetAreaM2(TeamSize));O->SetNumberField(TEXT("area_m2"),ERProcedural::PlayableAreaM2(L));O->SetNumberField(TEXT("area_tolerance_percent"),10);
+    O->SetBoolField(TEXT("circular"),L.CircularArena);O->SetBoolField(TEXT("central_hill"),L.CentralHill);
+    O->SetField(TEXT("hill_center"),Vector(L.HillCenter));O->SetNumberField(TEXT("hill_height_m"),L.HillHeight/100);
+    O->SetField(TEXT("building_center"),Vector(L.CentralBuildingCenter));
     O->SetField(TEXT("dimensions_m"),Vector(L.ArenaSize));O->SetStringField(TEXT("theme"),L.ThemeName.ToString());
     O->SetNumberField(TEXT("building_floors"),L.BuildingFloors);O->SetNumberField(TEXT("blocks"),L.VillageBlocks.Num());
     int32 Storeys=0;for(const auto& P:L.VillageBlocks)Storeys=FMath::Max(Storeys,P.Storeys);
@@ -187,11 +190,11 @@ bool FERMapSizingTest::RunTest(const FString&)
             C.Seed=Seed;
             if(!TestTrue(*FString::Printf(TEXT("%s %dv%d seed%d builds valid geometry"),*Id,TeamSize,TeamSize,Seed),ERProcedural::Build(C,B,L)))return false;
             TestTrue(TEXT("actual arena dimensions in metres are positive and finite"),!L.ArenaSize.ContainsNaN() && L.ArenaSize.GetMin()>0);
-            TestTrue(TEXT("500 square metres per expected player, within ten percent"),ERProcedural::ValidTeamArea(L.ArenaSize,TeamSize));
+            TestTrue(TEXT("500 square metres per expected player, within ten percent"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-ERProcedural::TargetAreaM2(TeamSize))<=ERProcedural::TargetAreaM2(TeamSize)*.1+.01);
             RoomCounts.Add(L.Rooms.Num());BlockCounts.Add(L.VillageBlocks.Num());Bounds.Add({FMath::RoundToInt32(L.ArenaSize.X),FMath::RoundToInt32(L.ArenaSize.Y)});
             TestTrue(TEXT("starts remain independent of expected team size"),L.AlphaSpawns.Num()>=8 && L.OmegaSpawns.Num()==L.AlphaSpawns.Num());
             for(int32 I=0;I<L.AlphaSpawns.Num();++I)
-            {auto P=L.AlphaSpawns[I].GetLocation();P.X=-P.X;P.Y=-P.Y;TestTrue(TEXT("equal paired spawn distances"),P.Equals(L.OmegaSpawns[I].GetLocation(),.02));}
+            {auto P=L.AlphaSpawns[I].GetLocation();if(L.LayoutSymmetry!=EERTemplateSymmetry::Mirror)P.X=-P.X;P.Y=-P.Y;TestTrue(TEXT("equal paired spawn distances"),P.Equals(L.OmegaSpawns[I].GetLocation(),.02));}
             for(const auto& Node:L.RoomNodes)
                 TestTrue(TEXT("room footprints remain inside measured arena"),FMath::Abs(Node.Center.X)+Node.Size.X*.5+20<=L.ArenaSize.X*.5 && FMath::Abs(Node.Center.Y)+Node.Size.Y*.5+20<=L.ArenaSize.Y*.5);
             if(L.UnderpassAxis==1)for(int32 I=1;I<L.UnderpassRoute.Num();++I)
@@ -299,7 +302,7 @@ bool FERMapDensityBudgetTest::RunTest(const FString&)
         {
             FERProceduralConfig C;C.TemplateAsset=T;C.ExpectedTeamSize=N;C.Seed=Seed;FERBlockRoomConfig B;FERProceduralLayout L;
             if(!TestTrue(*FString::Printf(TEXT("%s %dv%d seed%d builds inside density budget"),*Id,N,N,Seed),ERProcedural::Build(C,B,L)))return false;
-            TestTrue(TEXT("actual perimeter area within ten percent of1000m² per team member"),ERProcedural::ValidTeamArea(L.ArenaSize,N));
+            TestTrue(TEXT("actual perimeter area within ten percent of1000m² per team member"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-ERProcedural::TargetAreaM2(N))<=ERProcedural::TargetAreaM2(N)*.1+.01);
             if(Id==TEXT("FireTraining"))TestTrue(TEXT("every team size keeps the warehouse longitudinal"),L.ArenaSize.Y>=L.ArenaSize.X*1.2f);
             if(Id==TEXT("Rooms"))TestTrue(TEXT("every room profile has independent base access"),IndependentRoomBaseAccess(L));
             if(N>1)for(const auto& Hole:L.UnderpassBreaches)

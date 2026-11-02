@@ -13,7 +13,10 @@ Sealed half-turn room graph with no arena floor outside it. 4, 6, 8 or 10 rooms.
   coverage (60% for the large rectangle), 2m apart, 6m approaches.
 - Larger graphs add an upper crossing with galleries at 620cm and 310cm switchbacks.
 - No single corridor may disconnect bases. Starts and routes are reserved before furnishing.
-- Sparse 2.4m timber boards every 5m on runs over 10m; at most two per room.
+- Gameplay bases have 3m opaque timber spawn baffles, separate from sparse furniture.
+  Corner bases use an L shape with distinct west and south bypasses to their two mouths;
+  larger graphs keep both lateral mouths open. The timber can be breached after spawning.
+- Sparse 2.4m timber boards every 5m on runs over 10m; at most two furniture boards per room.
 - Prototype, off by default: `bEnablePCGExMacroGraph` swaps the straight lower spine for a baked
   central structure. See [PROCEDURAL_MAP_PLAYABILITY.md](../PROCEDURAL_MAP_PLAYABILITY.md#rooms-macro-graph).
 

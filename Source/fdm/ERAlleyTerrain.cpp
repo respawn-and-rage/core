@@ -25,6 +25,7 @@ float AlleyBaseHeight(FVector Arena,FVector2D P,bool Balanced)
 static float AlleyGroundField(const FERProceduralLayout& L,FVector2D P)
 {
     if(!L.GradedTerrain)return 0;
+    if(L.LayoutSymmetry==EERTemplateSymmetry::Mirror)P.Y=-FMath::Abs(P.Y);
     auto BaseAt=[&](FVector2D Q)
     {
         if(!L.SeededDistrict)return AlleyBaseHeight(L.ArenaSize,Q);
@@ -64,6 +65,7 @@ static float AlleyGroundField(const FERProceduralLayout& L,FVector2D P)
 }
 float AlleyGroundHeight(const FERProceduralLayout& L,FVector2D P)
 {
+    if(L.CircularArena)return CentralGroundHeight(L,P);
     for(const auto& R:L.UnderpassRamps)if(P.X>=R.Bounds.Min.X-.001 && P.X<=R.Bounds.Max.X+.001 && P.Y>=R.Bounds.Min.Y-.001 && P.Y<=R.Bounds.Max.Y+.001)return AlleyRampHeight(R,P);
     if(!L.SeededDistrict)return AlleyGroundField(L,P);
     // Use the same triangles as the collision mesh, not the ideal smooth

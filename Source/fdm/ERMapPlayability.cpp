@@ -63,11 +63,11 @@ struct FLayoutSolids
         Solids.Add({Frame,Half,FBox(-Half,Half).TransformBy(Frame),Pawn,Sight});
     }
     explicit FLayoutSolids(const FERProceduralLayout& L):FLayoutSolids(L,L.Panels){}
-    FLayoutSolids(const FERProceduralLayout& L,const TArray<FERCellPanelDesc>& Panels)
+    FLayoutSolids(const FERProceduralLayout& L,const TArray<FERCellPanelDesc>& Panels,bool VisibleOnly=false)
     {
         for(const auto& P:L.FixedPieces)
         {
-            if(P.VisualOnly)continue;
+            if(P.VisualOnly || (VisibleOnly && (P.CollisionOnly || P.Mesh || P.Material==EERBlockMaterial::Glass)))continue;
             if(P.MeshCollision){++Unknown;continue;}
             Add(P.Transform.GetRotation(),P.Transform.GetLocation(),P.Transform.GetScale3D()*100,true,!P.PawnBarrier);
         }
@@ -371,20 +371,24 @@ FERPlayabilityMetric& Reset(FERPlayabilityReport& R,const TCHAR* Code,EERPlayabi
 }
 void Note(FERPlayabilityMetric& M,const TCHAR* Name,double Value){M.Values.Emplace(Name,Value);}
 
-// Every start of one team against every start of the other, with a bounded stride.
+// Every opposing pair, both directions; no downsampling can hide one exposed start.
 template<typename TClear>
 void ProbeSpawnSight(const FERProceduralLayout& L,const FERPlayabilityPolicy& P,const FTransform& Frame,FERPlayabilityMetric& M,const TCHAR* Name,int32& Visible,TClear Clear)
 {
     const int32 Pairs=L.AlphaSpawns.Num()*L.OmegaSpawns.Num();
-    const int32 Stride=FMath::Max(1,FMath::CeilToInt32(FMath::Sqrt(float(Pairs)/FMath::Max(1,P.MaxSpawnPairs))));
+    constexpr int32 Stride=1;
     int32 Sampled=0;Visible=0;
-    const FVector Samples[]={FVector(0,0,P.EyeOffset),FVector(0,0,10),FVector(0,0,-60)};
+    const FVector Samples[]={FVector(0,0,92.5f),FVector(0,0,85),FVector(0,0,P.EyeOffset),FVector(0,0,10),FVector(0,0,-60),FVector(0,0,-90)};
     for(int32 I=0;I<L.AlphaSpawns.Num();I+=Stride)for(int32 J=0;J<L.OmegaSpawns.Num();J+=Stride)
     {
         ++Sampled;
         const FVector A=Frame.TransformPosition(L.AlphaSpawns[I].GetLocation()),B=Frame.TransformPosition(L.OmegaSpawns[J].GetLocation());
-        const FVector Eye(0,0,P.EyeOffset);bool Seen=false;
-        for(const FVector& Sample:Samples)Seen=Seen || Clear(A+Eye,B+Sample) || Clear(B+Eye,A+Sample);
+        bool Seen=false;
+        // Starts are recorded at floor+100; a settled 92.5cm capsule lowers
+        // the eye by 7.5cm. Test both heights, including lateral body samples.
+        for(float EyeHeight:{P.EyeOffset,P.EyeOffset-7.5f})for(const FVector& Sample:Samples)
+            for(const FVector Offset:{FVector::ZeroVector,FVector(-28,0,0),FVector(28,0,0),FVector(0,-28,0),FVector(0,28,0)})
+                Seen=Seen || Clear(A+FVector(0,0,EyeHeight),B+Sample+Offset) || Clear(B+FVector(0,0,EyeHeight),A+Sample+Offset);
         if(!Seen)continue;
         ++Visible;
         if(M.Violations.Num()<8)
@@ -617,6 +621,35 @@ EERPlayabilityMode ERPlayability::Mode()
     }();
     return Cached;
 #endif
+}
+bool ERPlayability::InitialSpawnsOccluded(const FERProceduralLayout& L)
+{
+    if(L.AlphaSpawns.IsEmpty() || L.OmegaSpawns.IsEmpty())return false;
+    FLayoutSolids Solids(L,L.Panels,true);
+    // All rays lie in this box. Cull unrelated perimeter/slab volumes once,
+    // rather than rescanning them for every body sample of every spawn pair.
+    FBox BeamBounds(ForceInit);
+    for(const auto* Bank:{&L.AlphaSpawns,&L.OmegaSpawns})for(const auto& Start:*Bank)BeamBounds+=Start.GetLocation();
+    BeamBounds=BeamBounds.ExpandBy(FVector(35,35,100));
+    Solids.Solids.RemoveAll([&](const FLayoutSolids::FSolid& Solid){return !Solid.bSight || !Solid.Bounds.Intersect(BeamBounds);});
+    FERPlayabilityMetric Metric;int32 Visible=0;
+    ProbeSpawnSight(L,FERPlayabilityPolicy(),FTransform::Identity,Metric,TEXT("initial spawn exposure"),Visible,
+        [&](FVector A,FVector B){return Solids.SightClear(A,B);});
+    return Visible==0;
+}
+bool ERPlayability::InitialSpawnsOccludedInWorld(UWorld* World,const FTransform& Frame,const FERProceduralLayout& L)
+{
+    if(!World || L.AlphaSpawns.IsEmpty() || L.OmegaSpawns.IsEmpty())return false;
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(ERInitialSpawnOcclusion),false);
+    for(TActorIterator<APawn> It(World);It;++It)Query.AddIgnoredActor(*It);
+    for(const auto Channel:{ECC_Visibility,ECC_GameTraceChannel1})
+    {
+        FERPlayabilityMetric Metric;int32 Visible=0;
+        ProbeSpawnSight(L,FERPlayabilityPolicy(),Frame,Metric,TEXT("initial spawn exposure"),Visible,
+            [&](FVector A,FVector B){FHitResult Hit;return !World->LineTraceSingleByChannel(Hit,A,B,Channel,Query);});
+        if(Visible>0)return false;
+    }
+    return true;
 }
 FERPlayabilityPolicy ERPlayability::PolicyFor(EERMapArchetype Archetype,int32 ExpectedTeamSize)
 {

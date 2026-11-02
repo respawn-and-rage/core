@@ -2,6 +2,7 @@
 #include "ERServerSettingsProbe.h"
 #include "ERMovement.h"
 #include "ERWorldPoseProbe.h"
+#include "ERHitFidelityProbe.h"
 #include "ERLoadoutProbe.h"
 #include "ERFieldClothingProbe.h"
 #include "ERClaymore.h"
@@ -255,6 +256,7 @@ void AERGameMode::BeginPlay()
     if (GetNetMode() == NM_Standalone && GetWorld()->GetMapName().Contains(TEXT("L_ProceduralLab")) && FParse::Param(FCommandLine::Get(), TEXT("ERBlockStressProbe"))) GetWorld()->SpawnActor<AERBlockStressProbe>();
     if (GetNetMode()==NM_Standalone && GetWorld()->GetMapName().Contains(TEXT("L_DestructionLab")) && FParse::Param(FCommandLine::Get(),TEXT("ERBlockCollapseProbe"))) GetWorld()->SpawnActor<AERBlockCollapseProbe>();
     if(FParse::Param(FCommandLine::Get(),TEXT("ERWorldPoseProbe")))GetWorld()->SpawnActor<AERWorldPoseProbe>();
+    if(FParse::Param(FCommandLine::Get(),TEXT("ERHitFidelityProbe")) || FParse::Param(FCommandLine::Get(),TEXT("ERHitLagProbe")))GetWorld()->SpawnActor<AERHitFidelityProbe>();
     if (FParse::Param(FCommandLine::Get(),TEXT("ERBlockNetworkProbe")) && GetWorld()->GetMapName().Contains(TEXT("L_ProceduralLab")))GetWorld()->SpawnActor<AERBlockNetworkProbe>();
     if (FParse::Param(FCommandLine::Get(), TEXT("ERNetworkProbe"))) GetWorld()->SpawnActor<AERNetworkProbe>();
     if(FParse::Param(FCommandLine::Get(),TEXT("ERTraversalProbe")))GetWorld()->SpawnActor<AERTraversalProbe>();
@@ -364,6 +366,8 @@ void AERGameMode::HandleStartingNewPlayer_Implementation(APlayerController* Play
 bool AERGameMode::ReadyToStartMatch_Implementation()
 {
     if (GetMatchState() != MatchState::WaitingToStart || GetWorld()->GetMapName().Contains(TEXT("L_MainMenu"))) return false;
+    for(TActorIterator<AERProceduralMap> Map(GetWorld());Map;++Map)
+        if(Map->LayoutConfig.TemplateAsset && !Map->IsMapReady())return false;
     return GetNumPlayers() > 0;
 }
 void AERGameMode::RestartPlayer(AController* Player)
@@ -538,7 +542,7 @@ void AERGameMode::ResetRound(bool AllowMapTravel)
             {Bot->TrainingStart->Destroy();Bot->TrainingStart=nullptr;}
             const int32 Previous=It->LayoutConfig.Seed;
             It->LayoutConfig.Seed=ERServer::Get(GetWorld(),"Map.FixedSeed")>0?int32(ERServer::Get(GetWorld(),"Map.Seed")):int32(HashCombine(uint32(Previous),It->GetMapEpoch()+7919u));
-            if(!It->Regenerate())It->LayoutConfig.Seed=Previous;
+            if(!It->Regenerate()){It->LayoutConfig.Seed=Previous;It->Regenerate();}
         }
     for(TActorIterator<AController> It(GetWorld());It;++It)
         if(Cast<AERPlayerController>(*It) || Cast<AERBotController>(*It))RestartPlayer(*It);

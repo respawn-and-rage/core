@@ -1,6 +1,7 @@
 #include "ERBlockCombat.h"
 #include "ERShotTrace.h"
 #include "ERWeapon.h"
+#include "ERCharacter.h"
 #include "HAL/PlatformTime.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "ERBlockRoom.h"
@@ -98,7 +99,8 @@ FERBlockShotResult ERBlockCombat::ContinueShot(UWorld* World, const FHitResult& 
         ++Result.ExtraTraces;
         const auto* Gun=Cast<AERWeapon>(Causer);
         const bool Anatomical=Gun && Gun->Data && Gun->Data->bUseBodyHitZones;
-        if (!(Anatomical ? ERShotTrace::Pellet(World,Hit,Cursor,Result.End,Query) :
+        if (!(Anatomical ? ERShotTrace::Pellet(World,Hit,Cursor,Result.End,Query,
+            Cast<AERCharacter>(Gun->GetOwner()) ? ERShotTrace::BulletTime(CastChecked<AERCharacter>(Gun->GetOwner())):-1) :
             World->LineTraceSingleByChannel(Hit, Cursor, Result.End, ECC_GameTraceChannel1, Query))) break;
     }
     for (auto* Room : Rooms)

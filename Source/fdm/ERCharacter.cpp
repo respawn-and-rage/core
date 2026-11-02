@@ -24,6 +24,8 @@
 #include "Animation/AnimSequence.h"
 #include "ERSmokeCloud.h"
 #include "ERShotEffects.h"
+#include "ERShotTrace.h"
+#include "Engine/NetDriver.h"
 #include "EngineUtils.h"
 #include "Animation/AnimSingleNodeInstance.h"
 #include "Kismet/GameplayStatics.h"
@@ -900,7 +902,17 @@ float AERCharacter::TakeDamage(float Damage, const FDamageEvent& Event, AControl
             Projectile->Payload == EERPayload::LaunchedHE || Projectile->Payload == EERPayload::Rocket);
         Facts.Grenade = Facts.Explosion && (Projectile->Payload == EERPayload::HE || Projectile->Payload == EERPayload::LaunchedHE);
     }
-    Health->ReceiveDamage(Damage, Killer, Ratio, Facts, bBullet ? &static_cast<const FPointDamageEvent&>(Event).HitInfo : nullptr);
+    FHitResult WoundHit;
+    if(bBullet)
+    {
+        WoundHit=static_cast<const FPointDamageEvent&>(Event).HitInfo;
+        const auto* SourceGun=Cast<AERWeapon>(Causer);
+        const auto* SourceCharacter=SourceGun ? Cast<AERCharacter>(SourceGun->GetOwner()):nullptr;
+        // Damage/range use the historical contact; wounds follow that contact on the current bone.
+        if(SourceCharacter && SourceGun->Data->bUseBodyHitZones)
+            CastChecked<UERPostureMesh>(GetMesh())->ShotHistory.ProjectToCurrent(GetMesh(),WoundHit,ERShotTrace::BulletTime(SourceCharacter));
+    }
+    Health->ReceiveDamage(Damage, Killer, Ratio, Facts, bBullet ? &WoundHit : nullptr);
     const float Applied=Before-Health->Health;
     if(Applied>0)
     {
@@ -1010,7 +1022,23 @@ void AERCharacter::ApplyDeathVisuals()
     FirstPersonMuzzleFlash->SetVisibility(false); WorldMuzzleFlash->SetVisibility(false);
     CameraKick = 0; MuzzleFlashUntil = 0;
 }
-void AERCharacter::ServerStartFire_Implementation() { if (!Health->bDead && Weapon && !Cast<UERMovement>(GetCharacterMovement())->bHighClimb) Weapon->StartFire(); }
+void AERCharacter::ServerStartFire_Implementation()
+{
+    const auto* Driver = GetNetDriver();
+    if (!Driver || !Driver->IsInTick()) { ApplyStartFire(); return; }
+    // A received trigger overtakes the move carrying that frame's view in the same packet.
+    // Timers run after this frame's moves, so the shot uses the aim the player fired with.
+    bQueuedFireStart = true; bQueuedFireStop = false;
+    GetWorldTimerManager().SetTimerForNextTick(this, &AERCharacter::ApplyQueuedFire);
+}
+void AERCharacter::ApplyStartFire() { if (!Health->bDead && Weapon && !Cast<UERMovement>(GetCharacterMovement())->bHighClimb) Weapon->StartFire(); }
+void AERCharacter::ApplyQueuedFire()
+{
+    const bool bStart = bQueuedFireStart, bStop = bQueuedFireStop;
+    bQueuedFireStart = bQueuedFireStop = false;
+    if (bStart) ApplyStartFire();
+    if (bStop && Weapon) Weapon->StopFire();
+}
 void AERCharacter::SetGrenadeInputHeld(bool bHeld)
 {
     if(!IsLocallyControlled()) return;
@@ -1024,7 +1052,11 @@ void AERCharacter::SetGrenadeInputHeld(bool bHeld)
     bLocalGrenadeInputHeld=true;
     LocalGrenadeCookDeadline=GetWorld()->GetTimeSeconds()+Weapon->Tuned()->FuseDuration;
 }
-void AERCharacter::ServerStopFire_Implementation() { if (Weapon) Weapon->StopFire(); }
+void AERCharacter::ServerStopFire_Implementation()
+{
+    if (bQueuedFireStart) bQueuedFireStop = true;
+    else if (Weapon) Weapon->StopFire();
+}
 void AERCharacter::ServerReload_Implementation() { if (!Health->bDead && Weapon && !Weapon->bPlacingClaymore && !Cast<UERMovement>(GetCharacterMovement())->bHighClimb) Weapon->Reload(); }
 bool AERCharacter::UsesReferenceArsenal() const
 {

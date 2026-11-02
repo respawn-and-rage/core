@@ -8,7 +8,8 @@ Original seeded districts informed by a user minimap and *Making of Dust 2*. Gen
 approaches, winding streets, plazas, and 0–2 central walls with 2–4 arches. Separators have narrow firing slits below a walkable crown. Access is paired at the lateral
 ends through 6m annex roofs, with separate ground-to-roof and roof-to-crown ladders;
 aprons are reserved before lot partitioning. Market courts stay open at ground level.
-Short elevated decks span actual gaps between nearby roofs; some use destructible timber. Teams use sand terraces up to +1.8m.
+Short elevated decks span actual gaps between nearby roofs; some use destructible timber. Teams use sand terraces up to +1.8m. Gameplay profiles reserve opaque masonry spawn
+screens inside the base courts, with the starts behind them and lateral dogleg exits.
 
 - `Town.ProceduralHouses`: native masonry, alternating Stone and weaker pale Brick pairs, 160×240cm doors, flat 15cm slabs, windows, flat
   roofs flush or with 25cm-high, 40cm-wide rims and 180cm gaps. Exterior switchback stairs. One hollow

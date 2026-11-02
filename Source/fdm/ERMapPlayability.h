@@ -53,8 +53,8 @@ struct FERPlayabilityPolicy
 {
     int32 MinIndependentPaths=2;
     float MergeRadius=60,LinkRadius=500,SpawnLinkRadius=800,BaseMargin=400;
-    float EyeOffset=64; // Above the capsule centre of a standing pawn.
-    int32 MaxSpawnPairs=100;
+    float EyeOffset=77.5f; // AERCharacter standing eye above its capsule centre.
+    int32 MaxSpawnPairs=100; // Legacy policy field; spawn checks always enumerate every pair.
     int32 PathLimit=8; // Flow stops here: more independent paths change nothing.
     // Bounded sight reading of routes: rays stay under MaxVantages*2*MaxExits+MaxObservers*MaxRouteSamples.
     float VantageHeight=200,RouteStep=400;
@@ -112,6 +112,11 @@ namespace ERPlayability
     // -ERMapPlayability=ReportOnly on the authority; always Off in Shipping.
     EERPlayabilityMode Mode();
     FERPlayabilityPolicy PolicyFor(EERMapArchetype Archetype,int32 ExpectedTeamSize);
+
+    // Mandatory initial-map rule, independent of optional reporting/selection.
+    // Layout proof uses visible opaque known solids; unknown art/terrain never proves safety.
+    bool InitialSpawnsOccluded(const FERProceduralLayout& Layout);
+    bool InitialSpawnsOccludedInWorld(UWorld* World,const FTransform& MapFrame,const FERProceduralLayout& Layout);
 
     // Graph queries. Blocked edges do not exist. Node order is the tie-break.
     TArray<int32> Components(const FERTacticalGraph& Graph);

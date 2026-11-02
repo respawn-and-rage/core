@@ -167,6 +167,9 @@ public:
     bool IsWeaponStowed() const;
     virtual void FellOutOfWorld(const class UDamageType& Type) override;
     UFUNCTION(Server, Reliable) void ServerStartFire();
+    void ApplyStartFire();
+    void ApplyQueuedFire();
+    bool bQueuedFireStart = false, bQueuedFireStop = false;
     void SetGrenadeInputHeld(bool bHeld);
     float GrenadeThrowPoseBlend = 0;
     UFUNCTION(Server, Reliable) void ServerStopFire();

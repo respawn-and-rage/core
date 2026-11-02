@@ -61,20 +61,34 @@ inline bool FactoryPaletteMatches(AERProceduralMap& Map)
     }
     return Matched>0;
 }
+inline const FERLayoutFixedPiece* PerimeterFence(const FERProceduralLayout& L)
+{
+    return L.FixedPieces.FindByPredicate([&](const auto& P)
+    {return P.PawnBarrier && (L.CircularArena || (P.Transform.GetLocation().Y<-L.ArenaSize.Y*.5+10 && P.Transform.GetLocation().Z<ERIndustrialFence::PlinthHeightCm+ERIndustrialFence::ModuleHeightCm));});
+}
+inline bool PerimeterMatches(AERProceduralMap& Map,const FCollisionQueryParams& Q)
+{
+    const auto* Fence=PerimeterFence(Map.GetLayout());if(!Fence)return false;
+    const FVector Center=Fence->Transform.GetLocation(),Normal=Fence->Transform.GetRotation().GetAxisY();
+    const float MetalHalf=ERIndustrialFence::ModuleHeightCm*.5f;
+    auto Ray=[&](float Z){FHitResult Hit;const FVector P(Center.X,Center.Y,Z);return Map.GetWorld()->LineTraceSingleByChannel(Hit,P-Normal*100,P+Normal*100,ECC_Pawn,Q);};
+    return Ray(Center.Z-MetalHalf-ERIndustrialFence::PlinthHeightCm*.5f) && Ray(Center.Z) && !Ray(Center.Z+MetalHalf+1);
+}
 inline bool FenceAperturesMatch(AERProceduralMap& Map,const FCollisionQueryParams& Q)
 {
     const auto& L=Map.GetLayout();
-    const auto* Fence=L.FixedPieces.FindByPredicate([&](const auto& P){return P.PawnBarrier && P.Transform.GetLocation().Y<-L.ArenaSize.Y*.5+10 && P.Transform.GetLocation().Z<ERIndustrialFence::PlinthHeightCm+ERIndustrialFence::ModuleHeightCm;});
+    const auto* Fence=PerimeterFence(L);
     if(!Fence)return false;
     int32 Blocked=0;FHitResult Hit;
     const FVector Center=Fence->Transform.GetLocation(),Size=Fence->Transform.GetScale3D()*100;
+    const FVector Along=Fence->Transform.GetRotation().GetAxisX(),Normal=Fence->Transform.GetRotation().GetAxisY();
     for(int32 I=0;I<64;++I)
     {
-        const FVector P=Center+FVector((-.45+(I%8)*.9/7)*Size.X,0,(-.45+(I/8)*.9/7)*Size.Z);
-        const bool Metal=Map.GetWorld()->LineTraceSingleByChannel(Hit,P-FVector(0,60,0),P+FVector(0,60,0),ECC_GameTraceChannel1,Q);
+        const FVector P=Center+Along*((-.45+(I%8)*.9/7)*Size.X)+FVector(0,0,(-.45+(I/8)*.9/7)*Size.Z);
+        const bool Metal=Map.GetWorld()->LineTraceSingleByChannel(Hit,P-Normal*60,P+Normal*60,ECC_GameTraceChannel1,Q);
         Blocked+=Metal;
-        if(Map.GetWorld()->LineTraceSingleByChannel(Hit,P+FVector(0,60,0),P-FVector(0,60,0),ECC_GameTraceChannel1,Q)!=Metal)return false;
-        if(Map.GetWorld()->LineTraceSingleByChannel(Hit,P-FVector(0,60,0),P+FVector(0,60,0),ECC_Visibility,Q)!=Metal)return false;
+        if(Map.GetWorld()->LineTraceSingleByChannel(Hit,P+Normal*60,P-Normal*60,ECC_GameTraceChannel1,Q)!=Metal)return false;
+        if(Map.GetWorld()->LineTraceSingleByChannel(Hit,P-Normal*60,P+Normal*60,ECC_Visibility,Q)!=Metal)return false;
     }
     return Blocked>0 && Blocked<64;
 }

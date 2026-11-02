@@ -12,6 +12,8 @@ storeys from 2.4m, budget of 10 floors.
 - Each base has a variant (gallery, covered porch or barracks), a corner lookout, a side shack
   with roof access. Lateral walls 240cm, with standing bypasses recorded in `VillageSideWalls`
   and `VillageSideBypasses`.
+- Sized gameplay bases have a 3m timber screen in front of their spawn bank, with both
+  gallery stairs accessible around its ends.
 - Nothing may stand unsupported on a fresh map: decks drop plank and beam stubs beside ladder
   wells, and imported storage shells hold their lowest 30cm through `AnchorHeight`.
 - 3v3+ uses at least two blocks; paired 4.8×2.4m L shelters meet a ground-cover quota that upper

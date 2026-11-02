@@ -100,12 +100,14 @@ PLAYABILITY=False
 def card(d, plan, x, y, w, h, scale):
     ident=plan['template']; tw,th,_=plan['dimensions_m']; n=plan['team_size']
     d.text(x+24,y+14,NAMES[ident],26,bold=True)
-    d.text(x+24,y+49,f'{tw:g} × {th:g} m  |  {tw*th:,.0f} m²'.replace(',', ' '),23,bold=True)
+    area=plan['area_m2']
+    d.text(x+24,y+49,f'{tw:g} × {th:g} m  |  {area:,.0f} m²'.replace(',', ' '),23,bold=True)
     d.text(x+24,y+81,f'{n} vs {n} · seed {plan["seed"]}',17,color='#64717a')
     ox=x+w/2-tw*scale/2; oy=y+135+(h-240-th*scale)/2
     def p(v):
         return (ox+(v[0]+tw/2)*scale,oy+(v[1]+th/2)*scale)
-    outline=[(ox,oy),(ox+tw*scale,oy),(ox+tw*scale,oy+th*scale),(ox,oy+th*scale)]
+    outline=([p((tw*.5*math.cos(i*math.tau/128),th*.5*math.sin(i*math.tau/128),0)) for i in range(128)]
+             if plan.get('circular') else [(ox,oy),(ox+tw*scale,oy),(ox+tw*scale,oy+th*scale),(ox,oy+th*scale)])
     d.polygon(outline,'#e9e8e0','#697a83',1.3)
     for at in range(0,math.ceil(tw),5):
         d.line([(ox+at*scale,oy),(ox+at*scale,oy+th*scale)],'#d9ded8',.6)
@@ -113,6 +115,9 @@ def card(d, plan, x, y, w, h, scale):
         d.line([(ox,oy+at*scale),(ox+tw*scale,oy+at*scale)],'#d9ded8',.6)
     for f in plan['floors']:
         d.polygon([p(v) for v in f], '#f5f1e4','#b3ae9d',.7)
+    if plan.get('circular') and not plan.get('central_hill'):
+        hx,hy=p(plan['hill_center'])
+        d.text(hx,hy-10,f'COLLINA +{plan["hill_height_m"]:.1f} m',12,color='#72894f',bold=True,center=True)
     # Ground constructions first; upper footprints use a lighter outline.
     solids=sorted(plan['solids'],key=lambda s:min(v[2] for v in s['corners']))
     for s in solids:
@@ -167,12 +172,12 @@ def card(d, plan, x, y, w, h, scale):
     if 'ground_floor_area_m2' in plan:
         floor=plan['ground_floor_area_m2']
         d.text(x+24,y+h-102,f'Pavimento utile {floor:,.0f} m² · {floor/(tw*th)*100:.0f}% della pianta'.replace(',',' '),15,color='#53636b')
-    d.text(x+24,y+h-78,f'Obiettivo {n*1000:g} m² ±10% · scarto {(tw*th/(n*1000)-1)*100:+.1f}%',15,color='#53636b')
+    d.text(x+24,y+h-78,f'Obiettivo {n*1000:g} m² ±10% · scarto {(area/(n*1000)-1)*100:+.1f}%',15,color='#53636b')
     note=NOTES[ident] if n<=2 else 'Vincoli e topologia adattati alla squadra'
     if ident=='FireTraining':
         note=f'{plan["naves"]} '+('navata' if plan['naves']==1 else 'navate')+f' · {plan["bays"]} campate lungo la mappa'
     elif ident=='CentralBuilding':
-        note='Arena quasi quadrata · nucleo centrale e tetto'
+        note=('Arena circolare · '+('edificio sulla collina' if plan.get('central_hill') else 'edificio a ovest · collina a est') if plan.get('circular') else 'Arena rettangolare · nucleo centrale e tetto')
     elif ident=='Rooms':
         shapes={'rectangular':'sale rettangolari','compact':'sale compatte','irregular':'sale sagomate'}
         note=(f'4 stanze · {shapes.get(plan.get("hall_shape"),"sale centrali")}' + (' · passaggio centrale' if plan.get('hall_connection') else ' · sale separate') if plan["rooms"]==4 else f'{plan["rooms"]} stanze · '+('gallerie e incrocio su 2 quote' if plan.get('upper_crossing',True) else 'rete di corridoi al piano terra'))
@@ -280,7 +285,7 @@ def main():
     plans=json.loads(export.read_text())
     if not plans or any(q['team_size']!=args.team_size for q in plans) or (not args.reuse and {q['seed'] for q in plans} != set(args.seeds)):
         raise SystemExit('Invalid native export')
-    if any(not .9*args.team_size*1000-.01 <= q['dimensions_m'][0]*q['dimensions_m'][1] <= 1.1*args.team_size*1000+.01 for q in plans):
+    if any(not .9*args.team_size*1000-.01 <= q['area_m2'] <= 1.1*args.team_size*1000+.01 for q in plans):
         raise SystemExit('Native export violates the500m²/player area budget; regenerate')
     output=(args.output or folder/f'{args.team_size}v{args.team_size}').resolve()
     render(plans,output)

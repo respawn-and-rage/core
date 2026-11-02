@@ -129,6 +129,7 @@ bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<F
         TArray<FOption> Options;
         for(const auto& K:V.Widths)for(int32 Count=V.MinNaves;Count<=V.MaxNaves;++Count)for(int32 N=V.MinBays;N<=V.MaxBays;++N)
         {
+            if(T.ReflectionBuild && N%2!=0)continue;
             const float Total=K.WidthCm*Count,Area=T.SizingTeamSize>0 ? (Total+60)*(420.f*N+80)/1e4f:Total*420.f*N/1e4f;
             if(Area>=V.FloorArea.X && Area<=V.FloorArea.Y && 420.f*N<=Total*V.MaxAspect && 420.f*N+80>=(Total+60)*1.2f)Options.Add({&K,Count,N});
         }

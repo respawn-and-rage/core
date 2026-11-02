@@ -1,6 +1,6 @@
 # Weapons
 
-**Code:** `ERWeapon.h/.cpp` (`UERWeaponData`, `AERWeapon`, `AERProjectile`), `ERWeaponBallistics.h`, `ERShotTrace`, `ERShotEffects`, `ERWounds`, `ERWorldWeaponPose`, `ERLoadout`; fire entry point in `ERCharacter`.
+**Code:** `ERWeapon.h/.cpp` (`UERWeaponData`, `AERWeapon`, `AERProjectile`), `ERWeaponBallistics.h`, `ERShotTrace`, `ERShotHistory`, `ERShotEffects`, `ERWounds`, `ERWorldWeaponPose`, `ERLoadout`; fire entry point in `ERCharacter`.
 
 ## Add or change a weapon
 
@@ -62,7 +62,21 @@ CS2 seeds or spray paths: never claim CS2 parity.
 
 ## Damage
 
-- Bullets: immediate server line traces on the Projectile channel. Range attenuation
+- Bullets: server anatomical traces with a 2cm edge tolerance, used only if no exact body
+  intersection exists on that target. Exact hits retain their anatomical zone. Bodies remain
+  smaller than some clothing and boots; the tolerance trades fewer visible misses for a small
+  margin outside the figure. Melee retains exact current-time body traces.
+  `UERPostureMesh` pushes its procedural pose to the physics bodies and records server poses.
+  Remote bullet queries interpolate this history using a server estimate of RTT/2, capped at 200ms.
+  Local shots use current bodies. No client timestamp, aim direction or hit result is trusted.
+  This conservative estimate does not reconstruct replication/interpolation delay, jitter,
+  animation phase or movement-packet timing exactly.
+  Wounds map the historical contact back onto the current bone.
+  Queries transform rays into each body's current frame without moving live bodies. History
+  resets across mesh changes, death and large teleports; missing history falls back to current
+  bodies. Cover is tested in its current state, including the actual edge contact point, and
+  penetration retains its shared HP budget. A remote trigger runs after that frame's moves and
+  the owner sends its move at once, so the shot uses the received view. Range attenuation
   `damage * RangeModifier^(distance_cm/1270)`. Hit zones on skeletal bodies: head 4
   (deagle 3.9), stomach 1.25, chest/arms 1, legs .75. Fractional damage is preserved.
 - Armor: `ArmorRatio/2`, consuming half the prevented damage. Legs bypass armor; head uses
@@ -127,5 +141,6 @@ each model's licence, including Milkor's CC BY-NC. Sources: private
 ## Verify
 
 Always `test-reference-weapons.py` (`--render` for viewmodels), then as relevant:
-`test-arsenal.py`, `test-scopes.py --render`, `test-world-poses.py`, `test-network.py --shot-feedback`.
-Native: `EclipseRecoil.Weapons.ReferenceBallistics`. Saved assets: `verify_sketchfab_weapons.py`.
+`test-arsenal.py`, `test-scopes.py --render`, `test-world-poses.py`, `test-network.py --shot-feedback`,
+`test-hit-fidelity.py` (rendered figure against hit bodies; `--lag 0 25 50` for two-peer shot timing).
+Native: `EclipseRecoil.Weapons.ReferenceBallistics`, `EclipseRecoil.Weapons.ShotHistory`. Saved assets: `verify_sketchfab_weapons.py`.

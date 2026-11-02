@@ -8,7 +8,7 @@
 | `central_building` | `L_CentralBuilding` | `DA_CentralBuilding` | yes |
 | `middle_eastern_alleys` | `L_MiddleEasternAlleys` | `DA_MiddleEasternAlleys` | yes |
 | `fire_training` | `L_FireTraining` | `DA_FireTraining` | yes |
-| `rooms` | `L_Rooms` | `DA_Rooms` | yes |
+| `rooms` | `L_Rooms` | `DA_Rooms` | offline only |
 | `village` | `L_Village` | `DA_Village` | yes |
 | `depot` | `L_Depot` | fixed reference | offline only |
 
@@ -21,9 +21,19 @@ Recipes live in `Art/MapTemplates`. Reproduce a layout with
 
 - `ERProcedural::Build` is deterministic from the replicated seed and validates before
   committing; invalid layouts are rejected atomically. Each peer repeats the same bounded
-  attempts (16, or 256 for alleys), and the attempt index enters the digest.
-- **Half-turn pairing:** sample one half, rotate geometry, spawns and fixed collision 180°.
-  Teams never roll independently. Symmetry is not a claim of balance.
+  attempts (16, or 1024 for alleys), and the attempt index enters the digest.
+- **Paired symmetry:** sample one half, then apply the recipe’s half-turn or reflection
+  across Y=0 to geometry, spawns and collision. `EERTemplateSymmetry::Mirror` is available
+  to every template. Specialized generators fold their canonical construction at the axis,
+  reflecting cell grids with positive unit scale and reversing skin winding and openings.
+  Oblique cell seams are rejected atomically; imported members stay whole and are
+  paired by reflection without being resized. Teams never
+  roll independently. Symmetry is not a claim of balance.
+- **No initial spawn exposure:** every opposing start pair must have blocked visibility and
+  direct projectile lines on the intact map, at every supported size and seed. The common
+  gameplay builder requires opaque known-solid cover, then authority checks real collision
+  before publishing an epoch or allowing players in. Candidate selection is optional; this
+  rule is not. Exhausted retries fail closed. Destruction may open lines later.
 - Walkable decks, roofs and treads use solid surfaces with matching visible and collision
   geometry. Detailed art never provides a walkable surface.
 - All peers rebuild the same layout behind the loading gate. See [DESTRUCTION.md](DESTRUCTION.md).
@@ -35,11 +45,14 @@ Recipes live in `Art/MapTemplates`. Reproduce a layout with
 
 `Map.ExpectedTeamSize` (1..16) budgets **500m² per expected player**:
 `target area = team size × 1000m²`, **±10% of area**, not per axis. Upper floors, roofs and
-lower passages do not count; Rooms counts its enclosing rectangle. No saturation at 8.
+lower passages do not count; Rooms counts its enclosing rectangle. Central Building counts
+the circular footprint (`PlayableAreaM2`), rather than its bounding square. No saturation at 8.
 
 `ERMapSizing.cpp` configures transient recipe copies: structural counts, spacing and bounds.
 It never scales characters, portals, stairs, ladders, kit meshes, material thickness or cells.
-Zero keeps authored studies. The size travels in the protocol descriptor.
+Zero keeps geometry-only authored editor studies, not gameplay approval. Hosted games always
+apply the server’s positive team-size rule and mandatory spawn validation. The size travels
+in the protocol descriptor.
 Admission, capacity and bot counts are independent of it.
 
 ```sh

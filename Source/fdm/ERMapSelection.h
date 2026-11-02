@@ -49,8 +49,8 @@ namespace ERMapSelection
     // Hard rules and ranges for one analysed candidate.
     void Judge(FERMapCandidate& Candidate,const FERPlayabilityReport& Report,const FERMapSelectionProfile& Profile);
     // Best preference among clean candidates. The plain seed keeps any tie, so a map only moves
-    // for a reason; the seed breaks other ties. With no clean candidate: the first layout, marked
-    // as fallback, because no range outweighs a broken rule.
+    // for a reason; the seed breaks other ties. A fallback must still block initial spawn sight;
+    // return INDEX_NONE when no built candidate satisfies that mandatory rule.
     int32 Decide(const TArray<FERMapCandidate>& Candidates,int32 Seed,bool& bFallback);
     // One more point for each best clean candidate that a central breach leaves no worse. Layout
     // sight can overstate but never misses a line, so this only ever passes over a candidate.

@@ -3,6 +3,7 @@
 #include "ERBotController.h"
 #include "ERProceduralMap.h"
 #include "ERSpawnRisk.h"
+#include "ERMapPlayability.h"
 #include "Components/CapsuleComponent.h"
 #include "EngineUtils.h"
 
@@ -103,6 +104,19 @@ AERTeamPlayerStart* AERGameMode::FindAdditionalStart(AController* Player, TConst
                 { Supported = false; break; }
             }
             if (!Supported) continue;
+            // Initial overflow/training starts obey the same rule as recipe
+            // starts. After destruction, ordinary respawn risk scoring applies.
+            bool Occluded=true;
+            for(TActorIterator<AERProceduralMap> Map(GetWorld());Map;++Map)
+                if(Map->LayoutConfig.TemplateAsset && Map->LayoutConfig.ExpectedTeamSize>0 && Map->GetCellWorld().GetRemovedCount()==0 && Map->GetCellWorld().GetDetachedCount()==0)
+                {
+                    FERProceduralLayout Starts;Starts.AlphaSpawns.Add(FTransform(Position+FVector(0,0,100-HalfHeight-2)));
+                    const auto Team=Player->GetPlayerState<AERPlayerState>()->Team;
+                    for(TActorIterator<AERTeamPlayerStart> Opponent(GetWorld());Opponent;++Opponent)
+                        if(Opponent->Team!=EERTeam::None && Opponent->Team!=Team)Starts.OmegaSpawns.Add(FTransform(Opponent->GetActorLocation()+FVector(0,0,Opponent->ActorHasTag(AdditionalStartTag) ? 100-HalfHeight-2:0)));
+                    Occluded&=Map->IsMapReady() && ERPlayability::InitialSpawnsOccludedInWorld(GetWorld(),FTransform::Identity,Starts);
+                }
+            if(!Occluded)continue;
             auto* Start = GetWorld()->SpawnActor<AERTeamPlayerStart>(Position, Anchor->GetActorRotation());
             if (!Start) return nullptr;
             Start->Team = Player->GetPlayerState<AERPlayerState>()->Team;
@@ -144,6 +158,8 @@ AActor* AERGameMode::ChoosePlayerStart_Implementation(AController* Player)
 {
     auto* State = Player ? Player->GetPlayerState<AERPlayerState>() : nullptr;
     if (!State) return nullptr;
+    for(TActorIterator<AERProceduralMap> Map(GetWorld());Map;++Map)
+        if(Map->LayoutConfig.TemplateAsset && !Map->IsMapReady())return nullptr;
     PrepareTeamStarts();
     const auto* Capsule = DefaultPawnClass->GetDefaultObject<ACharacter>()->GetCapsuleComponent();
     const auto Shape = FCollisionShape::MakeCapsule(Capsule->GetScaledCapsuleRadius(), Capsule->GetScaledCapsuleHalfHeight());

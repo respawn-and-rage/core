@@ -3,6 +3,7 @@
 #include "Sound/SoundBase.h"
 #include "ERClaymore.h"
 #include "ERShotTrace.h"
+#include "ERPostureMesh.h"
 #include "Engine/DamageEvents.h"
 #include "ERShotEffects.h"
 #include "ERMovement.h"
@@ -464,13 +465,25 @@ void AERWeapon::TryFire()
             *Character->GetName(),Character->GetAimPunchState().Sequence,Now,FPlatformTime::Seconds(),P.Pitch,P.Yaw,Aim.Pitch,Aim.Yaw);
     }
 #endif
+#if !UE_BUILD_SHIPPING
+    if(FParse::Param(FCommandLine::Get(),TEXT("ERHitLagProbe")))
+        for(TActorIterator<AERCharacter> It(GetWorld());It;++It)if(*It!=Character)
+        {
+            const double QueryTime=ERShotTrace::BulletTime(Character);
+            FVector Historical=It->GetMesh()->GetBoneLocation(TEXT("spine_03"));TArray<FTransform> Pose;
+            if(const auto* Posture=Cast<UERPostureMesh>(It->GetMesh()))Posture->ShotHistory.Sample(QueryTime,Pose,&Historical);
+            UE_LOG(LogTemp,Display,TEXT("ER_HIT_LAG_SERVER shot=%u target=%s yaw=%.3f"),AuthorizedShotCount,*It->GetMesh()->GetBoneLocation(TEXT("spine_03")).ToCompactString(),Aim.Yaw);
+            UE_LOG(LogTemp,Display,TEXT("ER_HIT_LAG_REWOUND shot=%u target=%s yaw=%.3f rewind_ms=%.1f"),AuthorizedShotCount,*Historical.ToCompactString(),Aim.Yaw,(Now-QueryTime)*1000);
+        }
+#endif
     // Camera height is explicit: no animated socket is required for authoritative collision.
     Eye = Character->Camera->GetComponentLocation();
     FCollisionQueryParams Params(SCENE_QUERY_STAT(ERRifle), false, Character); Params.AddIgnoredActor(this);
+    const double ShotTime=Tuned()->Payload==EERPayload::Bullet ? ERShotTrace::BulletTime(Character):-1;
     FHitResult ViewHit;
     const FVector Far = Eye + Aim.Vector() * FMath::Max(1.f, Tuned()->HitscanRange);
     const bool bViewHit = Tuned()->Payload == EERPayload::Bullet && Tuned()->bUseBodyHitZones ?
-        ERShotTrace::Pellet(GetWorld(), ViewHit, Eye, Far, Params) :
+        ERShotTrace::Pellet(GetWorld(), ViewHit, Eye, Far, Params, ShotTime) :
         GetWorld()->LineTraceSingleByChannel(ViewHit, Eye, Far, ECC_GameTraceChannel1, Params);
     const FVector Target = bViewHit ? ViewHit.ImpactPoint : Far;
     FVector IntendedMuzzle = Eye + Aim.RotateVector(FVector(45, 12, -12));
@@ -560,7 +573,7 @@ void AERWeapon::TryFire()
                 (Pellet == 0 ? LastShotDirection : ShotRandom.VRandCone(LastShotAimDirection, FMath::DegreesToRadians(LastShotSpreadDegrees)));
             FHitResult Hit = MuzzleHit;
             const FVector TraceEnd = PelletStart + Direction * FMath::Max(1.f, Tuned()->HitscanRange);
-            const bool bHit = PelletBlocked || (Tuned()->bUseBodyHitZones ? ERShotTrace::Pellet(GetWorld(),Hit,PelletStart,TraceEnd,Params) :
+            const bool bHit = PelletBlocked || (Tuned()->bUseBodyHitZones ? ERShotTrace::Pellet(GetWorld(),Hit,PelletStart,TraceEnd,Params,ShotTime) :
                 GetWorld()->LineTraceSingleByChannel(Hit, IntendedMuzzle, TraceEnd, ECC_GameTraceChannel1, Params));
             ++LastShotTraceCount;
             FVector PelletEnd=bHit ? Hit.ImpactPoint : TraceEnd;

@@ -299,5 +299,11 @@ void UERPostureMesh::FinalizeBoneTransform()
             }
         }
     }
+    // The engine pushes kinematic bodies before this override. Server hit volumes
+    // must take the visible procedural pose, or bullets test an arm and head that moved.
+    if(C && C->HasAuthority() && !Bodies.IsEmpty())
+        UpdateKinematicBonesToAnim(GetEditableComponentSpaceTransforms(),ETeleportType::TeleportPhysics,false,EAllowKinematicDeferral::DisallowDeferral);
     Super::FinalizeBoneTransform();
+    if(C && C->HasAuthority() && !C->Health->bDead && !Bodies.IsEmpty())ShotHistory.Record(this);
+    else ShotHistory.Frames.Reset();
 }
