@@ -58,6 +58,11 @@ with tempfile.TemporaryDirectory(prefix='rr-package-user-') as user:
                '-unattended', '-nosound', '-NoSplash', '-stdout', '-FullStdOutLogOutput',
                '-UserDir=' + user, '-Seconds=' + str(args.seconds), '-ERPerformanceAudit']
     command += ['-RenderOffscreen', '-windowed', '-ResX=' + str(args.width), '-ResY=' + str(args.height)] if args.render else ['-nullrhi']
+    if sys.platform == 'darwin':
+        # UE 5.8 can clear LLM thread state during command-line processing on
+        # the game thread while AppKit still holds an allocator LLM scope on
+        # the main thread. Keep tracking enabled so that scope can pop safely.
+        command.append('-llm')
     if args.shader_model:
         command.append('-' + args.shader_model)
     with log.open('w') as stream:

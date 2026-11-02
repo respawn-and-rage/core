@@ -30,6 +30,13 @@ Development packages boot every configured map offline and as a listen server wi
 bots, then render SM5 and SM6 offscreen; receipts are in `runtime-smoke/`. This needs
 an SM6-capable Mac (M2+, macOS 15+). A menu-only smoke test misses real failures.
 
+The macOS runtime smoke helper passes `-llm` to keep Unreal's low-level memory
+tracker enabled. UE 5.8 can otherwise clear the main thread's tracker state while
+AppKit holds an allocator scope during startup, causing `FLLMTracker::PopTag` to
+assert before map loading. Use `-llm` for direct Development app launches too;
+this is a launch workaround, not an engine patch. Shipping disables this tracker
+at compile time.
+
 ```sh
 python3 scripts/test-packaged-runtime.py --executable <App>/Contents/MacOS/RespawnAndRage --all-maps
 python3 scripts/test-packaged-runtime.py --executable <App>/Contents/MacOS/RespawnAndRage --render --shader-model sm5

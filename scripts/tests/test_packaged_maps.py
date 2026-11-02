@@ -28,6 +28,7 @@ class PackagedMapsTests(unittest.TestCase):
         package = '/Game/EclipseRecoil/Maps/L_FireTraining'
         def launch(command, stdout, **kwargs):
             self.assertTrue(command[1].startswith(package + ('?listen?' if listen else '?')))
+            self.assertEqual('-llm' in command, sys.platform == 'darwin')
             text = ('ER_RENDER_PROFILE aa=2 gi=0 reflections=0 shadows=1\n'
                     'ER_WEAPON_MODEL name=Pistol\n' + 'ER_BOT_JOINED\n' * 6)
             if loaded:
