@@ -237,29 +237,32 @@ bool FERMapStressRulesTest::RunTest(const FString&)
 }
 
 // Support is only read after damage, so anything that floats on a fresh map falls at the first shot.
+// Village must have none. The others report what they have.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERMapFreshSupportTest,"EclipseRecoil.Maps.Stress.FreshSupport",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FERMapFreshSupportTest::RunTest(const FString&)
 {
+    const auto Teams=SelectionList(TEXT("ERPlayabilityTeams="),TEXT("2,4,8"));
     const auto Seeds=SelectionList(TEXT("ERPlayabilitySeeds="),TEXT("42,73,7919"));
-    FString Rows=TEXT("archetype,seed,panel,cells,material,skin,anchor_bottom,anchored,solid_skin,indestructible,size_x,size_y,size_z,z\n");
+    FString Rows=TEXT("archetype,team,seed,panel,cells,material,skin,anchor_bottom,anchored,solid_skin,indestructible,size_x,size_y,size_z,z\n");
     for(const TCHAR* Id:SelectionTemplates)
     {
         auto* T=SelectionRecipe(Id);if(!TestNotNull(Id,T))return false;
         auto* World=SelectionWorld();if(!World)return false;
-        auto* Map=World->SpawnActor<AERProceduralMap>();Map->LayoutConfig.TemplateAsset=T;Map->LayoutConfig.ExpectedTeamSize=4;
-        for(int32 Seed:Seeds)
+        auto* Map=World->SpawnActor<AERProceduralMap>();Map->LayoutConfig.TemplateAsset=T;
+        for(int32 Team:Teams)for(int32 Seed:Seeds)
         {
-            Map->LayoutConfig.Seed=Seed;
-            if(!Map->Regenerate()){AddError(FString::Printf(TEXT("%s seed%d did not generate"),Id,Seed));continue;}
+            Map->LayoutConfig.ExpectedTeamSize=Team;Map->LayoutConfig.Seed=Seed;
+            if(!Map->Regenerate()){AddError(FString::Printf(TEXT("%s %dv%d seed%d did not generate"),Id,Team,Team,Seed));continue;}
             FERCellSupport Support=Map->GetSupport();TArray<TArray<FERCellId>> Loose;
             Support.Evaluate(Map->GetCellWorld(),Loose);
             TMap<int32,int32> Cells;for(const auto& Component:Loose)for(const auto& Cell:Component)Cells.FindOrAdd(Cell.Panel)+=1;
             int32 Total=0;for(const auto& Item:Cells)Total+=Item.Value;
-            UE_LOG(LogTemp,Display,TEXT("ER_FRESH_SUPPORT %s seed=%d loose=%d components=%d panels=%d of=%d"),Id,Seed,Total,Loose.Num(),Cells.Num(),Map->GetCellWorld().GetPanels().Num());
+            UE_LOG(LogTemp,Display,TEXT("ER_FRESH_SUPPORT %s team=%d seed=%d loose=%d components=%d panels=%d of=%d"),Id,Team,Seed,Total,Loose.Num(),Cells.Num(),Map->GetCellWorld().GetPanels().Num());
+            if(T->Archetype==EERMapArchetype::Village)TestEqual(*FString::Printf(TEXT("Village %dv%d seed%d stands on a fresh map"),Team,Team,Seed),Total,0);
             for(const auto& Item:Cells)
             {
                 const auto& P=Map->GetCellWorld().GetPanels()[Item.Key];
-                Rows+=FString::Printf(TEXT("%s,%d,%d,%d,%d,%s,%d,%d,%d,%d,%g,%g,%g,%g\n"),Id,Seed,Item.Key,Item.Value,int32(P.Material),*P.SkinName.ToString(),P.bAnchorBottom,P.bAnchored,P.bSolidSkin,P.bIndestructible,P.Size.X,P.Size.Y,P.Size.Z,P.Transform.GetLocation().Z);
+                Rows+=FString::Printf(TEXT("%s,%d,%d,%d,%d,%d,%s,%d,%d,%d,%d,%g,%g,%g,%g\n"),Id,Team,Seed,Item.Key,Item.Value,int32(P.Material),*P.SkinName.ToString(),P.bAnchorBottom,P.bAnchored,P.bSolidSkin,P.bIndestructible,P.Size.X,P.Size.Y,P.Size.Z,P.Transform.GetLocation().Z);
             }
         }
         CloseSelectionWorld(World);

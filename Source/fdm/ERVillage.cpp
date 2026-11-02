@@ -102,7 +102,7 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     {
         if(!Source || !Source->Source || Source->Corners.IsEmpty() || Source->Corners.Num()>30000)return false;
         FERCellPanelDesc P;P.Id=Id++;P.Material=EERBlockMaterial::Wood;P.Size=Size;
-        P.Transform=FTransform(Center-Size*.5);P.bAnchorBottom=true;
+        P.Transform=FTransform(Center-Size*.5);P.bAnchorBottom=true;P.AnchorHeight=30;
         P.Cell={FERCellWorld::FitCell(Size.X,Cells.CellSize),FERCellWorld::FitCell(Size.Y,Cells.WoodDepth),FERCellWorld::FitCell(Size.Z,Cells.CellSize)};
         P.Surface=Source->Source->GetMaterial(0);P.Skin=Source->Corners;
         P.SkinCRC=Source->GeometryCRC;P.SkinName=Source->Source->GetFName();
@@ -149,6 +149,14 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     // on the preceding floor so they never close the ground doglegs.
     auto Deck=[&](float X,float Y,float Width,float Depth,float Height,float SupportZ=0.f,const TArray<FBox>& Holes=TArray<FBox>())
     {
+        // A plank stub past a well that reaches no beam, or a beam end under no plank, would stand on nothing.
+        const float BeamY[]={Y-(Depth*.5f-25),Y,Y+(Depth*.5f-25)};
+        auto Holed=[&](float X0,float X1,float Y0,float Y1){return Holes.ContainsByPredicate([&](const FBox& H){return X1>H.Min.X && X0<H.Max.X && Y1>H.Min.Y && Y0<H.Max.Y;});};
+        auto OnBeam=[&](float X0,float X1,float Y0,float Y1)
+        {
+            for(float CY:BeamY)if(Y1>CY-10 && Y0<CY+10 && !Holes.ContainsByPredicate([&](const FBox& H){return X0>=H.Min.X && X1<=H.Max.X && CY+10>H.Min.Y && CY-10<H.Max.Y;}))return true;
+            return false;
+        };
         auto Strip=[&](float X0,float X1,float Y0,float Y1,float CZ,float H)
         {
             TArray<FVector2D> Segments{{Y0,Y1}};
@@ -159,19 +167,24 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
                 {if(Hole.Min.Y>S.X)Next.Add({S.X,FMath::Min(S.Y,Hole.Min.Y)});if(Hole.Max.Y<S.Y)Next.Add({FMath::Max(S.X,Hole.Max.Y),S.Y});}
                 Segments=MoveTemp(Next);
             }
-            for(const auto& S:Segments)if(S.Y>S.X+.1)Wood({(X0+X1)*.5f,(S.X+S.Y)*.5f,CZ},{X1-X0,S.Y-S.X,H});
+            for(const auto& S:Segments)if(S.Y>S.X+.1 && OnBeam(X0,X1,S.X,S.Y))Wood({(X0+X1)*.5f,(S.X+S.Y)*.5f,CZ},{X1-X0,S.Y-S.X,H});
         };
         const int32 N=FMath::RoundToInt(Width/28);const float Pitch=Width/N;
+        auto UnderPlank=[&](float X0,float X1,float CY)
+        {
+            for(int32 I=0;I<N;++I){const float A=X-Width*.5f+I*Pitch;if(X1>A && X0<A+Pitch && !Holed(A,A+Pitch,CY-10,CY+10))return true;}
+            return false;
+        };
         for(int32 I=0;I<N;++I){const float A=X-Width*.5f+I*Pitch;Strip(A+.15f,A+Pitch-.15f,Y-Depth*.5f,Y+Depth*.5f,Height-3,6);}
         // Transverse beams stop at wells rather than passing through a climber.
-        for(float DY:{-1.f,0.f,1.f})
+        for(float CY:BeamY)
         {
-            const float CY=Y+DY*(Depth*.5f-25);TArray<FVector2D> Segments{{X-Width*.5f,X+Width*.5f}};
+            TArray<FVector2D> Segments{{X-Width*.5f,X+Width*.5f}};
             for(const auto& Hole:Holes)if(CY+10>Hole.Min.Y && CY-10<Hole.Max.Y)
             {
                 TArray<FVector2D> Next;for(const auto& S:Segments){if(Hole.Min.X>S.X)Next.Add({S.X,FMath::Min(S.Y,Hole.Min.X)});if(Hole.Max.X<S.Y)Next.Add({FMath::Max(S.X,Hole.Max.X),S.Y});}Segments=MoveTemp(Next);
             }
-            for(const auto& S:Segments)if(S.Y>S.X+.1)Wood({(S.X+S.Y)*.5f,CY,Height-11},{S.Y-S.X,20,10});
+            for(const auto& S:Segments)if(S.Y>S.X+.1 && UnderPlank(S.X,S.Y,CY))Wood({(S.X+S.Y)*.5f,CY,Height-11},{S.Y-S.X,20,10});
         }
         for(float DX:{-.45f,-.15f,.15f,.45f})for(float DY:{-1.f,1.f})
         {
@@ -294,8 +307,9 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
                 if(Plan.SelfSymmetric && RoomSide>0)continue;
                 const float RW=(RoomW-190)*.5f,CX=BX+RoomSide*RoomX+Side*(95+RW*.5f),CY=BY+D*.5f-35;
                 Wood({CX,CY,Floor+62.5f},{RW,24,125});GraySheet({CX,CY+12.1f,Floor+62.5f},{RW,.2f,125});GraySheet({CX,CY,Floor+125.1f},{RW,26,.2f});
-                Wood({BX+RoomSide*RoomX+Side*(RoomW*.5f+20),CY-40,Floor+62.5f},{24,80,125});
-                GraySheet({BX+RoomSide*RoomX+Side*(RoomW*.5f+32.1f),CY-40,Floor+62.5f},{.2f,80,125});
+                // The return meets the wall: over a ladder well no plank would carry it.
+                Wood({BX+RoomSide*RoomX+Side*(RoomW*.5f+12),CY-40,Floor+62.5f},{24,80,125});
+                GraySheet({BX+RoomSide*RoomX+Side*(RoomW*.5f+24.1f),CY-40,Floor+62.5f},{.2f,80,125});
                 FERLayoutCover Cover;Cover.Frame=FTransform(FVector(CX,CY,Floor));Cover.Size={RW,24,125};Cover.Material=EERBlockMaterial::Wood;Cover.HalfHeight=60;
                 Cover.Hide={CX,CY-50,Floor+60};Cover.Entry={BX+RoomSide*RoomX,CY-50,Floor+60};Cover.SightFrom={CX,CY+400,Floor+110};Cover.SightTo={CX,CY-50,Floor+110};
                 L.CoverSites.Add(Cover);Cover.Frame=Cover.Frame*HalfTurn;for(FVector* P:{&Cover.Hide,&Cover.Entry,&Cover.SightFrom,&Cover.SightTo})*P=HalfTurn.TransformPosition(*P);L.CoverSites.Add(Cover);

@@ -62,12 +62,12 @@ bool AERCorpse::BuildFieldGear(UStaticMesh* Mesh, bool bHelmet, bool bOutwardFac
         const float MinAngle = Hemisphere ? -.12f : -PI*.5f;
         auto Point = [&](int32 R, int32 S)
         {
-            const float Elevation = FMath::Lerp(MinAngle, PI*.5f-.001f, float(R)/Rings);
+            const float Latitude = FMath::Lerp(MinAngle, PI*.5f-.001f, float(R)/Rings);
             const float Angle = 2*PI*float(S)/Sides;
             // Superellipsoid makes bags box-shaped with softened corners.
             auto Shape = [&](float X) { return Hemisphere ? X : FMath::Sign(X)*FMath::Pow(FMath::Abs(X), .28f); };
-            return Center + Radius*FVector(Shape(FMath::Cos(Elevation))*Shape(FMath::Cos(Angle)),
-                Shape(FMath::Cos(Elevation))*Shape(FMath::Sin(Angle)), Shape(FMath::Sin(Elevation)));
+            return Center + Radius*FVector(Shape(FMath::Cos(Latitude))*Shape(FMath::Cos(Angle)),
+                Shape(FMath::Cos(Latitude))*Shape(FMath::Sin(Angle)), Shape(FMath::Sin(Latitude)));
         };
         for (int32 R=0; R<Rings; ++R) for (int32 S=0; S<Sides; ++S)
         {

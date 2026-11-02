@@ -105,7 +105,7 @@ void FERCellSupport::Relabel(const FERCellWorld& World, int32 Index)
     L.Revision=C.Revision;L.Count=0;L.Uniform=C.AliveCount==Bits;L.Label.Reset();L.Sparse.Reset();L.Anchored.Reset();
     if(L.Uniform)
     {
-        L.Count=1;L.Anchored.Add(P.bAnchored || P.bIndestructible || ((P.bAnchorBottom || GroundPanel[C.Panel]) && C.Z0==0));++LastRelabelled;return;
+        L.Count=1;L.Anchored.Add(P.bAnchored || P.bIndestructible || ((P.bAnchorBottom || GroundPanel[C.Panel]) && C.Z0==0) || (P.bAnchorBottom && C.Z0*P.Cell.Z<P.AnchorHeight));++LastRelabelled;return;
     }
     if(!C.AliveCount){L.Label.Empty();L.Sparse.Empty();++LastRelabelled;return;}
     L.Label.Init(INDEX_NONE,Bits);

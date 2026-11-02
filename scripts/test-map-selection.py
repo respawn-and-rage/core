@@ -76,8 +76,9 @@ for (template, selected, scenario), group in sorted(scenarios.items()):
 loose = {}
 for row in csv.DictReader((reports/'fresh-support.csv').open()):
     plans = loose.setdefault(row['archetype'], {})
-    plans[row['seed']] = plans.get(row['seed'], 0)+int(row['cells'])
+    key = row['team'], row['seed']
+    plans[key] = plans.get(key, 0)+int(row['cells'])
 print('cells no anchor holds on a fresh map, which fall at the first damage anywhere:')
 for template, plans in sorted(loose.items()):
-    print(f'  {template:20} {len(plans)}/{len(seeds.split(","))} seeds, up to {max(plans.values())} cells')
+    print(f'  {template:20} {len(plans)}/{len(seeds.split(","))*len(args.teams.split(","))} plans, up to {max(plans.values())} cells')
 print('Map selection: PASS')

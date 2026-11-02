@@ -61,8 +61,8 @@ several; concrete and stone resist by design. Never claim a fixed grenade count 
 
 `FERCellSupport`: nodes are face-connected components within a chunk, edges per chunk pair
 (neighbours plus precomputed panel contacts), refreshed only for changed chunks. Union-find
-from anchors (`bAnchorBottom`, `bAnchored`, indestructible, ground rows). This is connectivity,
-not load simulation. Ordinary upper decks are never permanently anchored.
+from anchors (`bAnchorBottom`, also up to `AnchorHeight`; `bAnchored`, indestructible, ground
+rows). This is connectivity, not load simulation. Ordinary upper decks are never permanently anchored.
 
 Evaluation runs on the 50ms timer, never inside a blast snapshot, with bounded removals
 per step (32768 cells). Damage starts it, so a fresh map is never checked: anything built

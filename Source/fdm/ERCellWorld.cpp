@@ -125,7 +125,7 @@ bool FERCellWorld::Build(const TArray<FERCellPanelDesc>& Desc, const FERCellSett
         H = HashCombineFast(H, ::GetTypeHash(D.Id)); H = HashCombineFast(H, ::GetTypeHash(uint8(D.Material)));Mix(D.Strength);
         if(D.Surface)H=HashCombineFast(H,FCrc::StrCrc32(*D.Surface->GetPathName()));
         if(D.InteriorSurface)H=HashCombineFast(H,FCrc::StrCrc32(*D.InteriorSurface->GetPathName()));
-        H = HashCombineFast(H, ::GetTypeHash(uint32(D.bPane) | (uint32(D.bIndestructible) << 1) | (uint32(D.bAnchorBottom) << 2) | (uint32(D.bAnchored) << 3)));
+        H = HashCombineFast(H, ::GetTypeHash(uint32(D.bPane) | (uint32(D.bIndestructible) << 1) | (uint32(D.bAnchorBottom) << 2) | (uint32(D.bAnchored) << 3)));Mix(D.AnchorHeight);
         for (const FBox2D& Hole : D.Holes) { Mix(Hole.Min.X); Mix(Hole.Min.Y); Mix(Hole.Max.X); Mix(Hole.Max.Y); }
         for (const FVector& V : {D.Transform.GetLocation(), D.Transform.GetRotation().GetAxisX(), D.Transform.GetRotation().GetAxisZ(), D.Size, D.Cell}) { Mix(V.X); Mix(V.Y); Mix(V.Z); }
     }
@@ -188,7 +188,7 @@ bool FERCellWorld::IsAnchored(const FERCellId& Id) const
 {
     if (!IsValid(Id)) return false;
     const auto& P = Panels[Id.Panel];
-    return P.bAnchored || P.bIndestructible || (P.bAnchorBottom && Id.Z == 0);
+    return P.bAnchored || P.bIndestructible || (P.bAnchorBottom && (Id.Z == 0 || Id.Z * P.Cell.Z < P.AnchorHeight));
 }
 FERCellBatchResult FERCellWorld::DetachCells(const TArray<FERCellId>& Ids)
 {

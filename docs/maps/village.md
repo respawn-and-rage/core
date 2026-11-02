@@ -12,13 +12,12 @@ storeys from 2.4m, budget of 10 floors.
 - Each base has a variant (gallery, covered porch or barracks), a corner lookout, a side shack
   with roof access. Lateral walls 240cm, with standing bypasses recorded in `VillageSideWalls`
   and `VillageSideBypasses`.
+- Nothing may stand unsupported on a fresh map: decks drop plank and beam stubs beside ladder
+  wells, and imported storage shells hold their lowest 30cm through `AnchorHeight`.
 - 3v3+ uses at least two blocks; paired 4.8×2.4m L shelters meet a ground-cover quota that upper
   floors cannot satisfy.
 - Perimeter: tapered 3.8–4.4m logs with real shot gaps, plus a hidden locomotion-only wall.
 - Backdrop: J&E Gray Park panorama (Greg Zaal, CC0), exterior trees, all skipped on dedicated.
-- Known defect: a few roof beams and pieces of the storage body have no support and fall at the
-  first damage anywhere on the map. See `fresh-support.csv` in
-  [destruction stress](../PROCEDURAL_MAP_PLAYABILITY.md#destruction-stress).
 
 ## Verify
 

@@ -40,6 +40,7 @@ struct FERCellPanelDesc
     TArray<FBox2D> Holes;
     // Support: the bottom row rests on the ground or a fixed slab; or every cell is fixed.
     bool bAnchorBottom = false, bAnchored = false;
+    float AnchorHeight = 0; // With bAnchorBottom, rows below this also hold: a skin's trim may sit clear of its bottom row.
     // A hollow imported shell. Original triangles drive visual AND collision
     // geometry; the ordinary calibrated cells carry damage, support and masks.
     TArray<FERMeshCorner> Skin;

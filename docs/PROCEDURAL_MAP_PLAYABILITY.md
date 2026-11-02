@@ -236,8 +236,8 @@ stands, and real sight may exceed the abstract state only when other cells fell 
 
 Cell support is evaluated only after damage, so anything unsupported on a fresh map stands until the
 first cut anywhere on it. `EclipseRecoil.Maps.Stress.FreshSupport` lists those pieces in
-`fresh-support.csv` without failing: every Village plan loses some loose beams and storage trim this
-way, which shows as `cells_detached` in every Village scenario.
+`fresh-support.csv`, per team size and seed, and fails if a Village plan has any. The other templates
+are only reported: Central Building's fences have a plan with loose panels.
 
 ## Verify
 
