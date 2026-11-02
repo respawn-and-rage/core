@@ -1,15 +1,26 @@
 {
-  "passed": true,
-  "failures": [],
+  "passed": false,
+  "failures": [
+    "source_stat_Pistol_shot_interval",
+    "saved_reload_palm_contact_under_1_5mm_SMG error_cm=1.49023",
+    "saved_reload_palm_contact_under_1_5mm_Carbine error_cm=2.37551",
+    "source_stat_Sniper_shot_interval",
+    "saved_reload_palm_contact_under_1_5mm_Sniper error_cm=1.73483",
+    "source_stat_Launcher_armor_ratio",
+    "saved_reload_palm_contact_under_1_5mm_Launcher error_cm=0.60693",
+    "source_stat_HE_armor_ratio",
+    "saved_sniper_uses_awp_row"
+  ],
   "original_archives": 9,
   "catalog_slots": 10,
   "asset_counts": {
-    "AnimSequence": 123,
-    "ERWeaponData": 10,
-    "Material": 26,
-    "SkeletalMesh": 29,
-    "Skeleton": 29,
-    "Texture2D": 69
+    "AnimSequence": 132,
+    "ERWeaponData": 11,
+    "Material": 29,
+    "SkeletalMesh": 31,
+    "Skeleton": 31,
+    "Texture2D": 78,
+    "StaticMesh": 1
   },
   "weapons": [
     {
@@ -99,7 +110,7 @@
     },
     {
       "key": "HE",
-      "mesh": "/Game/EclipseRecoil/Weapons/Sketchfab/HE/SK_HE.SK_HE",
+      "mesh": "/Game/EclipseRecoil/Weapons/Sketchfab/HE/F1/SK_HE.SK_HE",
       "material_slots": 1,
       "clips": []
     },

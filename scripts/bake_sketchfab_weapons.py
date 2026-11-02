@@ -52,6 +52,13 @@ for key, prefix, gun_parent, scale, clips in models:
     original_objects = list(bpy.data.objects)
     rigs = [o for o in original_objects if o.type == 'ARMATURE']
     gun_objects = [o for o in original_objects if o.type == 'MESH' and 'arm' not in o.name.lower()]
+    if key == 'SMG':
+        # Pmag is the inserted magazine; Pmag_2 is the loose reload prop.
+        # The source also includes an unskinned helper cube.
+        gun_objects = [o for o in gun_objects if o.vertex_groups and
+                       {g.name for g in o.vertex_groups} != {'Pmag_2'}]
+        assert len(gun_objects) == 1 and 'Pmag' in gun_objects[0].vertex_groups, \
+            'SMG source changed: inspect the inserted and spare magazines before baking'
     if key == 'Launcher':
         gun_objects = [o for o in gun_objects if o.name != 'GL_scope']
     if key in ('HE', 'Smoke', 'Projectile'):

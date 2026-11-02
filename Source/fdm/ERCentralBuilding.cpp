@@ -148,15 +148,50 @@ bool BuildCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERMapTempla
         const float Door=CoreX!=0 ? 0:-300,DoorHalf=140;
         auto Facade=[&](float A,float B,float Lo,float Hi)
         {if(B>A && Hi>Lo)Box({(A+B)*.5,-FloorD*.5+10,Z+(Lo+Hi)*.5},{B-A,20,Hi-Lo},MainMaterial);};
+        // Residential facade: repeated windows and a full-height balcony door.
+        // Keep the authored offset entrance and its circulation corridor intact.
+        struct FOpening { float Center,HalfWidth,Sill,Head; };
+        TArray<FOpening> Openings;
         if(Floor==0)
         {
-            Facade(-FloorW*.5,Door-DoorHalf,0,300);Facade(Door+DoorHalf,FloorW*.5,0,300);
-            Facade(Door-DoorHalf,Door+DoorHalf,240,300);
+            Openings.Add({Door,DoorHalf,0,240});
+            Openings.Add({FloorW*.30f,80,90,230});
+            if(Door==0)Openings.Add({-FloorW*.30f,80,90,230});
         }
         else
         {
-            for(float X:{-FloorW*.25,FloorW*.25}){Facade(X-100,X+100,0,100);Facade(X-100,X+100,210,300);}
-            Facade(-FloorW*.5,-FloorW*.25-100,0,300);Facade(-FloorW*.25+100,FloorW*.25-100,0,300);Facade(FloorW*.25+100,FloorW*.5,0,300);
+            Openings.Add({-FloorW*.25f,90,90,230});
+            Openings.Add({FloorW*.25f,90,0,240});
+        }
+        Openings.Sort([](const FOpening& A,const FOpening& B){return A.Center<B.Center;});
+        float Cursor=-FloorW*.5f;
+        for(const auto& Opening:Openings)
+        {
+            Facade(Cursor,Opening.Center-Opening.HalfWidth,0,300);
+            Facade(Opening.Center-Opening.HalfWidth,Opening.Center+Opening.HalfWidth,0,Opening.Sill);
+            Facade(Opening.Center-Opening.HalfWidth,Opening.Center+Opening.HalfWidth,Opening.Head,300);
+            Cursor=Opening.Center+Opening.HalfWidth;
+        }
+        Facade(Cursor,FloorW*.5f,0,300);
+        if(Floor>0)
+        {
+            const float BX=FloorW*.25f,BY=-FloorD*.5f;
+            Slab(BX-150,BX+150,BY-160,BY-(Terraced ? 100:0),Z);
+            // Solid masonry guards are supported by the balcony slab.
+            Box({BX,BY-150,Z+50},{300,20,100},MainMaterial);
+            for(float Sign:{-1.f,1.f})
+                Box({BX+Sign*140,BY-75,Z+50},{20,130,100},MainMaterial);
+            for(float Sign:{-1.f,1.f})L.RoomAccessRoutes.Add({{Sign*BX,Sign*(BY+130),Z+100},{Sign*BX,Sign*(BY-80),Z+100}});
+        }
+        // Paired room wings flank a broad central hall. Open doorways connect
+        // the rooms without intruding into either stairwell or the cross-map route.
+        const float RoomX=FloorW*.5f-340,RoomY=-FloorD*.23f;
+        if(RoomX>450)
+        {
+            Box({-(RoomX+457.5f)*.5f,RoomY,Z+150},{RoomX-457.5f,15,300},MainMaterial);
+            Box({-450,(RoomY+140-200)*.5f,Z+150},{15,-200-RoomY-140,300},MainMaterial);
+            Box({-450,RoomY+70,Z+270},{15,140,60},MainMaterial);
+            for(float Sign:{-1.f,1.f})L.RoomAccessRoutes.Add({{Sign*-320,Sign*(RoomY+70),Z+100},{Sign*-580,Sign*(RoomY+70),Z+100}});
         }
         if(Terraced && Floor>0)
         {
@@ -166,7 +201,19 @@ bool BuildCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERMapTempla
             Box({-FloorW*.5f+10,DoorY,Z+270},{20,240,60},MainMaterial);
             for(float Sign:{-1.f,1.f})L.RoomAccessRoutes.Add({{Sign*(-FloorW*.5f-100),Sign*DoorY,Z+100},{Sign*(-FloorW*.5f+200),Sign*DoorY,Z+100}});
         }
-        else Box({-FloorW*.5+10,0,Z+150},{20,FloorD-40,300},MainMaterial);
+        else
+        {
+            auto SideWall=[&](float A,float B,float Lo,float Hi)
+            {if(B>A && Hi>Lo)Box({-FloorW*.5f+10,(A+B)*.5f,Z+(Lo+Hi)*.5f},{20,B-A,Hi-Lo},MainMaterial);};
+            float Edge=-FloorD*.5f+20;
+            for(float Y:{-FloorD*.25f,FloorD*.25f})
+            {
+                SideWall(Edge,Y-80,0,300);
+                SideWall(Y-80,Y+80,0,90);SideWall(Y-80,Y+80,230,300);
+                Edge=Y+80;
+            }
+            SideWall(Edge,FloorD*.5f-20,0,300);
+        }
         const float DeckZ=Z+Stride;
         if(Terraced && Floor>0)
             Slab(-FloorW*.5,FloorW*.5,-FloorD*.5,FloorD*.5,DeckZ,false);

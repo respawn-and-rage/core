@@ -9,7 +9,8 @@ Crossing is always sampled from the seed: open yard, 3m destructible brick wall 
 bridges and stairs, or fixed fence crossed by the roof or side buildings. `MapCrossing` works only
 under the non-shipping `-ERIndustrialMapProbe`.
 
-- 1–3 storey core of 3.2m floors with stairwells (20cm risers, 30cm treads) and paired
+- 1–3 storey core with 3m clear ceilings and 20cm slabs, windowed facades,
+  paired room wings off a central hall, and accessible upper-floor masonry balconies. Circulation uses stairwells (20cm risers, 30cm treads) and paired
   exterior ladders. OpenYard may shift the core ±8m on X, about its own `SymmetryCenter`, and
   step upper floors back 5m / 2m with terrace ladders.
 - Secondary buildings and towers vary 1–3 floors, materials and yaw; compact ones use

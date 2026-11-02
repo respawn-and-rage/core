@@ -114,6 +114,10 @@ The knife uses a user-set manual pose (`ERKnifeManualGripApproved` metadata,
 
 ## Rebuild
 
+The SMG bake excludes the loose `Pmag_2` reload prop and helper cube, retaining
+the inserted `Pmag`. After baking only SMG, `setup_smg_mesh.py` updates its V4
+mesh with a backup and protected-package hash checks, preserving clips and data.
+
 Numeric tuning: `setup_weapon_hit_zones.py`, `setup_weapon_accuracy.py`,
 `setup_weapon_recoil.py`, `setup_grenade_combat.py`, `setup_scopes.py`. Each saves only owned
 data. `import_sketchfab_weapons.py` is the art import; do not rerun it for tuning. Keep

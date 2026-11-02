@@ -40,14 +40,12 @@ void AERDustTemplateProbe::Publish(int32 Next,AERProceduralMap* Map)
     Phase=Next;SnapshotPhase=Next;ExpectedDigest=Map->GetStateDigest();ForceNetUpdate();
     UE_LOG(LogTemp,Display,TEXT("ER_DUST_STATE phase=%d digest=%u epoch=%u"),Phase,ExpectedDigest,Map->GetMapEpoch());
 }
-// The Short A deck over the underpass is a BlockAll template FixedMeshes group.
-// A remote pawn put there is corrected relative to it, so the client must
-// resolve that runtime component by name.
+// Resolve the market floor or the authored Short A deck as a movement base.
 static FVector DeckStand(const UWorld* World,const FVector& P)
 {
     FCollisionQueryParams Q(SCENE_QUERY_STAT(ERDustDeck),false);FHitResult Hit;
     for(TActorIterator<APawn> Pawn(World);Pawn;++Pawn)Q.AddIgnoredActor(*Pawn);
-    return World->LineTraceSingleByChannel(Hit,P+FVector(0,0,500),P+FVector(0,0,200),ECC_WorldStatic,Q) ? Hit.ImpactPoint+FVector(0,0,94):P+FVector(0,0,414);
+    return World->LineTraceSingleByChannel(Hit,P+FVector(0,0,500),P-FVector(0,0,50),ECC_WorldStatic,Q) ? Hit.ImpactPoint+FVector(0,0,94):P+FVector(0,0,414);
 }
 void AERDustTemplateProbe::PlaceRemote(bool Latest,const FVector& P)
 {
@@ -81,7 +79,7 @@ void AERDustTemplateProbe::Tick(float Delta)
             for(TActorIterator<APawn> Pawn(GetWorld());Pawn;++Pawn)Q.AddIgnoredActor(*Pawn);
             const bool Cells=Map->ValidateCells();
             const bool Plan=L.TownBuildings.Num()>=12 && (L.SeededDistrict ? L.TownGates.Num()==L.DistrictAccesses*L.DistrictWallCount:L.TownGates.Num()==3);
-            const bool Deck=GetWorld()->LineTraceSingleByChannel(Hit,P+FVector(0,0,500),P+FVector(0,0,200),ECC_WorldStatic,Q) && FMath::IsNearlyEqual(Hit.ImpactPoint.Z,320.f,1.f);
+            const bool Deck=GetWorld()->LineTraceSingleByChannel(Hit,P+FVector(0,0,500),P-FVector(0,0,50),ECC_WorldStatic,Q) && FMath::IsNearlyEqual(Hit.ImpactPoint.Z,L.SeededDistrict ? 0.f:320.f,1.f);
             const bool Lower=!GetWorld()->SweepSingleByChannel(Hit,L.LowerRoute[0],L.LowerRoute.Last(),FQuat::Identity,ECC_Pawn,FCollisionShape::MakeCapsule(34,92.5),Q);
             bool Road=true,Facade=true,Roof=true;
             if(L.UnderpassAxis)
@@ -288,17 +286,17 @@ void AERDustTemplateProbe::Tick(float Delta)
     {
         if(Follow(L.LowerRoute) || Elapsed-StageTime>12)
         {
-            Check(FVector::Dist2D(C->GetActorLocation(),L.LowerRoute.Last())<50 && C->GetActorLocation().Z<110,TEXT("actual_pawn_walks_CT_under_Short_A"));
+            Check(FVector::Dist2D(C->GetActorLocation(),L.LowerRoute.Last())<50 && C->GetActorLocation().Z<110,L.SeededDistrict ? TEXT("actual_pawn_crosses_market_lane"):TEXT("actual_pawn_walks_CT_under_Short_A"));
             Capture(TEXT("DustTown-Underpass.png"));Place(L.UpperRoute[0],0);Waypoint=0;Phase=3;StageTime=Elapsed;
         }
     }
     else if(Phase==3)
     {
-        if(!ReachedUpper && C->GetActorLocation().Z>408)
+        if(!ReachedUpper && (L.SeededDistrict || C->GetActorLocation().Z>408))
         {ReachedUpper=true;Capture(TEXT("DustTown-ShortA.png"));}
         if(Follow(L.UpperRoute) || Elapsed-StageTime>70)
         {
-            Check(ReachedUpper && FVector::Dist2D(C->GetActorLocation(),L.UpperRoute.Last())<60 && FMath::Abs(C->GetActorLocation().Z-L.UpperRoute.Last().Z)<45,TEXT("actual_pawn_climbs_and_follows_bent_Short_A_to_A_court"));
+            Check(ReachedUpper && FVector::Dist2D(C->GetActorLocation(),L.UpperRoute.Last())<60 && FMath::Abs(C->GetActorLocation().Z-L.UpperRoute.Last().Z)<45,L.SeededDistrict ? TEXT("actual_pawn_crosses_open_market_court"):TEXT("actual_pawn_climbs_and_follows_bent_Short_A_to_A_court"));
             Move->StopMovementImmediately();Phase=L.GradedTerrain ? 30:4;StageTime=Elapsed;Waypoint=0;
         }
     }

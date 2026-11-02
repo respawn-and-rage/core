@@ -28,14 +28,14 @@ struct FERBlockCollapseSettings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0.1",ClampMax="20")) float DebrisSettleAfter=2;
 };
 
-// Protocol 23: no Village piece stands unsupported on a fresh map. Protocol 22: Village back gallery rail rests on the deck. Protocol 21: authority-chosen map candidate in the descriptor. Protocol 20: optional baked Rooms macro graph in the descriptor. Protocol 19:per-template palettes and Stone alley houses; optional hall passage and varied Rooms hall shapes and diagonal corner bases with four through-rooms, longitudinal Fire Training and distributed Village ground cover and variable Rooms/Village graphs at500m²/player density; expected team size plus material-rule snapshot and bounded compressed skin masks; 5cm cells with complete shard-payload witnesses. BlockCount holds the cell count, PageVersions the
+// Protocol 25: Alleys roof links, lateral wall access and firing slits. Protocol 24: Central Building residential windows, room wings and accessible balconies. Protocol 23: no Village piece stands unsupported on a fresh map. Protocol 22: Village back gallery rail rests on the deck. Protocol 21: authority-chosen map candidate in the descriptor. Protocol 20: optional baked Rooms macro graph in the descriptor. Protocol 19:per-template palettes and Stone alley houses; optional hall passage and varied Rooms hall shapes and diagonal corner bases with four through-rooms, longitudinal Fire Training and distributed Village ground cover and variable Rooms/Village graphs at500m²/player density; expected team size plus material-rule snapshot and bounded compressed skin masks; 5cm cells with complete shard-payload witnesses. BlockCount holds the cell count, PageVersions the
 // versions of the chunk-mask shards (AERCellNetShard).
 USTRUCT()
 struct FERBlockNetworkDescriptor
 {
     GENERATED_BODY()
     UPROPERTY() uint32 Epoch=0;
-    UPROPERTY() uint32 Protocol=23;
+    UPROPERTY() uint32 Protocol=25;
     UPROPERTY() uint32 LayoutDigest=0;
     UPROPERTY() uint32 Sequence=0;
     UPROPERTY() int32 BlockCount=0;

@@ -220,7 +220,7 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
                 const FBox Box=FBox(-HalfSize,HalfSize).ExpandBy(FVector(35,35,93));
                 const FVector LocalA=Frame.InverseTransformPositionNoScale(A),LocalB=Frame.InverseTransformPositionNoScale(B);
                 if(FMath::LineBoxIntersection(Box,LocalA,LocalB,LocalB-LocalA))
-                {UE_LOG(LogTemp,Warning,TEXT("ER_TEMPLATE_ROUTE_REJECT seed=%d from=%s to=%s volume=%s"),C.Seed,*A.ToString(),*B.ToString(),*Frame.GetLocation().ToString());return false;}
+                {UE_LOG(LogTemp,Warning,TEXT("ER_TEMPLATE_ROUTE_REJECT seed=%d from=%s to=%s volume=%s size=%s"),C.Seed,*A.ToString(),*B.ToString(),*Frame.GetLocation().ToString(),*Frame.GetScale3D().ToString());return false;}
             }
         }
         return true;

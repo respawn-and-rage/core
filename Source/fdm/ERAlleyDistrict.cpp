@@ -129,8 +129,8 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
     for(int32 Wall=0;Wall<L.DistrictWallCount;++Wall)
     {
         const float Y=L.DistrictWallCount==1 ? 0:(Wall ? 1.f:-1.f)*L.DistrictWallOffset;
-        for(float X:{GateX[0]+Widths[0]*.5f+70,-GateX[0]-Widths[0]*.5f-70})
-            Space({{X-140,Y-400},{X+140,Y+400}});
+        for(float X:{-float(Half.X)+400,float(Half.X)-400})
+            Space({{X-350,Y-1100},{X+350,Y+1100}});
     }
     L.GroundRoutes.SetNum(1);TArray<FVector> SouthGrade;for(auto P:L.GroundRoutes[0])SouthGrade.Add(Opposite(P));L.GroundRoutes.Add(SouthGrade);
     // Cross streets create loops within each team's district.
@@ -188,6 +188,12 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
             const FVector Candidate(X,Y,0);const float Score=FVector::DistSquared2D(Candidate,C+FVector(800,650,0));if(Score>=BestSite)continue;
             const FBox Bounds(Candidate-FVector(W*.5f+140,D*.5f+140,10000),Candidate+FVector(W*.5f+140,D*.5f+140,10000));
             bool Clear=Bounds.Min.X> -Half.X+30 && Bounds.Max.X<Half.X-30 && Bounds.Min.Y> -Half.Y+30 && Bounds.Max.Y<FMath::Min(-250.f,DistrictEnd);
+            for(int32 Separator=0;Separator<L.DistrictWallCount;++Separator)
+            {
+                const float WallY=L.DistrictWallCount==1 ? 0:(Separator ? 1.f:-1.f)*L.DistrictWallOffset;
+                for(float SideX:{-float(Half.X)+400,float(Half.X)-400})
+                    Clear&=!Bounds.Intersect(FBox(FVector(SideX-350,WallY-1100,-10000),FVector(SideX+350,WallY+1100,10000)));
+            }
             for(const auto& Path:North)for(int32 J=1;J<Path.Num();++J)Clear&=!FMath::LineBoxIntersection(Bounds,Path[J-1],Path[J],Path[J]-Path[J-1]);
             for(const auto& Path:L.RoomAccessRoutes)for(int32 J=1;J<Path.Num();++J)Clear&=!FMath::LineBoxIntersection(Bounds,Path[J-1],Path[J],Path[J]-Path[J-1]);
             const FBox Spawn(Base-FVector(SpawnSize*.5f,10000),Base+FVector(SpawnSize*.5f,10000));Clear&=!Bounds.Intersect(Spawn);
@@ -195,6 +201,8 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
             for(const auto& Ramp:L.UnderpassRamps)Clear&=!Bounds.Intersect(FBox(FVector(Ramp.Bounds.Min.X-100,Ramp.Bounds.Min.Y-100,-10000),FVector(Ramp.Bounds.Max.X+100,Ramp.Bounds.Max.Y+100,10000)));
             for(const auto& Hole:L.UnderpassBreaches)Clear&=!Bounds.Intersect(FBox(FVector(Hole.Min.X-120,Hole.Min.Y-120,-10000),FVector(Hole.Max.X+120,Hole.Max.Y+120,10000)));
             if(!L.UnderpassApproach.IsEmpty())for(int32 J=1;J<L.UnderpassApproach.Num();++J)Clear&=!FMath::LineBoxIntersection(Bounds,L.UnderpassApproach[J-1],L.UnderpassApproach[J],L.UnderpassApproach[J]-L.UnderpassApproach[J-1]);
+            for(int32 Segment=1;Segment<L.UnderpassRoute.Num();++Segment)
+                Clear&=!FMath::LineBoxIntersection(Bounds,L.UnderpassRoute[Segment-1],L.UnderpassRoute[Segment],L.UnderpassRoute[Segment]-L.UnderpassRoute[Segment-1]);
             for(const auto& Foot:TowerFootprints)Clear&=!Bounds.Intersect(FBox(FVector(Foot.Min,-10000),FVector(Foot.Max,10000)));
             if(Clear){Origin=Candidate;Placed=true;BestSite=Score;}
         }
@@ -244,7 +252,7 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
         }
     }
     auto Plots=Lots({{-Half.X+30,-Half.Y+30},{Half.X-30,DistrictEnd}},Roads);
-    if(Plots.IsEmpty() || Plots.Num()>180)return false;
+    if(Plots.IsEmpty() || Plots.Num()>180){UE_LOG(LogTemp,Warning,TEXT("ER_DISTRICT_REJECT seed=%d plots=%d"),Seed,Plots.Num());return false;}
     TArray<FPlot> Houses;const float Frontage=Pick(950,1200);
     for(const auto& P:Plots)
     {
@@ -364,54 +372,104 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
                     if(FMath::LineBoxIntersection(Obstacle,From,To,To-From)){Clear=false;break;}
                 }
                 if(!Clear)continue;
+                if(Gap>=60)
+                {
+                    FVector Deck=(P1+P2)*.5f;Deck.Z=FMath::Min(Left.Max.Z,Right.Max.Z)-10;
+                    FVector DeckSize(180,180,20);DeckSize[Axis]=Gap+100;
+                    const FBox DeckBounds(Deck-DeckSize*.5f+FVector(.1f),Deck+DeckSize*.5f-FVector(.1f));
+                    bool DeckClear=true;
+                    for(const auto& Piece:Pieces)if(!Piece.VisualOnly)
+                    {
+                        const FTransform PieceFrame(FRotator(0,Piece.RotationYaw,0),Piece.Center);
+                        DeckClear&=!DeckBounds.Intersect(FBox(-Piece.Size*.5f,Piece.Size*.5f).TransformBy(PieceFrame));
+                    }
+                    if(!DeckClear)continue;
+                    auto& Link=Box(Deck,DeckSize,V.RoofSurface,true);
+                    if(((A/2+B/2)%2)==0)
+                    {
+                        Link.Size.Z=FERCellSettings().WoodDepth;
+                        Link.Center.Z=FMath::Min(Left.Max.Z,Right.Max.Z)-Link.Size.Z*.5f;
+                        Link.Destructible=true;Link.Material=EERBlockMaterial::Wood;
+                        Link.FixedSurface=nullptr;Link.CellSurface=V.WoodSurface;Link.Anchored=true;
+                    }
+                }
                 L.Houses[A].RoofMouths.Add(One.GetCenter()[Axis]<Two.GetCenter()[Axis] ? P1:P2);
                 L.Houses[B].RoofMouths.Add(One.GetCenter()[Axis]<Two.GetCenter()[Axis] ? P2:P1);
                 L.RoofTransfers.Add({P0,P1,P2,P3});
             }
         }
     }
-    // Preserve a genuine 3.2m over/under crossing in the paired market squares.
+    // The market is an open court; elevated links belong between separate roofs.
     L.TownCrossing=PlazaCenters[0];
-    if(T.SizingTeamSize!=1)
-    {
-    const FVector Bridge=L.TownCrossing;Pad({FVector2D(Bridge)-FVector2D(1300,T.SizingTeamSize==2 ? 600:1100),FVector2D(Bridge)+FVector2D(1300,T.SizingTeamSize==2 ? 600:1100)},0);
-    for(int32 End=0;End<2;++End)
-    {
-        const float Sign=End ? -1.f:1.f;TArray<FVector> Route{Bridge+FVector(Sign*-1170,0,100)};
-        for(int32 I=0;I<16;++I)
-        {const float H=(I+1)*20;const auto P=Bridge+FVector(Sign*(-1100+(I+.5f)*35),0,0);PairBox(P+FVector(0,0,H*.5f),{35,300,H},V.RoofSurface,true);Route.Add(P+FVector(0,0,H+100));}
-        Route.Add(Bridge+FVector(Sign*-450,0,420));L.StairRoutes.Add(Route);
-    }
-    PairBox(Bridge+FVector(0,0,305),{1080,300,30},V.RoofSurface,true);
-    for(float Sign:{-1.f,1.f})PairBox(Bridge+FVector(Sign*395,0,145),{290,300,290},V.WallSurface);
-    L.LowerRoute={Bridge+FVector(0,-500,100),Bridge+FVector(0,500,100)};
-    L.UpperRoute=L.StairRoutes[0];L.UpperRoute.Add(Bridge+FVector(0,0,420));
-    for(int32 I=L.StairRoutes[1].Num()-1;I>=0;--I)L.UpperRoute.Add(L.StairRoutes[1][I]);
-    }
+    L.LowerRoute={L.TownCrossing+FVector(0,-500,100),L.TownCrossing+FVector(0,500,100)};
+    L.UpperRoute={L.TownCrossing+FVector(-1100,0,100),L.TownCrossing+FVector(1100,0,100)};
     // Each existing wall has exactly the requested 2/3/4 arch openings. With
     // no wall these are approach routes, free to connect across the open core.
     const float WallH=1300,Depth=240;
+    auto WallSpan=[&](float Lo,float Hi,float Y)
+    {
+        if(Hi<=Lo)return;
+        // A slit is 30cm wide, 80cm high, with masonry above and below.
+        const int32 Count=FMath::FloorToInt32((Hi-Lo)/500);
+        float At=Lo;
+        for(int32 I=0;I<Count;++I)
+        {
+            const float X=Lo+(Hi-Lo)*(I+.5f)/Count;
+            Box({(At+X-15)*.5f,Y,WallH*.5f},{X-15-At,Depth,WallH},V.WallSurface);
+            Box({X,Y,360},{30,Depth,720},V.WallSurface);
+            Box({X,Y,1050},{30,Depth,500},V.WallSurface);
+            At=X+15;
+        }
+        if(Hi>At)Box({(At+Hi)*.5f,Y,WallH*.5f},{Hi-At,Depth,WallH},V.WallSurface);
+    };
     for(int32 Wall=0;Wall<L.DistrictWallCount;++Wall)
     {
         const float Y=L.DistrictWallCount==1 ? 0:(Wall ? 1.f:-1.f)*L.DistrictWallOffset;float Edge=-Half.X;
         for(int32 I=0;I<GateX.Num();++I)
         {
             const float X=GateX[I],Gap=Widths[I],Lo=X-Gap*.5f,Hi=X+Gap*.5f;
-            if(Lo>Edge)Box({(Edge+Lo)*.5f,Y,WallH*.5f},{Lo-Edge,Depth,WallH},V.WallSurface);
+            WallSpan(Edge,Lo,Y);
             Box({X,Y,(440+WallH)*.5f},{Gap,Depth,WallH-440},V.WallSurface);
             auto& Arch=Box({X,Y,220},{Gap+80,Depth+4,440},nullptr);Arch.FixedMesh=V.ArchMesh;Arch.VisualOnly=true;
             const FTransform Frame(FRotator::ZeroRotator,FVector(X,Y,0));
             L.TownGates.Add({Frame,Gap,Gap,0,{{X,Y-350,100},{X,Y,100},{X,Y+350,100}}});Edge=Hi;
             Pad({{X-Gap*.5f-100,Y-400},{X+Gap*.5f+100,Y+400}},0);
         }
-        if(Edge<Half.X)Box({(Edge+Half.X)*.5f,Y,WallH*.5f},{Half.X-Edge,Depth,WallH},V.WallSurface);
-        // Every separator has a two-sided climb onto its continuous, walkable roof.
-        // Keep both feet beside an arch, on its explicitly flattened approach.
-        for(float X:{GateX[0]+Widths[0]*.5f+70,-GateX[0]-Widths[0]*.5f-70})
+        WallSpan(Edge,float(Half.X),Y);
+        // Lateral annex roofs interrupt the long climb: ground -> roof -> crown.
+        for(float X:{-float(Half.X)+400,float(Half.X)-400})
         for(float Sign:{-1.f,1.f})
         {
-            const FTransform Ladder(FRotator(0,Sign*90,0),FVector(X,Y+Sign*(Depth*.5f+35),0));
-            L.Ladders.Add({Ladder,WallH+110,WallH});
+            const float RoofHeight=600;
+            const FVector Annex(X,Y+Sign*(Depth*.5f+300),0);
+            // Keep existing ramp mouths open through the annex arcade.
+            auto AnnexWall=[&](FVector Offset,FVector Extent)
+            {
+                const FVector Center=Annex+Offset;
+                const FBox Clearance(Center-Extent*.5f-FVector(35,35,93),Center+Extent*.5f+FVector(35,35,93));
+                for(const auto* Path:{&L.UnderpassRoute,&L.UnderpassApproach})
+                    for(int32 Segment=1;Segment<Path->Num();++Segment)
+                        for(int32 Copy=0;Copy<2;++Copy)
+                        {
+                            const FVector From=Copy ? Opposite((*Path)[Segment-1]):(*Path)[Segment-1];
+                            const FVector To=Copy ? Opposite((*Path)[Segment]):(*Path)[Segment];
+                            if(FMath::LineBoxIntersection(Clearance,From,To,To-From))return;
+                        }
+                Box(Center,Extent,V.WallSurface);
+            };
+            AnnexWall({-290,0,290},{20,600,580});
+            AnnexWall({290,0,290},{20,600,580});
+            AnnexWall({0,-Sign*290,290},{560,20,580});
+            for(float Side:{-1.f,1.f})AnnexWall({Side*180,Sign*290,290},{200,20,580});
+            AnnexWall({0,Sign*290,410},{160,20,340});
+            Box(Annex+FVector(0,0,590),{600,600,20},V.RoofSurface,true);
+            Pad({{X-350,Y-1100},{X+350,Y+1100}},0);
+            for(int32 Stage=0;Stage<2;++Stage)
+            {
+            const float Foot=Stage ? RoofHeight:0,Top=Stage ? WallH:RoofHeight;
+            const float Climb=Top-Foot;
+            const FTransform Ladder(FRotator(0,Sign*90,0),FVector(X+(Stage ? 0:(X>0 ? 180:-180)),Y+Sign*(Depth*.5f+(Stage ? 35:635)),Foot));
+            L.Ladders.Add({Ladder,Climb+110,Climb});
             auto Metal=[&](FVector P,FVector Size)
             {
                 auto& B=Box(Ladder.TransformPosition(P),Size,nullptr,false,Sign*90);
@@ -419,13 +477,14 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
             };
             for(float Rail:{-42.f,42.f})
             {
-                for(float RailEdge:{-3.9f,3.9f})Metal({RailEdge,Rail,(WallH+110)*.5f},{.2f,8,WallH+110});
-                for(float RailEdge:{-3.9f,3.9f})Metal({0,Rail+RailEdge,(WallH+110)*.5f},{7.6f,.2f,WallH+110});
+                for(float RailEdge:{-3.9f,3.9f})Metal({RailEdge,Rail,(Climb+110)*.5f},{.2f,8,Climb+110});
+                for(float RailEdge:{-3.9f,3.9f})Metal({0,Rail+RailEdge,(Climb+110)*.5f},{7.6f,.2f,Climb+110});
             }
-            for(float Z=25;Z<WallH;Z+=25)Metal({0,0,Z},{.2f,76,4});
-            Pad({{X-100,Y-400},{X+100,Y+400}},0);
+            for(float Z=25;Z<Climb;Z+=25)Metal({0,0,Z},{.2f,76,4});
+            }
+            L.RoomAccessRoutes.Add({Annex+FVector(0,Sign*180,RoofHeight+100),Annex+FVector(0,0,RoofHeight+100),Annex+FVector(0,-Sign*180,RoofHeight+100)});
         }
-        for(float X:{GateX[0]+Widths[0]*.5f+70,-GateX[0]-Widths[0]*.5f-70})
+        for(float X:{-float(Half.X)+400,float(Half.X)-400})
         L.RoomAccessRoutes.Add({{X,Y-Depth*.5f,WallH+100},{X,Y,WallH+100},{X,Y+Depth*.5f,WallH+100}});
 
     }
@@ -547,6 +606,7 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
         }
     }
     if(!BuildAlleyLowCover(T,Seed,Pieces,L))return false;
-    return Pieces.Num()<1800 && L.Houses.Num()>(T.SizingTeamSize>0 && T.SizingTeamSize<=2 ? 3:12);
+    if(Pieces.Num()>=1800 || L.Houses.Num()<=(T.SizingTeamSize>0 && T.SizingTeamSize<=2 ? 3:12)){UE_LOG(LogTemp,Warning,TEXT("ER_DISTRICT_REJECT seed=%d pieces=%d houses=%d"),Seed,Pieces.Num(),L.Houses.Num());return false;}
+    return true;
 }
 }
