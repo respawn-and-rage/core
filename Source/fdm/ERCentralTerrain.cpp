@@ -7,6 +7,28 @@ namespace ERProcedural
 {
 double PlayableAreaM2(const FERProceduralLayout& L)
 {
+    if(!L.RoomNodes.IsEmpty())
+    {
+        // Count the primary floor of each sealed room and corridor in plan.
+        // Galleries, switchbacks and the upper crossing add no area budget.
+        double Area=0;
+        for(const auto& V:L.RoomNodes)
+        {
+            if(V.Junction && V.Center.Z>=620)continue;
+            double Twice=0;
+            for(int32 I=0;I<V.Polygon.Num();++I)
+                Twice+=FVector2D::CrossProduct(V.Polygon[I],V.Polygon[(I+1)%V.Polygon.Num()]);
+            Area+=FMath::Abs(Twice)*.5;
+        }
+        for(const auto& E:L.RoomLinks)
+        {
+            const auto& A=L.RoomNodes[E.A];const auto& B=L.RoomNodes[E.B];
+            if((A.Junction && A.Center.Z>=620) || (B.Junction && B.Center.Z>=620) ||
+                E.Start.Z>A.Center.Z+.01 || E.End.Z>B.Center.Z+.01)continue;
+            Area+=FVector::Dist2D(E.Start,E.End)*(E.Width-2*E.Cut);
+        }
+        return Area/10000.;
+    }
     return L.CircularArena ? PI*FMath::Square(L.ArenaSize.X*.5)/10000.:L.ArenaSize.X*L.ArenaSize.Y/10000.;
 }
 namespace

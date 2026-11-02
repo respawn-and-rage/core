@@ -6,6 +6,8 @@ Shared rules are in [MAPS.md](../MAPS.md).
 
 Sealed half-turn room graph with no arena floor outside it. 4, 6, 8 or 10 rooms.
 
+- No recon drones or launch cases. Area sizing counts primary room and corridor floors only;
+  galleries, switchbacks and the upper crossing do not add area.
 - Corridors 3.6m wide, at least 560cm high (legacy saved 340 is raised at runtime), four clipped
   corners, slope ≤1:2. Closed shell prisms provide collision.
 - Four-room plans: all rooms at rectangle corners, Alpha northwest, Omega southeast, two attack

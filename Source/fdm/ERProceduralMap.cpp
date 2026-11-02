@@ -203,6 +203,19 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
             if(!ConfigureTeamSize(*Recipe,C.ExpectedTeamSize,Sized.Seed))return false;
             Sized.TemplateAsset=Recipe.Get();FERProceduralLayout Next;
             if(!BuildGeometry(Sized,B,Next,Cells)){++GeometryRejected;continue;}
+            if(Recipe->Archetype==EERMapArchetype::Rooms)
+            {
+                // Fit room dimensions to the actual primary floor, keeping
+                // corridor widths, heights, materials and cells unchanged.
+                for(int32 Fit=0;Fit<8;++Fit)
+                {
+                    const double Actual=PlayableAreaM2(Next),Target=TargetAreaM2(C.ExpectedTeamSize);
+                    if(Actual<=0 || FMath::Abs(Actual-Target)<=Target*.05)break;
+                    Recipe->Rooms.NominalRoomSize=FMath::GridSnap(
+                        Recipe->Rooms.NominalRoomSize*float(FMath::Sqrt(Target/Actual)),50.f);
+                    if(!BuildGeometry(Sized,B,Next,Cells)){Next={};break;}
+                }
+            }
             if(C.TemplateAsset->Archetype!=EERMapArchetype::LegacyAssembly && FMath::Abs(PlayableAreaM2(Next)-TargetAreaM2(C.ExpectedTeamSize))>TargetAreaM2(C.ExpectedTeamSize)*.1+.01)continue;
             if(!ERPlayability::InitialSpawnsOccluded(Next)){++SpawnRejected;continue;}
             if(!ApplyMapTheme(C,Next))return false;

@@ -17,7 +17,7 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
         if(!ERProcedural::Build(C,B,L)){AddError(FString::Printf(TEXT("circular layout failed size=%d seed=%d"),TeamSize,Seed));return false;}
         Modes.Add(L.CentralHill);
         if(!L.CircularArena || L.LayoutSymmetry!=EERTemplateSymmetry::Mirror || L.AlphaSpawns.Num()!=10 || L.OmegaSpawns.Num()!=10)return false;
-        if(FMath::Abs(ERProcedural::PlayableAreaM2(L)-TeamSize*1000)>TeamSize*100+.01)return false;
+        if(FMath::Abs(ERProcedural::PlayableAreaM2(L)-TeamSize*1500)>TeamSize*150+.01)return false;
         for(int32 I=0;I<10;++I)
         {
             const auto A=L.AlphaSpawns[I].GetLocation(),O=L.OmegaSpawns[I].GetLocation();

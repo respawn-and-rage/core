@@ -1,6 +1,6 @@
 #include "ERProceduralMap.h"
 
-//500m² per expected player, both teams included. Dimensions are physical plan
+//750m² per expected player, both teams included. Dimensions are physical plan
 //dimensions; upper floors never add to the area and player admission is separate.
 bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed)
 {
@@ -45,7 +45,7 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
         break;
     case EERMapArchetype::FireTraining:
         T.FireTraining.FloorArea={Area*.9f,Area*1.1f};
-        T.FireTraining.MinBays=TeamSize==1 ? 8:TeamSize<=4 ? 10:14;T.FireTraining.MaxBays=36;
+        T.FireTraining.MinBays=TeamSize==1 ? 8:TeamSize<=4 ? 10:14;T.FireTraining.MaxBays=64;
         T.FireTraining.MinNaves=1;T.FireTraining.MaxNaves=TeamSize<=3 ? 1:4;
         T.FireTraining.MaxAspect=TeamSize<=3 ? 10:3;
         T.FireTraining.MinHeightBands=2;T.FireTraining.MaxHeightBands=TeamSize<=2 ? 2:4;
@@ -63,6 +63,9 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
         T.Rooms.LaneSpacing=TeamSize==1 ? 800:TeamSize==2 ? 800:TeamSize==14 ? 2300:TeamSize>=15 ? 2400:S[TeamSize];
         if(TeamSize>1)
         {
+            // Seed the topology within the authored dimension range. Build
+            // then fits primary floor area by changing room dimensions.
+            const float ProfileArea=FMath::Min(Area,16000.f);
             struct FProfile {int32 N;float S,Offset,Margin,Spacing;};
             TArray<FProfile> Profiles;
             for(int32 N=1;N<=(TeamSize==2 ? 3:4);++N)
@@ -72,9 +75,9 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
                         if(N>1 && !(TeamSize==2 && N==3) && O<800)continue;
                         const float Width=3*Size+2*O+2*M;
                         const float MinimumSpacing=N>1 && Size>1600 ? (N%2==0 ? 1300.f:900.f):800.f;
-                        const float Spacing=FMath::Clamp(FMath::GridSnap((Area*10000/Width-(N==1 ? 3:N)*Size-400)/(N==1 ? 2:N-1),100.f),MinimumSpacing,2400.f);
+                        const float Spacing=FMath::Clamp(FMath::GridSnap((ProfileArea*10000/Width-(N==1 ? 3:N)*Size-400)/(N==1 ? 2:N-1),100.f),MinimumSpacing,2400.f);
                         const FVector Bounds(Width,(N==1 ? 3:N)*Size+(N==1 ? 2:N-1)*Spacing+400,1300);
-                        if(ValidTeamArea(Bounds,TeamSize))Profiles.Add({N,Size,O,M,Spacing});
+                        if(FMath::Abs(Bounds.X*Bounds.Y/10000-ProfileArea)<=ProfileArea*.1)Profiles.Add({N,Size,O,M,Spacing});
                     }
             if(Profiles.IsEmpty())return false;
             // Choose a lane count first so the many six-room proportions do

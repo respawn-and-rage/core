@@ -281,7 +281,7 @@ void AERReconDirector::ConfigureMap()
     TArray<AERBotPatrolPoint*> Patrol;
     for (TActorIterator<AERBotPatrolPoint> It(GetWorld());It;++It) Patrol.Add(*It);
     Patrol.Sort([](const AERBotPatrolPoint& A,const AERBotPatrolPoint& B){return A.RouteIndex<B.RouteIndex;});
-    for (int32 Index=0; Index<2; ++Index)
+    for (int32 Index=0; !ClosedRooms && Index<2; ++Index)
     {
         FVector Spawn = Frame.Center + FVector(Index ? 2000 : -2000,0,100);
         FRotator Facing(0, Index ? 180 : 0, 0);
@@ -336,6 +336,8 @@ void AERReconDirector::ConfigureMap()
 }
 void AERReconDirector::LaunchDrone(int32 Index)
 {
+    for(TActorIterator<AERProceduralMap> It(GetWorld());It;++It)
+        if(It->LayoutConfig.TemplateAsset && It->LayoutConfig.TemplateAsset->Archetype==EERMapArchetype::Rooms)return;
     auto& Team = Teams[Index];
     if (Team.Drone.IsValid() || !Team.Base.IsValid() || Team.Launched >= int32(ERServer::Get(GetWorld(),"Recon.Stock"))) return;
     const FVector Launch = Team.Base->GetActorLocation()+FVector(0,0,80);
@@ -347,16 +349,6 @@ void AERReconDirector::LaunchDrone(int32 Index)
     Drone->Flight.Team = TeamAt(Index); Drone->Flight.Launch = Launch;
     Drone->Flight.Center = FVector(Frame.Center.X,Frame.Center.Y,Frame.Indoor>0 ? Frame.Indoor+50 : Frame.Top+900);
     Drone->Flight.Radius = Frame.Indoor>0 ? Frame.IndoorOrbit : FVector2D(Frame.Span*.26);
-    for(TActorIterator<AERProceduralMap> It(GetWorld());It;++It)
-        if(It->LayoutConfig.TemplateAsset && It->LayoutConfig.TemplateAsset->Archetype==EERMapArchetype::Rooms && It->GetLayout().RoomNodes.Num()>=2)
-        {
-            // Separate sealed rooms cannot use a warehouse-wide orbit. Keep
-            // each drone within its base; contacts still require real LOS.
-            const auto& Node=It->GetLayout().RoomNodes[Index];
-            Drone->Flight.Center=It->GetActorTransform().TransformPosition(Node.Center+FVector(0,0,Node.Height-80));
-            Drone->Flight.Radius=Node.Size*.18f;
-            break;
-        }
     Team.Base->LaunchAt = ServerTime(GetWorld()); Team.Base->ForceNetUpdate();
     Drone->Flight.StartedAt = Team.Base->LaunchAt+1.2;
     Drone->FinishSpawning(Transform);
@@ -375,7 +367,7 @@ void AERReconDirector::DroneDestroyed(AERReconDrone* Drone)
     UE_LOG(LogTemp,Display,TEXT("ER_RECON_DOWN team=%d remaining=%d next=%.2f"),TeamIndex(Drone->Flight.Team),int32(ERServer::Get(GetWorld(),"Recon.Stock"))-Team.Launched,Team.NextLaunch);
 }
 AERReconDrone* AERReconDirector::ActiveDrone(EERTeam Team) const { return Teams[TeamIndex(Team)].Drone.Get(); }
-int32 AERReconDirector::Remaining(EERTeam Team) const { const auto& T=Teams[TeamIndex(Team)]; return int32(ERServer::Get(GetWorld(),"Recon.Stock"))-T.Launched+(T.Drone.IsValid()?1:0); }
+int32 AERReconDirector::Remaining(EERTeam Team) const { const auto& T=Teams[TeamIndex(Team)]; if(!T.Base.IsValid())return 0; return int32(ERServer::Get(GetWorld(),"Recon.Stock"))-T.Launched+(T.Drone.IsValid()?1:0); }
 double AERReconDirector::NextLaunch(EERTeam Team) const { return Teams[TeamIndex(Team)].NextLaunch; }
 FVector AERReconDirector::CellPosition(int32 Cell) const
 {

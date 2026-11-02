@@ -16,6 +16,7 @@ visible contacts: never derive enemy markers by enumerating client pawns.
 - Smoke hides sightings and new terrain by integrating 48 density samples along the ray, with
   optical depth 1 as threshold. Keep shader and `ReconDensity` coefficients aligned. Bot AI
   ignores this.
+- Rooms disables launch cases and drones; player vision remains active.
 - Each team has one indestructible Pelican case and five drones in total, including the first.
   An authorized bullet hit destroys a drone; replacement after 30s. Flight evaluates replicated
   parameters against server time. Case lid plays original FBX keys from `LaunchAt`.

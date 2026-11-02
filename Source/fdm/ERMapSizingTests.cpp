@@ -190,7 +190,7 @@ bool FERMapSizingTest::RunTest(const FString&)
             C.Seed=Seed;
             if(!TestTrue(*FString::Printf(TEXT("%s %dv%d seed%d builds valid geometry"),*Id,TeamSize,TeamSize,Seed),ERProcedural::Build(C,B,L)))return false;
             TestTrue(TEXT("actual arena dimensions in metres are positive and finite"),!L.ArenaSize.ContainsNaN() && L.ArenaSize.GetMin()>0);
-            TestTrue(TEXT("500 square metres per expected player, within ten percent"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-ERProcedural::TargetAreaM2(TeamSize))<=ERProcedural::TargetAreaM2(TeamSize)*.1+.01);
+            TestTrue(TEXT("750 square metres per expected player, within ten percent"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-ERProcedural::TargetAreaM2(TeamSize))<=ERProcedural::TargetAreaM2(TeamSize)*.1+.01);
             RoomCounts.Add(L.Rooms.Num());BlockCounts.Add(L.VillageBlocks.Num());Bounds.Add({FMath::RoundToInt32(L.ArenaSize.X),FMath::RoundToInt32(L.ArenaSize.Y)});
             TestTrue(TEXT("starts remain independent of expected team size"),L.AlphaSpawns.Num()>=8 && L.OmegaSpawns.Num()==L.AlphaSpawns.Num());
             for(int32 I=0;I<L.AlphaSpawns.Num();++I)
@@ -302,7 +302,7 @@ bool FERMapDensityBudgetTest::RunTest(const FString&)
         {
             FERProceduralConfig C;C.TemplateAsset=T;C.ExpectedTeamSize=N;C.Seed=Seed;FERBlockRoomConfig B;FERProceduralLayout L;
             if(!TestTrue(*FString::Printf(TEXT("%s %dv%d seed%d builds inside density budget"),*Id,N,N,Seed),ERProcedural::Build(C,B,L)))return false;
-            TestTrue(TEXT("actual perimeter area within ten percent of1000m² per team member"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-ERProcedural::TargetAreaM2(N))<=ERProcedural::TargetAreaM2(N)*.1+.01);
+            TestTrue(TEXT("actual perimeter area within ten percent of1500m² per team member"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-ERProcedural::TargetAreaM2(N))<=ERProcedural::TargetAreaM2(N)*.1+.01);
             if(Id==TEXT("FireTraining"))TestTrue(TEXT("every team size keeps the warehouse longitudinal"),L.ArenaSize.Y>=L.ArenaSize.X*1.2f);
             if(Id==TEXT("Rooms"))TestTrue(TEXT("every room profile has independent base access"),IndependentRoomBaseAccess(L));
             if(N>1)for(const auto& Hole:L.UnderpassBreaches)
@@ -313,6 +313,23 @@ bool FERMapDensityBudgetTest::RunTest(const FString&)
         }
         UE_LOG(LogTemp,Display,TEXT("ER_MAP_DENSITY_VERIFIED template=%s sizes=1..16 seeds=11"),*Id);
     }
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERRoomsFloorBudgetTest,"EclipseRecoil.Maps.RoomsFloorBudget",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FERRoomsFloorBudgetTest::RunTest(const FString&)
+{
+    FERProceduralLayout L;L.ArenaSize={10000,10000,1700};
+    for(int32 I=0;I<2;++I)
+    {
+        auto& V=L.RoomNodes.AddDefaulted_GetRef();V.Center={I*2000.,0,0};
+        V.Polygon={{-500,-500},{500,-500},{500,500},{-500,500}};
+    }
+    L.RoomLinks.Add({0,1,{500,0,0},{1500,0,0},360,560,40});
+    TestEqual(TEXT("room polygons plus narrow corridor floor, excluding empty perimeter"),ERProcedural::PlayableAreaM2(L),228.);
+    L.RoomLinks.Add({0,1,{500,0,620},{1500,0,620},360,560,40});
+    L.ElevatedDecks.Add(FBox(FVector(-500,-500,600),FVector(500,500,620)));
+    TestEqual(TEXT("upper crossing and decks add no primary floor"),ERProcedural::PlayableAreaM2(L),228.);
+    TestEqual(TEXT("750 square metres for each player on both teams"),ERProcedural::TargetAreaM2(2),3000.f);
     return true;
 }
 #endif

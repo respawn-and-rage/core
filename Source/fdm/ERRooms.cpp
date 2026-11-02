@@ -45,7 +45,7 @@ bool BuildRooms(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERProc
     const int32 N=Geometry.RandRange(R.MinLaneRooms,R.MaxLaneRooms);
     bool HallPassage=false;int32 HallStyle=0;
     const float S=R.NominalRoomSize>0 ? R.NominalRoomSize:N==2 ? 2200.f:N==3 ? 2000.f:1800.f;
-    if(!FMath::IsFinite(R.NominalRoomSize) || R.NominalRoomSize<0 || !FMath::IsFinite(S) || S<800 || S>2400 || !FMath::IsFinite(R.LaneSpacing) || R.LaneSpacing<800 || R.LaneSpacing>2400 ||
+    if(!FMath::IsFinite(R.NominalRoomSize) || R.NominalRoomSize<0 || !FMath::IsFinite(S) || S<800 || S>(T->SizingTeamSize>0 ? 8000:2400) || !FMath::IsFinite(R.LaneSpacing) || R.LaneSpacing<800 || R.LaneSpacing>2400 ||
        !FMath::IsFinite(R.LaneOffset) || R.LaneOffset<400 || R.LaneOffset>1700 || !FMath::IsFinite(R.PlanMargin) || R.PlanMargin<300 || R.PlanMargin>1100)return false;
     const bool GroundOnly=T->SizingRoomsGroundOnly || N==1;
     const float X=S+R.LaneOffset,Y=N==1 ? S+R.LaneSpacing:(N-1)*(S+R.LaneSpacing)*.5f,H=FMath::Max(560.f,R.CorridorHeight);
@@ -571,8 +571,7 @@ bool BuildRooms(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERProc
     L.ArenaSize={2*(X+S*.5f+R.PlanMargin),2*Y+S+400,1700};
     for(const auto& RoomNode:L.RoomNodes)
         if(FMath::Abs(RoomNode.Center.X)+RoomNode.Size.X*.5+20>L.ArenaSize.X*.5 || FMath::Abs(RoomNode.Center.Y)+RoomNode.Size.Y*.5+20>L.ArenaSize.Y*.5)return false;
-    // This sealed complex uses ground-level player sight; aerial recon remains
-    // above the roof. No warehouse orbit may pass through these separate rooms.
+    // This sealed complex uses player sight only; recon drones are disabled.
     L.FeatureNames={Theme.Name,TEXT("OctagonalCorridors"),TEXT("SwitchbackRamps"),TEXT("TimberScreens"),TEXT("SpacedTimberScreens"),TEXT("GalleryConnections"),TEXT("OverUnderCrossing"),TEXT("DoglegCorridors")};
     if(Macro)L.FeatureNames.Add(TEXT("PCGExMacroGraph"));
     if(N==1)

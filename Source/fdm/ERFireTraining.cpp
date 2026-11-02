@@ -86,8 +86,8 @@ bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<F
 {
     const auto& V=T.FireTraining;
     auto Ratio=[](float X){return FMath::IsFinite(X) && X>0 && X<=1;};
-    if(T.Symmetry!=EERTemplateSymmetry::HalfTurn || V.ContinuousUpperFloors || V.FloorArea.ContainsNaN() || V.FloorArea.X<300 || V.FloorArea.Y>(T.SizingTeamSize>0 ? 17600:10000) || V.FloorArea.X>V.FloorArea.Y ||
-        V.MinBays<6 || V.MaxBays>36 || V.MinBays>V.MaxBays || V.MinHeightBands<1 || V.MaxHeightBands>5 ||
+    if(T.Symmetry!=EERTemplateSymmetry::HalfTurn || V.ContinuousUpperFloors || V.FloorArea.ContainsNaN() || V.FloorArea.X<300 || V.FloorArea.Y>(T.SizingTeamSize>0 ? 26400:10000) || V.FloorArea.X>V.FloorArea.Y ||
+        V.MinBays<6 || V.MaxBays>(T.SizingTeamSize>0 ? 64:36) || V.MinBays>V.MaxBays || V.MinHeightBands<1 || V.MaxHeightBands>5 ||
         V.MinNaves<1 || V.MaxNaves>4 || V.MinNaves>V.MaxNaves || !FMath::IsFinite(V.MaxAspect) || V.MaxAspect<1.5f || V.MaxPlazas<0 || V.MaxPlazas>3 || V.MinHeightBands>V.MaxHeightBands ||
         !Ratio(V.ElevatedTargetRatio) || !Ratio(V.ElevatedMaxRatio) || !Ratio(V.OverheadMaxRatio) || !Ratio(V.OpenRegionMinRatio) ||
         V.ElevatedTargetRatio>V.ElevatedMaxRatio || V.ElevatedMaxRatio>V.OverheadMaxRatio || V.Widths.IsEmpty() || V.Widths.Num()>3)return false;

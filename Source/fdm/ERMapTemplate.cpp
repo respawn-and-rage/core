@@ -50,7 +50,7 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
         const float MinDimension=Piece.Destructible && Piece.Material==EERBlockMaterial::Metal ? Cells.SheetThickness:1.f;
         if(Piece.Size.GetMin()<MinDimension-.001f)UE_LOG(LogTemp,Warning,TEXT("ER_TEMPLATE_PIECE_REJECT seed=%d size=%s"),C.Seed,*Piece.Size.ToString());
         if(Piece.Center.ContainsNaN() || Piece.Size.ContainsNaN() || Piece.Jitter.ContainsNaN() || Piece.MeshRotation.ContainsNaN() || !FMath::IsFinite(Piece.RotationYaw) ||
-            Piece.Size.GetMin()<MinDimension-.001f || Piece.Size.GetMax()>16000 || Piece.Jitter.X<0 || Piece.Jitter.Y<0 ||
+            Piece.Size.GetMin()<MinDimension-.001f || Piece.Size.GetMax()>(Fire && T->SizingTeamSize>0 ? 28000:16000) || Piece.Jitter.X<0 || Piece.Jitter.Y<0 ||
             Piece.Jitter.X>200 || Piece.Jitter.Y>200 || uint8(Piece.Material)>6 || (Piece.Destructible && Piece.FixedMesh) || !ValidMesh(Piece.FixedMesh) ||
             !FMath::IsFinite(Piece.Strength) || Piece.Strength<1 || Piece.Strength>16 ||
             (Piece.WalkableSurface && (Piece.FixedMesh || Piece.VisualOnly)) ||

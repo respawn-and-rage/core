@@ -43,9 +43,9 @@ Recipes live in `Art/MapTemplates`. Reproduce a layout with
 
 ## Team sizing
 
-`Map.ExpectedTeamSize` (1..16) budgets **500m² per expected player**:
-`target area = team size × 1000m²`, **±10% of area**, not per axis. Upper floors, roofs and
-lower passages do not count; Rooms counts its enclosing rectangle. Central Building counts
+`Map.ExpectedTeamSize` (1..16) budgets **750m² per expected player**:
+`target area = team size × 1500m²`, **±10% of area**, not per axis. Upper floors, roofs and
+lower passages do not count; Rooms counts primary room polygons and corridor floors, excluding galleries and upper crossings. Central Building counts
 the circular footprint (`PlayableAreaM2`), rather than its bounding square. No saturation at 8.
 
 `ERMapSizing.cpp` configures transient recipe copies: structural counts, spacing and bounds.

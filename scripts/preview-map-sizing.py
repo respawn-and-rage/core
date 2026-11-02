@@ -172,7 +172,7 @@ def card(d, plan, x, y, w, h, scale):
     if 'ground_floor_area_m2' in plan:
         floor=plan['ground_floor_area_m2']
         d.text(x+24,y+h-102,f'Pavimento utile {floor:,.0f} m² · {floor/(tw*th)*100:.0f}% della pianta'.replace(',',' '),15,color='#53636b')
-    d.text(x+24,y+h-78,f'Obiettivo {n*1000:g} m² ±10% · scarto {(area/(n*1000)-1)*100:+.1f}%',15,color='#53636b')
+    d.text(x+24,y+h-78,f'Obiettivo {n*1500:g} m² ±10% · scarto {(area/(n*1500)-1)*100:+.1f}%',15,color='#53636b')
     note=NOTES[ident] if n<=2 else 'Vincoli e topologia adattati alla squadra'
     if ident=='FireTraining':
         note=f'{plan["naves"]} '+('navata' if plan['naves']==1 else 'navate')+f' · {plan["bays"]} campate lungo la mappa'
@@ -217,7 +217,7 @@ def render(plans, output):
         focused=[next(p for p in selected if p['template']==ident) for ident in identifiers]
         focus=Drawing(1600,1100)
         focus.text(32,22,f'{n} VS {n} · {title}',32,bold=True)
-        focus.text(32,66,'Stessa scala · 500 m² per giocatore previsto · tolleranza ±10% sull’area',21,color='#64717a')
+        focus.text(32,66,'Stessa scala · 750 m² per giocatore previsto · tolleranza ±10% sull’area',21,color='#64717a')
         focus_scale=min(min(620/p['dimensions_m'][0],680/p['dimensions_m'][1]) for p in focused)
         for i,plan in enumerate(focused):
             card(focus,plan,i*800,110,800,950,focus_scale)
@@ -233,7 +233,7 @@ def render(plans, output):
     variety_scale=min(min(440/p['dimensions_m'][0],390/p['dimensions_m'][1]) for p in varied)
     for i,plan in enumerate(varied):
         card(comparison,plan,(i%len(seeds))*620,122+(i//len(seeds))*655,620,635,variety_scale)
-    comparison.text(32,1462,'Topologie del generatore reale · 500 m² per giocatore previsto, ±10% sull’area',19,color='#64717a')
+    comparison.text(32,1462,'Topologie del generatore reale · 750 m² per giocatore previsto, ±10% sull’area',19,color='#64717a')
     comparison.save(output/f'rooms-village-{n}v{n}')
     room_variants=[p for p in plans if p['template']=='Rooms' and p['rooms']==4][:3]
     if room_variants:
@@ -247,7 +247,7 @@ def render(plans, output):
     for plan in plans:
         f=f'{plan["template"]}-seed{plan["seed"]}'
         tw,th,_=plan['dimensions_m']
-        cards.append(f'<article><h2>{NAMES[plan["template"]]} · {tw:g} × {th:g} m</h2><p>Seed {plan["seed"]} · {n} vs {n} · {tw*th:g} m² / obiettivo {n*1000} m² ±10%</p><a href="{f}.svg"><img src="{f}.svg" alt="Pianta quotata"/></a></article>')
+        cards.append(f'<article><h2>{NAMES[plan["template"]]} · {tw:g} × {th:g} m</h2><p>Seed {plan["seed"]} · {n} vs {n} · {plan["area_m2"]:g} m² / obiettivo {n*1500} m² ±10%</p><a href="{f}.svg"><img src="{f}.svg" alt="Pianta quotata"/></a></article>')
     (output/'index.html').write_text(f'<!doctype html><html lang="it"><meta charset="utf-8"><title>Piante {n}vs{n}</title><style>body{{background:{BACKGROUND};color:#243440;font:17px Arial;margin:28px}}main{{display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:22px}}img{{width:100%}}article{{border:1px solid #cdd2cc;padding:16px}}h1{{margin-bottom:8px}}</style><h1>Piante {n} vs {n}</h1><p>Dimensioni reali in metri. Squadre previste indipendenti dalla capienza. Clicca una pianta per lo SVG.</p><h2>Tutti i template · stessa scala</h2><a href="overview-{n}v{n}.svg"><img src="overview-{n}v{n}.svg" alt="Tutti i template quotati alla stessa scala"/></a><h2>Variabilità Rooms / Village</h2><a href="rooms-village-{n}v{n}.svg"><img src="rooms-village-{n}v{n}.svg" alt="Confronto quotato delle varianti Rooms e Village"/></a><main>'+''.join(cards)+'</main></html>')
 
 
@@ -279,14 +279,14 @@ def main():
         if result.returncode or 'Result={Fail}' in lines or 'Result={Success} Name={TeamSizing}' not in lines or not export.exists() or export.stat().st_mtime<before:
             raise SystemExit(f'Native generator failed; see {log}')
     if not args.reuse:
-        receipt.write_text(json.dumps({'policy': '500m2-per-player-v18', 'sha256': hashlib.sha256(export.read_bytes()).hexdigest()}))
-    elif not receipt.exists() or json.loads(receipt.read_text()).get('policy') != '500m2-per-player-v18' or json.loads(receipt.read_text()).get('sha256') != hashlib.sha256(export.read_bytes()).hexdigest():
+        receipt.write_text(json.dumps({'policy': '750m2-per-player-rooms-floor-v28', 'sha256': hashlib.sha256(export.read_bytes()).hexdigest()}))
+    elif not receipt.exists() or json.loads(receipt.read_text()).get('policy') != '750m2-per-player-rooms-floor-v28' or json.loads(receipt.read_text()).get('sha256') != hashlib.sha256(export.read_bytes()).hexdigest():
         raise SystemExit('Native export is not verified; regenerate without --reuse')
     plans=json.loads(export.read_text())
     if not plans or any(q['team_size']!=args.team_size for q in plans) or (not args.reuse and {q['seed'] for q in plans} != set(args.seeds)):
         raise SystemExit('Invalid native export')
-    if any(not .9*args.team_size*1000-.01 <= q['area_m2'] <= 1.1*args.team_size*1000+.01 for q in plans):
-        raise SystemExit('Native export violates the500m²/player area budget; regenerate')
+    if any(not .9*args.team_size*1500-.01 <= q['area_m2'] <= 1.1*args.team_size*1500+.01 for q in plans):
+        raise SystemExit('Native export violates the750m²/player area budget; regenerate')
     output=(args.output or folder/f'{args.team_size}v{args.team_size}').resolve()
     render(plans,output)
     print(output/'index.html')

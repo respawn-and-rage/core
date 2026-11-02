@@ -12,7 +12,7 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
     FRandomStream Geometry(Seed);
     L.CircularArena=true;L.GradedTerrain=true;L.LayoutSymmetry=EERTemplateSymmetry::Mirror;
     const float Diameter=T.SizingTeamSize>0 ? T.SizingArena.X:7600;
-    if(!FMath::IsFinite(Diameter) || Diameter<3500 || Diameter>15000)return false;
+    if(!FMath::IsFinite(Diameter) || Diameter<3500 || Diameter>18000)return false;
     const float Radius=Diameter*.5;
     L.ArenaSize={Diameter,Diameter,2000};L.CrossingRule=EERCrossingRule::OpenYard;
     L.CentralHill=(HashCombineFast(uint32(Seed),0x48494c4cu)&1)!=0;
