@@ -122,7 +122,7 @@ bool ERProcedural::BuildGeometry(const FERProceduralConfig& C,const FERBlockRoom
         TStrongObjectPtr<UERMapTemplate> Canonical(DuplicateObject<UERMapTemplate>(C.TemplateAsset,GetTransientPackage()));
         Canonical->Symmetry=Canonical->Archetype==EERMapArchetype::MiddleEasternAlleys ? EERTemplateSymmetry::None:EERTemplateSymmetry::HalfTurn;
         Canonical->ReflectionBuild=true;
-        Canonical->SizingTeamSize=C.TemplateAsset->SizingTeamSize;Canonical->SizingRoomsGroundOnly=C.TemplateAsset->SizingRoomsGroundOnly;Canonical->SizingArena=C.TemplateAsset->SizingArena;
+        Canonical->CompositionSeed=C.TemplateAsset->CompositionSeed;Canonical->SizingTeamSize=C.TemplateAsset->SizingTeamSize;Canonical->SizingRoomsGroundOnly=C.TemplateAsset->SizingRoomsGroundOnly;Canonical->SizingArena=C.TemplateAsset->SizingArena;
         FERProceduralConfig Paired=C;Paired.TemplateAsset=Canonical.Get();FERProceduralLayout Next;
         if(!BuildGeometry(Paired,B,Next,Cells) || !FoldLayoutToMirror(Next,Cells))return false;
         Out=MoveTemp(Next);return true;
@@ -196,11 +196,14 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
         const int32 Attempts=C.TemplateAsset->Archetype==EERMapArchetype::MiddleEasternAlleys ? 1024:16;
         const uint32 Plan=C.MapCandidate ? HashCombine(uint32(C.Seed),uint32(C.MapCandidate)*0x2f0b4a87u):uint32(C.Seed);
         int32 GeometryRejected=0,SpawnRejected=0;
+        FERProceduralLayout BestSpawnFit;int32 BestSpawnZones=0;
+        const int32 RequestedZones=1+uint32(C.Seed)%3;
         for(int32 Attempt=0;Attempt<Attempts;++Attempt)
         {
             FERProceduralConfig Sized=C;
             Sized.Seed=Attempt ? int32(HashCombine(Plan,uint32(Attempt)*0x9e3779b9u)):int32(Plan);
             if(!ConfigureTeamSize(*Recipe,C.ExpectedTeamSize,Sized.Seed))return false;
+            Recipe->CompositionSeed=C.Seed;
             Sized.TemplateAsset=Recipe.Get();FERProceduralLayout Next;
             if(!BuildGeometry(Sized,B,Next,Cells)){++GeometryRejected;continue;}
             if(Recipe->Archetype==EERMapArchetype::Rooms)
@@ -217,9 +220,22 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
                 }
             }
             if(C.TemplateAsset->Archetype!=EERMapArchetype::LegacyAssembly && FMath::Abs(PlayableAreaM2(Next)-TargetAreaM2(C.ExpectedTeamSize))>TargetAreaM2(C.ExpectedTeamSize)*.1+.01)continue;
+            if(!BuildSpawnZones(C.Seed,Next,Cells)){++SpawnRejected;continue;}
             if(!ERPlayability::InitialSpawnsOccluded(Next)){++SpawnRejected;continue;}
+            const int32 Zones=Next.SpawnZones.Num()/2;
+            if(Zones<RequestedZones && Attempt<7)
+            {
+                if(Zones>BestSpawnZones){BestSpawnFit=MoveTemp(Next);BestSpawnZones=Zones;}
+                continue;
+            }
+            if(BestSpawnZones>Zones)Next=MoveTemp(BestSpawnFit);
             if(!ApplyMapTheme(C,Next))return false;
             Out=MoveTemp(Next);return true;
+        }
+        if(BestSpawnZones>0)
+        {
+            if(!ApplyMapTheme(C,BestSpawnFit))return false;
+            Out=MoveTemp(BestSpawnFit);return true;
         }
         UE_LOG(LogTemp,Warning,TEXT("ER_MAP_BUILD_EXHAUSTED seed=%d team=%d geometry_rejected=%d spawn_rejected=%d"),C.Seed,C.ExpectedTeamSize,GeometryRejected,SpawnRejected);
         return false;
@@ -286,13 +302,16 @@ bool ERProcedural::ApplyMapTheme(const FERProceduralConfig& C,FERProceduralLayou
         // Preserve emissive fixtures and their authored material slots.
         if(Piece.CollisionOnly || (Piece.VisualOnly && !Piece.Mesh) || (Piece.Mesh && Piece.Mesh->GetName().Contains(TEXT("Lamp"))))continue;
         Piece.Surface=Piece.Roof ? P.Ceiling.Get():P.Materials[uint8(Piece.Material)].Get();
-        if(P.ShellSteel && Piece.Mesh && Piece.Mesh->GetName().StartsWith(TEXT("SM_ER_WH_")))
+        const FVector FixedSize=Piece.Transform.GetScale3D()*100;
+        const bool ProceduralShell=C.TemplateAsset->Archetype==EERMapArchetype::FireTraining && !Piece.Mesh && !Piece.Roof && FixedSize.Z>=700 && (FixedSize.X>=L.WarehouseWidth-50 || FixedSize.Y>=L.WarehouseLength-1);
+        if(ProceduralShell)Piece.Surface=Piece.Material==EERBlockMaterial::Concrete ? P.Wall.Get():P.ShellSteel ? P.ShellSteel.Get():Piece.Surface;
+        else if(P.ShellSteel && Piece.Mesh && Piece.Mesh->GetName().StartsWith(TEXT("SM_ER_WH_")))
         {
             const FString Name=Piece.Mesh->GetName();
             Piece.Surface=Name.Contains(TEXT("Post")) || Name.Contains(TEXT("RoofArch")) ? P.Materials[uint8(EERBlockMaterial::Metal)].Get():Piece.Roof ? P.Ceiling.Get():P.ShellSteel.Get();
         }
         else if(P.LadderSteel && Piece.PawnBarrier)Piece.Surface=P.LadderSteel;
-        else if(P.DeckSteel && !Piece.Mesh && !Piece.VisualOnly)
+        else if(P.DeckSteel && !Piece.Mesh && !Piece.VisualOnly && !Piece.Roof)
         {
             const FVector Size=Piece.Transform.GetScale3D()*100;
             if(Size.Z<=30 && Size.X>=100 && Size.Y>=100 && Piece.Material==EERBlockMaterial::Metal)Piece.Surface=P.DeckSteel;
@@ -396,7 +415,8 @@ void AERProceduralMap::ResolveMapCandidate()
 bool AERProceduralMap::ValidateGeneratedCollision() const
 {
     return !LayoutConfig.TemplateAsset || LayoutConfig.ExpectedTeamSize==0 ||
-        ERPlayability::InitialSpawnsOccludedInWorld(GetWorld(),GetActorTransform(),Layout);
+        (ERPlayability::InitialSpawnsOccludedInWorld(GetWorld(),GetActorTransform(),Layout) &&
+         ERProcedural::SpawnZonesClearInWorld(GetWorld(),GetActorTransform(),Layout));
 }
 void AERProceduralMap::OnGenerationFinished()
 {
@@ -519,14 +539,14 @@ void AERProceduralMap::ConfigureTemplateFloors()
         AlleyTerrain->SetCanEverAffectNavigation(false);AlleyTerrain->SetDeferredCollisionUpdatesEnabled(true,false);
         AlleyTerrain->SetComplexAsSimpleCollisionEnabled(true,false);AlleyTerrain->SetCollisionProfileName(TEXT("BlockAll"));
         AlleyTerrain->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
-        AlleyTerrain->SetMaterial(0,Layout.GroundSurface);AlleyTerrain->RegisterComponent();if(Layout.CircularArena)ERProcedural::BuildCentralTerrain(AlleyTerrain,Layout);else ERProcedural::BuildAlleyTerrain(AlleyTerrain,Layout);
+        AlleyTerrain->SetMaterial(0,Layout.GroundSurface);AlleyTerrain->RegisterComponent();if(Layout.CircularArena)ERProcedural::BuildCentralTerrain(AlleyTerrain,Layout);else if(!Layout.VillageTerrainProfile.IsEmpty())ERProcedural::BuildVillageTerrain(AlleyTerrain,Layout);else ERProcedural::BuildAlleyTerrain(AlleyTerrain,Layout);
     }
     for(auto* Mesh:{TileFloors.Get(),WoodFloors.Get(),Ceilings.Get(),Stairs.Get()}){Mesh->ClearInstances();Mesh->SetStaticMesh(BlockMesh);}
     FixedCollision->SetStaticMesh(BlockMesh);
     FenceCollision->SetStaticMesh(BlockMesh);
     UInstancedStaticMeshComponent* FenceModules=nullptr;
     const bool FireTraining=Template->Archetype==EERMapArchetype::FireTraining;
-    if(auto* Module=FireTraining ? Template->FireTraining.ParapetModule.Get():Template->CentralBuilding.FenceModule.Get())
+    if(auto* Module=FireTraining ? nullptr:Template->CentralBuilding.FenceModule.Get())
     {
 #if WITH_EDITOR
         // First editor load may still be building the imported collision mesh.
@@ -563,12 +583,12 @@ void AERProceduralMap::ConfigureTemplateFloors()
     };
     Ceilings->SetHiddenInGame(Template->RoofMesh!=nullptr || Template->Archetype==EERMapArchetype::FireTraining);
     if(auto* Finish=Layout.ThemeCeiling ? Layout.ThemeCeiling:CeilingSurface.Get())Ceilings->SetMaterial(0,Finish);
-    if(bCeilings && !ClosedRooms)Ceilings->AddInstance(FTransform(FQuat::Identity,FVector(0,0,Size.Z+10),FVector(Size.X+40,Size.Y+40,20)/100));
+    if(bCeilings && !ClosedRooms && !FireTraining)Ceilings->AddInstance(FTransform(FQuat::Identity,FVector(0,0,Size.Z+10),FVector(Size.X+40,Size.Y+40,20)/100));
     if(ClosedRooms)ERProcedural::BuildRoomsShell(this,Layout,RoomsShell);
     for(const auto& Piece:Layout.FixedPieces)
     {
         if(Template->Archetype==EERMapArchetype::Village && Piece.VisualOnly && GetNetMode()==NM_DedicatedServer)continue;
-        if(Piece.Roof && !bCeilings)continue;
+        if(Piece.Roof && !bCeilings && !FireTraining)continue;
         if(Piece.CollisionOnly){(Piece.PawnBarrier ? FenceCollision:FixedCollision)->AddInstance(Piece.Transform);continue;}
         if(Piece.PawnBarrier)
         {
@@ -618,18 +638,16 @@ void AERProceduralMap::ConfigureTemplateFloors()
         Group->AddInstance(T);
     }
     FlushMetal();
-    if(Template->Archetype==EERMapArchetype::FireTraining && GetNetMode()!=NM_DedicatedServer)
-        for(const auto& Piece:Layout.FixedPieces)
-            if(Piece.Roof && Piece.VisualOnly && Piece.Mesh && Piece.Mesh->GetName().Contains(TEXT("RoofLamps")))
-                for(float Side:{-.25f,.25f})
-                {
-                    // Unshadowed fill: lamp art is visual, these provide the light.
-                    auto* Light=NewObject<UPointLightComponent>(this);AddInstanceComponent(Light);
-                    Light->SetupAttachment(RootComponent);Light->SetMobility(EComponentMobility::Movable);
-                    Light->SetRelativeLocation(FVector(Piece.Transform.GetLocation().X+Side*Layout.WarehouseNaveWidth,Piece.Transform.GetLocation().Y,Layout.IndoorCeiling-40));
-                    Light->SetIntensity(45);Light->SetAttenuationRadius(1600);Light->SetCastShadows(false);
-                    Light->SetLightColor(FLinearColor(1,.93,.82));Light->RegisterComponent();WarehouseLights.Add(Light);
-                }
+    if(FireTraining && GetNetMode()!=NM_DedicatedServer)
+        for(float X=-Layout.WarehouseWidth*.5f+600;X<Layout.WarehouseWidth*.5f;X+=1200)
+            for(float Y=-Layout.WarehouseLength*.5f+600;Y<Layout.WarehouseLength*.5f;Y+=1200)
+            {
+                auto* Light=NewObject<UPointLightComponent>(this);AddInstanceComponent(Light);
+                Light->SetupAttachment(RootComponent);Light->SetMobility(EComponentMobility::Movable);
+                Light->SetRelativeLocation({X,Y,Layout.IndoorCeiling-30});Light->SetIntensity(600);Light->SetAttenuationRadius(2200);Light->SetCastShadows(false);
+                Light->SetSourceRadius(40);Light->SetSpecularScale(.35f);
+                Light->SetLightColor(FLinearColor::White);Light->RegisterComponent();WarehouseLights.Add(Light);
+            }
     for(const auto& Desc:Layout.Ladders)
     {
         FActorSpawnParameters Params;Params.Owner=this;
@@ -690,7 +708,7 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
     H=HashCombine(H,FCrc::StrCrc32(*LayoutConfig.TemplateAsset->TemplateId));
     H=HashCombine(H,GetTypeHash(uint8(LayoutConfig.TemplateAsset->Archetype)));
     const auto* Template=LayoutConfig.TemplateAsset.Get();
-    if(auto* Module=Template->Archetype==EERMapArchetype::FireTraining ? Template->FireTraining.ParapetModule.Get():Template->CentralBuilding.FenceModule.Get())
+    if(auto* Module=Template->Archetype==EERMapArchetype::FireTraining ? nullptr:Template->CentralBuilding.FenceModule.Get())
     {
         H=HashCombine(H,FCrc::StrCrc32(*Module->GetPathName()));
         if(Module->GetBodySetup())H=HashCombine(H,GetTypeHash(Module->GetBodySetup()->BodySetupGuid));
@@ -700,6 +718,10 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
     H=HashCombine(H,GetTypeHash(Layout.CircularArena));H=HashCombine(H,GetTypeHash(uint8(Layout.LayoutSymmetry)));
     H=HashCombine(H,GetTypeHash(Layout.CentralHill));MixVector(Layout.HillCenter);
     MixVector(FVector(Layout.HillHeight,Layout.HillPlateau,Layout.HillFalloff));
+    H=HashCombine(H,GetTypeHash(Layout.CentralShape));H=HashCombine(H,GetTypeHash(uint8(Layout.CrossingRule)));
+    for(const auto& Foot:Layout.CentralFootprints){MixVector(Foot.Min);MixVector(Foot.Max);}
+    for(const auto& Entrance:Layout.CentralEntrances){MixVector(Entrance.GetLocation());MixVector(Entrance.GetRotation().GetForwardVector());}
+    for(const auto& Cover:Layout.CoverSites)if(Cover.FiringStair!=INDEX_NONE){H=HashCombine(H,GetTypeHash(Cover.FiringStair));MixVector(Cover.FiringPosition);}
     MixVector(Layout.ArenaSize);H=HashCombine(H,GetTypeHash(bCeilings));H=HashCombine(H,GetTypeHash(uint8(LayoutConfig.TemplateAsset->Symmetry)));
     if(LayoutConfig.TemplateAsset->Archetype==EERMapArchetype::Rooms)
     {
@@ -732,9 +754,15 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
         if(P.Mesh && P.Mesh->GetBodySetup())H=HashCombine(H,GetTypeHash(P.Mesh->GetBodySetup()->BodySetupGuid));
     }
     for(const auto* Starts:{&Layout.AlphaSpawns,&Layout.OmegaSpawns})for(const auto& P:*Starts){MixVector(P.GetLocation());MixVector(P.GetRotation().GetForwardVector());}
+    for(const auto& Zone:Layout.SpawnZones)
+    {
+        H=HashCombine(H,GetTypeHash(Zone.Team));H=HashCombine(H,GetTypeHash(Zone.FirstStart));H=HashCombine(H,GetTypeHash(Zone.StartCount));MixVector(Zone.Center);
+        for(const auto& Point:Zone.ExitRoute)MixVector(Point);
+    }
     for(const auto& Route:Layout.Routes)for(const auto& P:Route)MixVector(P);
     if(LayoutConfig.TemplateAsset->Archetype==EERMapArchetype::FireTraining)
     {
+        H=HashCombine(H,GetTypeHash(Layout.WarehouseCatwalkVariant));MixVector(FVector(Layout.WarehouseWidth,Layout.WarehouseLength,Layout.IndoorCeiling));
         H=HashCombine(H,GetTypeHash(Layout.WarehouseBays));H=HashCombine(H,GetTypeHash(Layout.WarehouseBands));
         H=HashCombine(H,GetTypeHash(Layout.LayoutAttempt));H=HashCombine(H,GetTypeHash(Layout.WarehouseNaves));
         for(const auto& P:Layout.Plazas){MixVector(P.Min);MixVector(P.Max);}H=HashCombine(H,GetTypeHash(FMath::RoundToInt(Layout.WarehouseWidth)));
@@ -742,6 +770,7 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
         for(const auto& Ladder:Layout.Ladders){MixVector(Ladder.Frame.GetLocation());MixVector(Ladder.Frame.GetRotation().GetForwardVector());MixVector(FVector(Ladder.Height,Ladder.DeckHeight,0));}
         for(const auto* Paths:{&Layout.RoomAccessRoutes,&Layout.StairRoutes,&Layout.CrossingRoutes})for(const auto& Route:*Paths)for(const auto& P:Route)MixVector(P);
     }
+    for(const auto& Knot:Layout.VillageTerrainProfile)MixVector({Knot.X,Knot.Y,0});
     if(LayoutConfig.TemplateAsset->Town.Enabled)
     {
         H=HashCombine(H,GetTypeHash(Layout.GradedTerrain));

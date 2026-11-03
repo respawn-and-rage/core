@@ -183,11 +183,6 @@ https://sketchfab.com/00amza
 http://creativecommons.org/licenses/by/4.0/
 Changes: Unreal adaptation, texture resizing/world projection; house origins and units normalized.
 
-FIRE TRAINING — WAREHOUSE KIT
-Warehouse (FBX, free) — owner-supplied archive warehouse-fbx-model-free.zip
-Author and licence not recorded in the archive; see provenance.json.
-Changes: split into a modular kit, normalized units/pivots, width inserts and plain end-wall bands added; textures reused unchanged.
-
 THANK YOU
 Thank you to all the artists, animators, sound designers and open-source contributors whose work supports Respawn & Rage.
 

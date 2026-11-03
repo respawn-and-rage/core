@@ -66,4 +66,46 @@ bool FERAlleyArchitectureTest::RunTest(const FString& Parameters)
     M->LayoutConfig.Seed=73;TestTrue(TEXT("regeneration restores all original skin cells and collisions"),M->Regenerate() && M->GetCellWorld().GetRemovedCount()==0 && M->ValidateCells());
     W->DestroyWorld(false);AddInfo(TEXT("ER_ALLEY_ARCHITECTURE_TEST_COMPLETE"));return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERAlleyBrickTowerTest,"EclipseRecoil.Destruction.MiddleEasternBrickTowers",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FERAlleyBrickTowerTest::RunTest(const FString&)
+{
+    UWorld::InitializationValues Values;Values.AllowAudioPlayback(false).CreateNavigation(false).CreateAISystem(false).CreateFXSystem(false).EnableTraceCollision(true);
+    auto* World=UWorld::CreateWorld(EWorldType::Game,false,NAME_None,nullptr,true,ERHIFeatureLevel::Num,&Values);if(!World)return false;
+    auto* Map=World->SpawnActor<AERProceduralMap>();
+    Map->LayoutConfig.TemplateAsset=LoadObject<UERMapTemplate>(nullptr,TEXT("/Game/EclipseRecoil/Art/MapTemplates/DA_MiddleEasternAlleys"));
+    Map->LayoutConfig.ExpectedTeamSize=3;Map->LayoutConfig.Seed=42;Map->bCeilings=false;
+    if(!TestTrue(TEXT("3v3 brick tower district builds"),Map->Regenerate())){World->DestroyWorld(false);return false;}
+    const auto& Layout=Map->GetLayout();
+    if(!TestTrue(TEXT("paired climbable towers exist"),Layout.DistrictTowers.Num()>=2)){World->DestroyWorld(false);return false;}
+    const auto& Ladder=Layout.DistrictTowers[0];const float Height=Layout.DistrictTowerHeights[0];
+    // The first tower has a 6m footprint; its ladder is 35cm outside the east face.
+    const FVector Center=Ladder.TransformPosition({-335,0,0});
+    const FBox TowerBounds(Center-FVector(400,400,1),Center+FVector(400,400,Height+100));
+    const auto& Cells=Map->GetCellWorld();int32 Deck=INDEX_NONE;TArray<int32> TowerPanels;
+    for(int32 I=0;I<Cells.GetPanels().Num();++I)
+    {
+        const auto& Panel=Cells.GetPanels()[I];
+        const FVector Mid=Panel.Transform.TransformPosition(Panel.Size*.5);
+        if(Panel.Material!=EERBlockMaterial::Brick || !TowerBounds.IsInside(Mid))continue;
+        TowerPanels.Add(I);
+        TestTrue(TEXT("tower brick layers are at most10cm thick with ordinary strength"),Panel.Size.GetMin()<=10.01 && Panel.Strength==1);
+        if(FVector::Dist2D(Mid,Center)<1 && FMath::IsNearlyEqual(float(Mid.Z-Center.Z),Height-5,.1f))Deck=I;
+    }
+    if(!TestTrue(TEXT("thin brick platform is present"),Deck!=INDEX_NONE)){World->DestroyWorld(false);return false;}
+    const auto& Platform=Cells.GetPanels()[Deck];
+    const FERCellId DeckCell{Deck,Platform.Dims.X/2,Platform.Dims.Y/2,Platform.Dims.Z/2};
+    TestFalse(TEXT("sniper platform is not permanently anchored"),Platform.bAnchored || Platform.bAnchorBottom);
+    Map->RequestSupportCheck();for(int32 I=0;I<500 && Map->IsSupportPending();++I)Map->StepSupport();
+    TestEqual(TEXT("intact district and tower keep all support"),Cells.GetRemovedCount(),int64(0));
+    const FBox CutBand(Center+FVector(-400,-400,100),Center+FVector(400,400,160));
+    int32 CutCount=0;for(int32 Panel:TowerPanels)CutCount+=ERAlleyDestruction::Cut(Map,Panel,CutBand);
+    TestTrue(TEXT("controlled damage removes thin brick supports"),CutCount>0);
+    TestTrue(TEXT("platform survives direct damage to supports"),Cells.IsAlive(DeckCell));
+    Map->RequestSupportCheck();for(int32 I=0;I<500 && Map->IsSupportPending();++I)Map->StepSupport();
+    TestFalse(TEXT("loss of tower walls collapses the sniper platform"),Cells.IsAlive(DeckCell));
+    TestTrue(TEXT("collapsed tower retains valid cell mappings"),Map->ValidateCells());
+    World->DestroyWorld(false);return true;
+}
+
 #endif

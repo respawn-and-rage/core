@@ -22,5 +22,6 @@ private:
     FTransform HighLadder;
     float HighLadderRise=0;
     bool SawLadder=false,SawLadderExit=false;
+    TArray<float> ProbedHeights;
     void Check(bool Good,const TCHAR* Label);
 };

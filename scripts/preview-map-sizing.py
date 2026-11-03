@@ -102,13 +102,27 @@ def card(d, plan, x, y, w, h, scale):
     d.text(x+24,y+14,NAMES[ident],26,bold=True)
     area=plan['area_m2']
     d.text(x+24,y+49,f'{tw:g} × {th:g} m  |  {area:,.0f} m²'.replace(',', ' '),23,bold=True)
-    d.text(x+24,y+81,f'{n} vs {n} · seed {plan["seed"]}',17,color='#64717a')
+    zone_count=len(plan.get("spawn_zones",[]))//2
+    zone_note=f" · {zone_count} zone/squadra" if zone_count else ""
+    d.text(x+24,y+81,f'{n} vs {n} · seed {plan["seed"]}{zone_note}',17,color='#64717a')
     ox=x+w/2-tw*scale/2; oy=y+135+(h-240-th*scale)/2
     def p(v):
         return (ox+(v[0]+tw/2)*scale,oy+(v[1]+th/2)*scale)
     outline=([p((tw*.5*math.cos(i*math.tau/128),th*.5*math.sin(i*math.tau/128),0)) for i in range(128)]
              if plan.get('circular') else [(ox,oy),(ox+tw*scale,oy),(ox+tw*scale,oy+th*scale),(ox,oy+th*scale)])
     d.polygon(outline,'#e9e8e0','#697a83',1.3)
+    profile=plan.get('village_terrain_profile',[])
+    if profile:
+        def elevation(yy):
+            for (a,ha),(b,hb) in zip(profile,profile[1:]):
+                if yy<=b:return ha+(hb-ha)*max(0,min(1,(yy-a)/(b-a)))
+            return profile[-1][1]
+        top=max(k[1] for k in profile)
+        for i in range(100):
+            ya=-th/2+th*i/100;yb=-th/2+th*(i+1)/100
+            t=elevation((ya+yb)/2)/max(top,.01)
+            color='#%02x%02x%02x'%(round(235-45*t),round(234-26*t),round(220-44*t))
+            d.polygon([p((-tw/2,ya)),p((tw/2,ya)),p((tw/2,yb)),p((-tw/2,yb))],color)
     for at in range(0,math.ceil(tw),5):
         d.line([(ox+at*scale,oy),(ox+at*scale,oy+th*scale)],'#d9ded8',.6)
     for at in range(0,math.ceil(th),5):
@@ -118,6 +132,8 @@ def card(d, plan, x, y, w, h, scale):
     if plan.get('circular') and not plan.get('central_hill'):
         hx,hy=p(plan['hill_center'])
         d.text(hx,hy-10,f'COLLINA +{plan["hill_height_m"]:.1f} m',12,color='#72894f',bold=True,center=True)
+    for deck in plan.get('upper_decks',[]):
+        d.polygon([p(v) for v in deck['outline']],'#d8e6eb','#7598aa',1)
     # Ground constructions first; upper footprints use a lighter outline.
     solids=sorted(plan['solids'],key=lambda s:min(v[2] for v in s['corners']))
     for s in solids:
@@ -125,11 +141,11 @@ def card(d, plan, x, y, w, h, scale):
         if z1<0:
             continue
         poly=[p(v) for v in hull(s['corners'])]
-        if z0>1.9:
-            if poly:
+        if z0>s.get('ground_z_m',0)+1.9:
+            if poly and ident!='CentralBuilding':
                 d.line(poly+[poly[0]],'#a3b4bd',.65)
         else:
-            d.polygon(poly, PALETTE[s['material'] % len(PALETTE)],'#66706d',.4)
+            d.polygon(poly, PALETTE[s['material'] % len(PALETTE)],'#45565c' if ident=='FireTraining' else '#66706d',1 if ident=='FireTraining' else .4)
     for s in plan.get('shell',[]):
         poly=[p(v) for v in s]
         if min(v[2] for v in s)<1.9:
@@ -142,6 +158,9 @@ def card(d, plan, x, y, w, h, scale):
         d.line([p(v) for v in route['points']],color,3 if kind=='connector' else 1.8,kind in ('lower','upper'))
         if kind=='connector':
             cx,cy=p((0,0,0));d.text(cx,cy-20,'PASSAGGIO',11,color=color,bold=True,center=True)
+    for firing in plan.get('firing_positions',[]):
+        d.line([p(v) for v in firing['path']],'#386d91',2)
+        fx,fy=p(firing['point']);d.circle(fx,fy,3.5,'#386d91');d.text(fx+7,fy-14,'F',13,color='#386d91',bold=True)
     for room in plan.get('room_details',[]):
         if room['base']:
             continue
@@ -152,7 +171,13 @@ def card(d, plan, x, y, w, h, scale):
         positions=[s['point'] for s in plan['spawns'] if s['team']==team]
         for v in positions:
             a,b=p(v); d.circle(a,b,2.8,'#217ab6' if team==0 else '#d97732')
-        if positions:
+        zones=[z for z in plan.get('spawn_zones',[]) if z['team']==team]
+        if zones:
+            for i,zone in enumerate(zones):
+                a,b=p(zone['center']);label=('A' if team==0 else 'O')+str(i+1)
+                d.text(a,b-25 if team==0 else b+10,label,13,color='#17629a' if team==0 else '#ae5726',bold=True,center=True)
+                d.line([p(v) for v in zone['exit']],'#568b69',1.5)
+        elif positions:
             center=[sum(v[k] for v in positions)/len(positions) for k in (0,1)]
             a,b=p(center)
             d.text(a,b-28 if team==0 else b+10,'ALPHA' if team==0 else 'OMEGA',13,color='#17629a' if team==0 else '#ae5726',bold=True,center=True)
@@ -175,14 +200,29 @@ def card(d, plan, x, y, w, h, scale):
     d.text(x+24,y+h-78,f'Obiettivo {n*1500:g} m² ±10% · scarto {(area/(n*1500)-1)*100:+.1f}%',15,color='#53636b')
     note=NOTES[ident] if n<=2 else 'Vincoli e topologia adattati alla squadra'
     if ident=='FireTraining':
-        note=f'{plan["naves"]} '+('navata' if plan['naves']==1 else 'navate')+f' · {plan["bays"]} campate lungo la mappa'
+        crossing=next((r for r in plan['routes'] if r['kind']=='crossing'),None)
+        top=crossing['points'][0][2]-1 if crossing else 0
+        note=f"{plan.get('ground_rooms',0)} stanze interne · {plan.get('ground_covers',0)} coperture · soffitto {plan.get('indoor_height_m',0):g} m · rete a +{top:g} m · "+{0:'passerelle a H',1:'ponti sfalsati',2:'anello sopraelevato',3:'doppi gomiti',4:'raccordi sfalsati',5:'passerella a S'}.get(plan.get('catwalk_variant',0),'')
     elif ident=='CentralBuilding':
-        note=('Arena circolare · '+('edificio sulla collina' if plan.get('central_hill') else 'edificio a ovest · collina a est') if plan.get('circular') else 'Arena rettangolare · nucleo centrale e tetto')
+        if plan.get('circular') and 'building_size_m' in plan:
+            bw,bd,_=plan['building_size_m'];floors=plan['building_floors']
+            shapes={0:'rettangolare',1:'a H',2:'a croce',3:'a gradoni'}
+            rules={1:'aperto',2:'muro scavalcabile 1,2 m',3:'barriera fissa 3 m'}
+            note=f"{bw:g} × {bd:g} m · {shapes.get(plan['central_shape'],'')} · {floors} "+('piano' if floors==1 else 'piani')+' · '+rules.get(plan['crossing_rule'],'')
+            if plan.get('secondary_buildings'):note+=f" · {plan['secondary_buildings']} edifici minori"
+            elif plan.get('central_hill'):note+=' · collina centrale'
+        else:
+            note=('Arena circolare · '+('edificio sulla collina' if plan.get('central_hill') else 'edificio a ovest · collina a est') if plan.get('circular') else 'Arena rettangolare · nucleo centrale e tetto')
     elif ident=='Rooms':
         shapes={'rectangular':'sale rettangolari','compact':'sale compatte','irregular':'sale sagomate'}
         note=(f'4 stanze · {shapes.get(plan.get("hall_shape"),"sale centrali")}' + (' · passaggio centrale' if plan.get('hall_connection') else ' · sale separate') if plan["rooms"]==4 else f'{plan["rooms"]} stanze · '+('gallerie e incrocio su 2 quote' if plan.get('upper_crossing',True) else 'rete di corridoi al piano terra'))
     elif ident=='Village':
         note=f'{plan["blocks"]} '+('blocco' if plan['blocks']==1 else 'blocchi')+f' · {plan.get("storeys",1)} '+('piano' if plan.get("storeys",1)==1 else 'piani')+f' · {plan.get("ground_cover_pockets",0)} ripari a terra'
+        if profile:
+            center=elevation(0);base=profile[0][1]
+            note+=f' · centro +{center:g} m / basi +{base:g} m'
+        else:note+=' · terreno piano'
+
     d.text(x+24,y+h-55,note,16,color='#53636b')
     d.line([(x+25,y+h-24),(x+25+10*scale,y+h-24)],'#324b59',3)
     d.text(x+35+10*scale,y+h-32,'10 m',14)

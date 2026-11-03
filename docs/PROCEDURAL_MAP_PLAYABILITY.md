@@ -6,6 +6,7 @@ Initial spawn occlusion is a separate mandatory gameplay-generation rule, includ
 
 **Code:** `ERMapPlayability.h/.cpp`, `ERMapPlayabilityTests.cpp`, `AERProceduralMap::GenerateLogicalWorld`
 and `OnGenerationFinished`. Rooms macro graph: `ERRoomsMacro.h/.cpp`, `ERRoomsMacroTests.cpp`, `BuildRooms`.
+Spawn-zone generation: `ERSpawnZones.cpp` (shared layout queries in `ERLayoutSolids.h`).
 Spawn scoring: `ERSpawnRisk.h/.cpp`, `ERSpawnRiskTests.cpp`, `AERGameMode::ChooseScoredStart`.
 Selection and stress: `ERMapSelection.h/.cpp`, `ERMapSelectionTests.cpp`, `ERPlayability::Stress`,
 `AERProceduralMap::ResolveMapCandidate`.

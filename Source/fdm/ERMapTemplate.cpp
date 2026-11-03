@@ -57,7 +57,7 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
             (Piece.PawnBarrier && (Piece.Destructible || Piece.VisualOnly || Piece.WalkableSurface)) ||
             (Piece.MeshCollision && (!Piece.FixedMesh || Piece.Destructible || Piece.VisualOnly || Piece.PawnBarrier || Piece.WalkableSurface)) ||
             (Piece.CollisionOnly && (Piece.Destructible || Piece.FixedMesh || Piece.VisualOnly || Piece.PawnBarrier || Piece.WalkableSurface || Piece.MeshCollision)) ||
-            (Piece.Roof && (Piece.Destructible || !Piece.FixedMesh)) ||
+            (Piece.Roof && (Piece.Destructible || (!Piece.FixedMesh && !Fire))) ||
             (Piece.Destructible && (Piece.VisualOnly || Piece.FixedSurface)) || (!Piece.Destructible && (Piece.CellSurface || Piece.MirroredCellSurface))) return false;
         if(Piece.SymmetryCenter.ContainsNaN() || (!Central && !Piece.SymmetryCenter.IsNearlyZero()) || Piece.SymmetryCenter.Y!=0 || Piece.SymmetryCenter.Z!=0 || FMath::Abs(Piece.SymmetryCenter.X)>1000)return false;
         if(Symmetric && !Piece.Mirrored && ((!Mirror && !FMath::IsNearlyEqual(Piece.Center.X,Piece.SymmetryCenter.X)) || !FMath::IsNearlyZero(Piece.Center.Y) || !Piece.Jitter.IsNearlyZero()))return false;

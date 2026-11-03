@@ -15,7 +15,7 @@
 Recipes live in `Art/MapTemplates`. Reproduce a layout with
 `/Game/EclipseRecoil/Maps/<Level>?MapSeed=42`, or `ERMapGenerate <seed>` on authority.
 
-**Code:** `ERMapCatalog`, `ERMapTemplate.h`, `ERProceduralConfig.h`, `ERProceduralMap`, `ERMapSizing.cpp`, `ERMapTheme.h`.
+**Code:** `ERSpawnZones.cpp`, `ERLayoutSolids.h`, `ERMapCatalog`, `ERMapTemplate.h`, `ERProceduralConfig.h`, `ERProceduralMap`, `ERMapSizing.cpp`, `ERMapTheme.h`.
 
 ## Shared rules
 
@@ -37,7 +37,13 @@ Recipes live in `Art/MapTemplates`. Reproduce a layout with
 - Walkable decks, roofs and treads use solid surfaces with matching visible and collision
   geometry. Detailed art never provides a walkable surface.
 - All peers rebuild the same layout behind the loading gate. See [DESTRUCTION.md](DESTRUCTION.md).
-- Each template has ten supported starts per team, plus server-side overflow near the base.
+- Gameplay generation distributes the existing player slots over 1–3 paired spawn zones.
+  The seed requests the count; bounded fitting may keep fewer where the map has no safe
+  space. Secondary zones sit at least 10m apart, in screened brick pockets beside existing
+  standing routes, with checked rear exits. The primary zone retains its original start.
+  Existing standing routes and cover entry paths remain clear of the new screens.
+  Every opposing pair stays screened. Real standing, support and exit collision checks
+  run before readiness. Zone count is independent of player slots and capacity.
 - Rounds advance the seed before respawn. Menu sessions use fresh seeds.
 - Cosmetic rolls use a separate stream and never consume geometry RNG.
 
@@ -74,8 +80,8 @@ geometry, physics, calibration or damage, and their identity enters the digest.
 | --- | --- | --- | --- |
 | Central Building | Urban | outdoor brick and concrete building, steel deck interiors | asphalt, grass or snow, from the seed |
 | Alleys | Stone | sandstone houses and perimeter, some pale brick houses | three sands |
-| Fire Training | Warehouse | concrete courts inside a steel shed | wet concrete |
-| Rooms | Tunnels | cast concrete shell, wet floor, timber cover | wet concrete |
+| Fire Training | Warehouse | concrete courts and through-rooms inside a closed procedural hall | dry light concrete |
+| Rooms | Tunnels | cast concrete shell, dry floor, timber cover | dry light concrete |
 | Village | Jungle | timber, corrugated sheet, gray cladding | jungle ground |
 
 Roles stay separate so structures read at distance: shell sheets, structural steel, galvanized
@@ -113,7 +119,7 @@ continuous; no runtime displacement. Removed sets must not be reacquired by pipe
 ## Rebuilding
 
 Each template has one setup script (`setup_central_building.py`, `setup_middle_eastern_alleys.py`,
-`setup_fire_training.py`, `setup_village.py`, ...) plus versioned migrations (`setup_alley_*`,
+`setup_fire_training_procedural.py`, `setup_village.py`, ...) plus versioned migrations (`setup_alley_*`,
 `setup_village_*`, `setup_map_variety.py`, `setup_map_palettes.py`). They validate 516 seeds, keep
 a verified rollback and save only owned packages. Completed markers stop older
 scripts from downgrading. Do not recreate retired levels (Killhouse, Dust, laboratories).

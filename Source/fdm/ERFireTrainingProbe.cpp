@@ -38,7 +38,7 @@ void AERFireTrainingProbe::Tick(float Delta)
     {
         if(NetworkStage && SeenNetworkStage!=NetworkStage && Map->IsSnapshotCurrent() && Map->GetStateDigest()==ExpectedDigest)
         {
-            bool Good=L.Bases.Num()==2 && L.WarehouseBaseCourts.Num()==2 && L.WarehouseCatwalks.Num()==4;
+            bool Good=L.Bases.Num()==2 && L.WarehouseBaseCourts.Num()==2 && L.WarehouseCatwalks.Num()>=4;
             FCollisionQueryParams Q(SCENE_QUERY_STAT(ERFireNetwork),false,PC->GetPawn());FHitResult Hit;
             for(const auto& Route:L.CrossingRoutes)for(int32 I=1;I<Route.Num();++I)
             {
@@ -81,6 +81,13 @@ void AERFireTrainingProbe::Tick(float Delta)
         {
             Check(SawLadder && C->GetActorLocation().Z>HighLadderRise+80,TEXT("actual_high_ladder_climb_and_deck_exit"));
             C->ConsumeMovementInputVector();Move->StopMovementImmediately();
+            ProbedHeights.Add(HighLadderRise);
+            if(const auto* Next=L.Ladders.FindByPredicate([&](const auto& D){return D.Frame.GetLocation().Z<1 && !ProbedHeights.Contains(D.DeckHeight);}))
+            {
+                HighLadder=Next->Frame;HighLadderRise=Next->DeckHeight;SawLadder=false;SawLadderExit=false;
+                C->SetActorLocation(HighLadder.TransformPosition({55,0,C->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+3}),false,nullptr,ETeleportType::TeleportPhysics);
+                Move->StopMovementImmediately();Move->SetMovementMode(MOVE_Walking);PC->SetControlRotation((-HighLadder.GetRotation().GetForwardVector()).Rotation());StageTime=Elapsed;return;
+            }
             C->SetActorHiddenInGame(true);PC->ClientSetHUD(AHUD::StaticClass());Phase=1;StageTime=Elapsed;
         }
         else if(Elapsed-StageTime>15){Check(false,TEXT("actual_high_ladder_timeout"));FPlatformMisc::RequestExitWithStatus(false,1);Phase=99;}
@@ -131,12 +138,12 @@ void AERFireTrainingProbe::Tick(float Delta)
         {
             Map->LayoutConfig.Seed=Wanted;Check(Map->Regenerate(),TEXT("gallery_seed"));Seed=Wanted;
             FString Features;for(const FName& F:L.FeatureNames)Features+=F.ToString()+TEXT(",");
-            UE_LOG(LogTemp,Display,TEXT("ER_FIRE_GALLERY seed=%d theme=%s width=%.0f bays=%d bands=%d catwalk_z=%.0f attempt=%d elevated=%.3f overhead=%.3f open=%.3f lights=%s features=%s digest=%u"),
-                Seed,*L.ThemeName.ToString(),L.WarehouseWidth,L.WarehouseBays,L.WarehouseBands,L.WarehouseCatwalks[0].Max.Z,L.LayoutAttempt,L.ElevatedRatio,L.OverheadRatio,L.OpenRegionRatio,TEXT("procedural"),*Features,Map->GetStateDigest());
+            UE_LOG(LogTemp,Display,TEXT("ER_FIRE_GALLERY seed=%d theme=%s width=%.0f length=%.0f ceiling=%.0f catwalk_z=%.0f attempt=%d elevated=%.3f overhead=%.3f open=%.3f lights=%s features=%s digest=%u"),
+                Seed,*L.ThemeName.ToString(),L.WarehouseWidth,L.WarehouseLength,L.IndoorCeiling,L.WarehouseCatwalks[0].Max.Z,L.LayoutAttempt,L.ElevatedRatio,L.OverheadRatio,L.OpenRegionRatio,TEXT("procedural"),*Features,Map->GetStateDigest());
             StageTime=Elapsed;
         }
         if(Elapsed-StageTime<2)return;
-        const int32 Kind=Shot%PerSeed;const float HL=210.f*L.WarehouseBays,W=L.WarehouseWidth;
+        const int32 Kind=Shot%PerSeed;const float HL=L.WarehouseLength*.5f,W=L.WarehouseWidth;
         const bool Plan=Kind==0;
         TInlineComponentArray<UPrimitiveComponent*> Parts(Map);
         for(auto* Part:Parts)if(Part->ComponentHasTag(TEXT("ERTemplateRoof")))Part->SetVisibility(!Plan);

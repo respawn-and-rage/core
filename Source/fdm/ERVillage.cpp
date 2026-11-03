@@ -48,7 +48,7 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     for(const auto& P:Plans)RequiredWidth=FMath::Max(RequiredWidth,float(FMath::Abs(P.Frame.GetLocation().X)+P.Size.X*.5+200));
     // Sparse layouts reserve a further3m at each approach for the wider
     // transverse cover and its bypass, clear of spawn structures and stairs.
-    const float RequiredLength=Envelope*2+Sample(T->SizingTeamSize==1 ? 2600:Count<=2 ? 4400:3800,T->SizingTeamSize==1 ? 2800:Count<=2 ? 5000:4400);
+    const float RequiredLength=Envelope*2+(T->SizingTeamSize>=2 ? 1000:0)+Sample(T->SizingTeamSize==1 ? 2600:Count<=2 ? 4400:3800,T->SizingTeamSize==1 ? 2800:Count<=2 ? 5000:4400);
     if(RequiredWidth*2>R.ArenaMax.X || RequiredLength>R.ArenaMax.Y)return false;
     const double MinWidth=FMath::Max(double(RequiredWidth*2),R.ArenaMin.X);
     const double MaxWidth=FMath::Min(R.ArenaMax.X,FMath::Max(R.ArenaMin.X,double(RequiredWidth*2+1200)));
@@ -364,8 +364,7 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     {
         Wood({X,GalleryFront-5,GalleryHeight+55},{GalleryWidth*.28f,20,110});GraySheet({X,GalleryFront+5.1f,GalleryHeight+55},{GalleryWidth*.28f,.2f,110});
     }
-    if(T->SizingTeamSize>0)
-        Wood({0,GalleryFront-5,GalleryHeight+150},{1300,20,300});
+    Wood({0,GalleryFront-5,GalleryHeight+150},{1300,20,300});
     Wood({0,-HY+40,GalleryHeight+55},{GalleryWidth-20,20,110});
     FERTemplateBase Gallery;Gallery.Frame=FTransform(FVector(0,GalleryY,0));Gallery.Size={GalleryWidth,GalleryDepth,GalleryHeight};Gallery.RoofZ=GalleryHeight;
     L.Bases.Add(Gallery);Gallery.Frame=Gallery.Frame*HalfTurn;L.Bases.Add(Gallery);
@@ -462,6 +461,7 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     L.Routes.Add(Exit);for(auto& P:Exit)P=HalfTurn.TransformPosition(P);L.Routes.Add(Exit);L.Routes.Add(L.CrossingRoutes[0]);L.Routes.Add(L.CrossingRoutes[1]);L.Routes.Add(L.LowerRoute);
     for(const auto& Passage:L.VillagePassages)L.Routes.Add(Passage);
     L.Spawn=L.AlphaSpawns[0].GetLocation();
+    PlanVillageTerrain(L,C.Seed,Envelope,WallYs);
     if(T->SizingTeamSize>=2)
     {
         // Distribute native ground-level timber/metal L shelters across the
@@ -481,6 +481,7 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
         auto Clear=[&](const FBox& Bounds)
         {
             if(Bounds.Min.X<-HX+90 || Bounds.Max.X>HX-90 || Bounds.Min.Y<-HY+1000 || Bounds.Max.Y>HY-1000)return false;
+            if(!L.VillageTerrainProfile.IsEmpty() && !FMath::IsNearlyEqual(VillageGroundHeight(L,{0,Bounds.Min.Y-300}),VillageGroundHeight(L,{0,Bounds.Max.Y+300}),.01f))return false;
             const auto Margin=Bounds.ExpandBy(FVector(80,80,5));
             for(const auto& B:Occupied)if(Margin.Intersect(B))return false;
             const auto Standing=Bounds.ExpandBy(FVector(50,50,93));
@@ -563,6 +564,7 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
         Sky.Transform=FTransform(FQuat::Identity,FVector::ZeroVector,FVector(200000,200000,200000)/100);L.FixedPieces.Add(Sky);
     }
     L.FeatureNames={TEXT("Jungle"),TEXT("VariableSymmetricBlocks"),TEXT("OneToThreeStoreys"),TEXT("VariableSpawnBases"),TEXT("RearSpawnGalleries"),TEXT("CornerLookouts"),TEXT("SideShacks"),TEXT("GrayCoverPockets"),TEXT("AdaptiveStandingSideWalls"),TEXT("LogPalisade"),TEXT("SealedPerimeter"),TEXT("OnlyHatchedGroundPassages")};
+    ApplyVillageTerrain(L);
     Out=MoveTemp(L);return true;
 }
 }

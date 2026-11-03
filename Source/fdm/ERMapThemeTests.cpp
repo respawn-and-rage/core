@@ -18,7 +18,7 @@ bool FERMapThemeTest::RunTest(const FString& Parameters)
             TestEqual(TEXT("every physical material has its own recognizable finish"),Rows.Num(),Theme.Materials.Num());
         }
         auto* Raw=DuplicateObject<UERMapTemplate>(Saved,GetTransientPackage());Raw->ThemeLibrary=nullptr;
-        FERProceduralConfig C;FERBlockRoomConfig B;TSet<int32> TemplateSeen;
+        FERProceduralConfig C;C.ExpectedTeamSize=3;FERBlockRoomConfig B;TSet<int32> TemplateSeen;
         for(int32 Seed=0;Seed<32;++Seed)
         {
             C.Seed=Seed;C.TemplateAsset=Raw;FERProceduralLayout Before,After,Again;

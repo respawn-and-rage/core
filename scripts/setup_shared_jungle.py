@@ -15,7 +15,7 @@ sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 protected=[p for p in (private/'Content/EclipseRecoil/Art/MapTemplates').glob('*.uasset') if p!=file]
 protected+=list((private/'Content/EclipseRecoil/Maps').glob('*.umap'))
 protected+=[private/'Content/EclipseRecoil/Art/Destruction/DA_ER_BlockMaterials.uasset']
-protected+=list((private/'Content/EclipseRecoil/Art/Village').rglob('*.uasset'))+list((private/'Content/EclipseRecoil/Art/FireTraining/WarehouseTheme').rglob('*.uasset'))
+protected+=list((private/'Content/EclipseRecoil/Art/Village').rglob('*.uasset'))+list((private/'Content/EclipseRecoil/Art/Industrial/SharedSteel').rglob('*.uasset'))
 before={str(p):sha(p) for p in protected}
 backup=root/'Saved/MapThemesBackup/before-shared-jungle.zip';backup.parent.mkdir(parents=True,exist_ok=True)
 if not backup.exists():
@@ -30,7 +30,7 @@ def identity(theme):
 themes=list(library.get_editor_property('themes'));original={str(t.get_editor_property('name')):identity(t) for t in themes}
 if set(original)!={'Industrial','Desert','Jungle'}:raise RuntimeError('Unexpected palette ownership')
 jungle=next(t for t in themes if str(t.get_editor_property('name'))=='Jungle')
-for key,path in dict(shell_steel='/Game/EclipseRecoil/Art/Village/Topology/M_Village_GraySheet',ladder_steel='/Game/EclipseRecoil/Art/FireTraining/WarehouseTheme/MI_ER_WH_LadderGalvanized',deck_steel='/Game/EclipseRecoil/Art/FireTraining/WarehouseTheme/MI_ER_WH_DeckPlates').items():
+for key,path in dict(shell_steel='/Game/EclipseRecoil/Art/Village/Topology/M_Village_GraySheet',ladder_steel='/Game/EclipseRecoil/Art/Industrial/SharedSteel/MI_ER_IndustrialLadderGalvanized',deck_steel='/Game/EclipseRecoil/Art/Industrial/SharedSteel/MI_ER_IndustrialDeckPlates').items():
     obj=a.load_asset(path)
     if not obj:raise RuntimeError('Missing theme role '+path)
     jungle.set_editor_property(key,obj)

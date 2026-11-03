@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Fire Training warehouse: native layout/physics tests or real Metal captures."""
+"""Procedural Fire Training: layout/physics, pawn movement, Metal captures and network snapshots."""
 import argparse,json,os,re,subprocess,time
 from pathlib import Path
 from client_shutdown import settle_clients
 p=argparse.ArgumentParser(description=__doc__)
+p.add_argument('--game',action='store_true',help='Run the real pawn ladder probe without rendering')
+p.add_argument('--team-size',type=int,choices=range(1,17),help='Expected team size for game/network probes')
 p.add_argument('--render',action='store_true',help='Launch L_FireTraining and capture plan/base/catwalk/steel detail/distant views')
 p.add_argument('--seed',type=int,default=42,help='Initial game or network seed')
 p.add_argument('--next-seed',type=int,default=73,help='Network regeneration seed')
@@ -14,7 +16,8 @@ args=p.parse_args();args.render|=args.offscreen
 if args.network and args.render:p.error('--network runs separately from the Metal gallery')
 root=Path(__file__).resolve().parents[1];out=root/'Saved/Testing';out.mkdir(parents=True,exist_ok=True)
 exe=Path(os.environ.get('UE_ROOT','/Users/Shared/Epic Games/UE_5.8'))/'Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor'
-common=[str(exe),str(root/'RespawnAndRage.uproject'),'-nosound','-unattended','-NoSplash','-stdout','-FullStdOutLogOutput']
+common=[str(exe),str(root/'RespawnAndRage.uproject'),'-nosound','-unattended','-NoSplash','-Multiprocess','-stdout','-FullStdOutLogOutput']
+if args.team_size:common+=['-ini:Game:[RespawnAndRage.ServerRules]:Map.ExpectedTeamSize='+str(args.team_size)]
 if args.network:
     common+=['-Multiprocess','-game','-nullrhi','-ExecCmds=t.MaxFPS 60','-MULTIHOME=0.0.0.0']
     processes=[];handles=[];paths={}
@@ -55,7 +58,7 @@ if args.network:
             try:process.wait(timeout=10)
             except subprocess.TimeoutExpired:process.kill();process.wait()
         for handle in handles:handle.close()
-if not args.render:
+if not(args.render or args.game):
     path=out/'fire-training-automation.log'
     with path.open('w') as f:
         r=subprocess.run(common+['-nullrhi','-ExecCmds=Automation RunTests EclipseRecoil.Destruction.FireTraining','-TestExit=Automation Test Queue Empty'],stdout=f,stderr=subprocess.STDOUT,timeout=900)
@@ -66,6 +69,7 @@ if not args.render:
 path=out/'fire-training-metal.log'
 command=common+[f'/Game/EclipseRecoil/Maps/L_FireTraining?Name=Host?MapSeed={args.seed}','-game','-windowed','-ResX=1600','-ResY=900','-ERFireTrainingProbe','-ERFireTrainingSeeds='+args.seeds,
                 '-ExecCmds=t.MaxFPS 60,sg.GlobalIlluminationQuality 0,sg.ReflectionQuality 0,sg.ShadowQuality 1']+(['-RenderOffscreen'] if args.offscreen else [])
+if args.game and not args.render:command.append('-nullrhi')
 started_at=time.time()
 with path.open('w') as f:r=subprocess.run(command,stdout=f,stderr=subprocess.STDOUT,timeout=600)
 text=path.read_text(errors='replace')

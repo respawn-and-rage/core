@@ -26,10 +26,17 @@ bool FERVillageLayoutTest::RunTest(const FString& Parameters)
     {
         C.Seed=Seed;if(!TestTrue(TEXT("Village accepts seed"),ERProcedural::Build(C,B,L)))return false;
         const int32 N=L.VillageBlocks.Num();int32 Floors=0,Centered=0;
+        for(float Y=-L.ArenaSize.Y*.5f;Y<L.ArenaSize.Y*.5f;Y+=100)
+        {
+            const float H=ERProcedural::VillageGroundHeight(L,{0,Y});
+            TestTrue(TEXT("terrain has no transverse slope"),FMath::IsNearlyEqual(H,ERProcedural::VillageGroundHeight(L,{L.ArenaSize.X*.4f,Y}),.001f));
+            TestTrue(TEXT("both teams face the same height profile"),FMath::IsNearlyEqual(H,ERProcedural::VillageGroundHeight(L,{0,-Y}),.001f));
+            TestTrue(TEXT("terrain grade stays walkable"),FMath::Abs(H-ERProcedural::VillageGroundHeight(L,{0,Y+10}))<=5.01f);
+        }
         for(const auto& Block:L.VillageBlocks)
         {
             Floors+=Block.Storeys;Storeys.Add(Block.Storeys);
-            if(Block.SelfSymmetric){++Centered;TestTrue(TEXT("odd centre block stays at origin"),Block.Frame.GetLocation().IsNearlyZero());}
+            if(Block.SelfSymmetric){++Centered;TestTrue(TEXT("odd centre block stays at origin"),FVector2D(Block.Frame.GetLocation()).IsNearlyZero());}
         }
         BlockCounts.Add(N);BaseVariants.Add(L.VillageBaseVariant);
         TestTrue(TEXT("variable block count within recipe"),N>=T->Village.MinCentralBlocks && N<=T->Village.MaxCentralBlocks);
@@ -110,7 +117,16 @@ bool FERVillagePhysicsTest::RunTest(const FString& Parameters)
     {
         Map->LayoutConfig.Seed=Seed;Asset->Village.DeckHeight=240+20*(uint32(Seed)%3);if(!TestTrue(TEXT("Village physical generation"),Map->Regenerate()))continue;
         AddInfo(FString::Printf(TEXT("ER_VILLAGE_PHYSICAL_SEED %d"),Seed));
-        const auto& L=Map->GetLayout();TestTrue(TEXT("valid cell world"),Map->ValidateCells());TestTrue(TEXT("Village uses a shared palette"),L.ThemeIndex!=INDEX_NONE && !L.ThemeName.IsNone());
+        const auto& L=Map->GetLayout();
+        for(float Y=-L.ArenaSize.Y*.5f+80;Y<L.ArenaSize.Y*.5f-80;Y+=100)
+        {
+            const float H=ERProcedural::VillageGroundHeight(L,{0,Y});
+            // Use a flank, clear of central timber platforms.
+            const float X=L.ArenaSize.X*.5f-80;
+            if(World->LineTraceSingleByChannel(Hit,{X,Y,H+25},{X,Y,H-25},ECC_Visibility,Q) && Hit.GetComponent() && Hit.GetComponent()->GetName()==TEXT("AlleyTerrain"))
+                TestTrue(TEXT("visible terrain and queried ground agree"),FMath::IsNearlyEqual(float(Hit.ImpactPoint.Z),H,.05f));
+        }
+        TestTrue(TEXT("valid cell world"),Map->ValidateCells());TestTrue(TEXT("Village uses a shared palette"),L.ThemeIndex!=INDEX_NONE && !L.ThemeName.IsNone());
         int32 Floors=0;for(const auto& Block:L.VillageBlocks)Floors+=Block.Storeys;
         TestEqual(TEXT("all storey decks plus four spawn structures"),L.ElevatedDecks.Num(),Floors+4);
         TestEqual(TEXT("two rear spawn galleries"),L.Bases.Num(),2);
@@ -129,7 +145,7 @@ bool FERVillagePhysicsTest::RunTest(const FString& Parameters)
             TestTrue(TEXT("gray cover interrupts crouched sightline"),World->LineTraceSingleByChannel(Hit,Cover.SightFrom,Cover.SightTo,ECC_Visibility,Q));
             TestFalse(TEXT("cover pocket has an open access"),World->SweepSingleByChannel(Hit,Cover.Entry+FVector(0,0,2),Cover.Hide+FVector(0,0,2),FQuat::Identity,ECC_Pawn,FCollisionShape::MakeCapsule(34,60),Q));
         }
-        bool Door=false;const FVector Storage(L.TownBuildings[0].GetCenter().X,L.TownBuildings[0].GetCenter().Y,0);const float StorageHalf=L.TownBuildings[0].GetExtent().Y;
+        bool Door=false;const FVector Storage(L.TownBuildings[0].GetCenter().X,L.TownBuildings[0].GetCenter().Y,L.TownBuildings[0].Min.Z);const float StorageHalf=L.TownBuildings[0].GetExtent().Y;
         for(float DX=-190;DX<=190;DX+=20)for(float Side:{-1.f,1.f})
             Door|=!World->SweepSingleByChannel(Hit,Storage+FVector(DX,Side*(StorageHalf+60),100),Storage+FVector(DX,Side*(StorageHalf-85),100),FQuat::Identity,ECC_Pawn,Capsule,Q);
         TestTrue(TEXT("side shack has real standing through-door"),Door);
@@ -164,9 +180,9 @@ bool FERVillagePhysicsTest::RunTest(const FString& Parameters)
         for(const auto& Wall:L.VillageSideWalls)
         {
             const auto P=Wall.GetCenter();const float InnerX=P.X<0 ? Wall.Max.X:Wall.Min.X;
-            TestTrue(TEXT("lateral cover blocks standing eye-height sightline"),World->LineTraceSingleByChannel(Hit,{P.X,P.Y-100,164},{P.X,P.Y+100,164},ECC_Visibility,Q));
-            TestTrue(TEXT("lateral cover extends across its full raised span"),World->LineTraceSingleByChannel(Hit,{InnerX+(P.X<0 ? -40:40),P.Y-100,220},{InnerX+(P.X<0 ? -40:40),P.Y+100,220},ECC_Visibility,Q));
-            TestFalse(TEXT("standing hide position behind side wall clear"),World->OverlapBlockingTestByChannel({P.X,P.Y-70,100},FQuat::Identity,ECC_Pawn,Capsule,Q));
+            TestTrue(TEXT("lateral cover blocks standing eye-height sightline"),World->LineTraceSingleByChannel(Hit,{P.X,P.Y-100,Wall.Min.Z+164},{P.X,P.Y+100,Wall.Min.Z+164},ECC_Visibility,Q));
+            TestTrue(TEXT("lateral cover extends across its full raised span"),World->LineTraceSingleByChannel(Hit,{InnerX+(P.X<0 ? -40:40),P.Y-100,Wall.Min.Z+220},{InnerX+(P.X<0 ? -40:40),P.Y+100,Wall.Min.Z+220},ECC_Visibility,Q));
+            TestFalse(TEXT("standing hide position behind side wall clear"),World->OverlapBlockingTestByChannel({P.X,P.Y-70,Wall.Min.Z+100},FQuat::Identity,ECC_Pawn,Capsule,Q));
         }
         for(const auto& House:L.SecondaryStructures)
         {
@@ -195,7 +211,7 @@ bool FERVillagePhysicsTest::RunTest(const FString& Parameters)
         for(const auto& Polygon:L.VillageClosedGround)for(int32 I=0;I<Polygon.Num();++I)
         {
             const FVector2D A=Polygon[I],Edge=Polygon[(I+1)%Polygon.Num()]-A,N=FVector2D(-Edge.Y,Edge.X).GetSafeNormal(),P=A+Edge*.5;
-            TestTrue(TEXT("sealed bay wall is actual visible collision"),World->LineTraceSingleByChannel(Hit,{P.X+N.X*30,P.Y+N.Y*30,100},{P.X-N.X*30,P.Y-N.Y*30,100},ECC_Visibility,Q));
+            TestTrue(TEXT("sealed bay wall is actual visible collision"),World->LineTraceSingleByChannel(Hit,{P.X+N.X*30,P.Y+N.Y*30,ERProcedural::VillageGroundHeight(L,P)+100},{P.X-N.X*30,P.Y-N.Y*30,ERProcedural::VillageGroundHeight(L,P)+100},ECC_Visibility,Q));
         }
         for(int32 I=1;I<L.LowerRoute.Num();++I)TestFalse(TEXT("middle ground lane still traversable"),World->SweepSingleByChannel(Hit,L.LowerRoute[I-1],L.LowerRoute[I],FQuat::Identity,ECC_Pawn,Capsule,Q));
         if(Seed==0 || Seed==42 || Seed==73)

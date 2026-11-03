@@ -126,8 +126,7 @@ struct FERCentralBuildingRecipe
     UPROPERTY(EditAnywhere, BlueprintReadWrite) TArray<TObjectPtr<class UMaterialInterface>> GroundSurfaces;
 };
 
-// One complete warehouse cross-section from the prepared kit. A width is
-// selectable only when every module exists; nothing is ever stretched.
+// Legacy warehouse references retained solely for loading and migrating old recipes.
 USTRUCT(BlueprintType)
 struct FERWarehouseWidthKit
 {
@@ -141,8 +140,8 @@ struct FERWarehouseWidthKit
     UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<class UStaticMesh> EndCrown;
 };
 
-// Killhouse-style warehouse: one open volume whose length/width/height come
-// from repeated kit modules, furnished with local decks, corridors and cargo.
+// Closed procedural training hall with independent dimensions and local elevated routes.
+// Legacy kit fields remain readable for asset migration; generation never uses them.
 USTRUCT(BlueprintType)
 struct FERFireTrainingRecipe
 {
@@ -155,12 +154,14 @@ struct FERFireTrainingRecipe
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="1",ClampMax="4")) int32 MinNaves=1;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="1",ClampMax="4")) int32 MaxNaves=4;
     // Longest allowed length / total width, so narrow halls never become tubes.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite) float MaxAspect=7;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float MaxAspect=1.5f;
     // Largest halls reserve this many empty plazas per half, scaled by floor area.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0",ClampMax="3")) int32 MaxPlazas=3;
     // 300cm wall bands only raise the envelope; they never add an upper floor.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="1",ClampMax="5")) int32 MinHeightBands=2;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="1",ClampMax="5")) int32 MaxHeightBands=4;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float MinCeilingHeight=800;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float MaxCeilingHeight=1400;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) float ElevatedTargetRatio=.2f;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) float ElevatedMaxRatio=.3f;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) float OverheadMaxRatio=.4f;
@@ -328,6 +329,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FERCentralBuildingRecipe CentralBuilding;
     // Only set on an ephemeral per-build copy, never saved into an authored asset.
     UPROPERTY(Transient) int32 SizingTeamSize=0;
+    UPROPERTY(Transient) int32 CompositionSeed=42;
     UPROPERTY(Transient) bool SizingRoomsGroundOnly=false;
     UPROPERTY(Transient) bool ReflectionBuild=false;
     UPROPERTY(Transient) FVector2D SizingArena=FVector2D::ZeroVector;

@@ -14,6 +14,7 @@ p.add_argument('--game', action='store_true', help='Climb timber stairs, damage 
 p.add_argument('--render', action='store_true', help='Real Metal game and 6 captures')
 p.add_argument('--network', action='store_true', help='Initial and late LAN clients across damage and regeneration')
 p.add_argument('--offscreen', action='store_true', help='Render Metal without showing a game window')
+p.add_argument('--team-size', type=int, choices=range(1,17), help='Expected team size for game/network probes')
 p.add_argument('--seed', type=int, default=42)
 p.add_argument('--next-seed', type=int, default=73)
 args = p.parse_args()
@@ -23,6 +24,7 @@ out = root/'Saved/Testing'
 out.mkdir(parents=True, exist_ok=True)
 exe = Path(os.environ.get('UE_ROOT', '/Users/Shared/Epic Games/UE_5.8'))/'Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor'
 common = [str(exe), str(root/'RespawnAndRage.uproject'), '-nosound', '-unattended', '-NoSplash', '-Multiprocess', '-stdout', '-FullStdOutLogOutput']
+if args.team_size:common+=['-ini:Game:[RespawnAndRage.ServerRules]:Map.ExpectedTeamSize='+str(args.team_size)]
 if not (args.game or args.render or args.network):
     log = out/'village-automation.log'
     with log.open('w') as f:

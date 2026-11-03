@@ -57,7 +57,7 @@ else:
         themes.append(theme)
     recipe = ue.ERRoomsRecipe()
     recipe.set_editor_property('themes', themes)
-    recipe.set_editor_property('lamp_surface', load('/Game/EclipseRecoil/Art/FireTraining/M_ER_WH_LampEmissive'))
+    recipe.set_editor_property('lamp_surface', load('/Game/EclipseRecoil/Art/Industrial/SharedSteel/M_ER_IndustrialLampEmissive'))
     candidate = ue.new_object(ue.ERMapTemplate)
     for key, value in [('template_id', 'rooms.indoor'), ('revision', 1),
                        ('source_reference', 'Original sealed room graph for 3v3 / 4v4; existing Industrial, Desert and Warehouse material themes'),

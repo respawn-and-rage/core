@@ -11,18 +11,18 @@ root=Path(ue.Paths.project_dir()).resolve();private=root/'Assets/maps';a=ue.Edit
 tools=ue.AssetToolsHelpers.get_asset_tools()
 art='/Game/EclipseRecoil/Art/';base=art+'MapTemplates/';alley=art+'MiddleEasternAlleys/'
 names=['CentralBuilding','MiddleEasternAlleys','FireTraining','Rooms','Village']
-sf=art+'Industrial/SketchfabTextures/M_ER_SF_';pbr=art+'ProceduralTextures/M_ER_PBR_';wh=art+'FireTraining/'
+sf=art+'Industrial/SketchfabTextures/M_ER_SF_';pbr=art+'ProceduralTextures/M_ER_PBR_';wh=art+'Industrial/SharedSteel/'
 glass=art+'ProceduralTextures/M_ER_Glass';village=art+'Village/M_ER_Jungle_'
-ladder=wh+'WarehouseTheme/MI_ER_WH_LadderGalvanized';deck=wh+'WarehouseTheme/MI_ER_WH_DeckPlates';wet=wh+'M_ER_WH_WetConcrete'
+ladder=wh+'MI_ER_IndustrialLadderGalvanized';deck=wh+'MI_ER_IndustrialDeckPlates';dry=sf+'concrete_seamless'
 sand=alley+'MI_ER_AlleySandstone';pale=alley+'MI_ER_AlleyLightBrick'
 plaster=pbr+'Plaster001';brick=pbr+'red_brick_03';stone=pbr+'stone_wall_02';rust=pbr+'rusty_metal_04'
 concrete=sf+'concrete_seamless';cast=pbr+'concrete_wall_006';wood=sf+'wood_05'
 # Order follows EERBlockMaterial: Drywall, Brick, Concrete, Wood, Stone, Metal, Glass.
 palettes=dict(
-    CentralBuilding=dict(name='Urban',materials=[plaster,brick,concrete,wood,stone,rust,glass],wall=concrete,floor=deck,ceiling=deck,grounds=[sf+'asphalt_11',sf+'grass_02',sf+'snow_01'],shell=wh+'M_ER_WH_Metal'),
-    MiddleEasternAlleys=dict(name='Stone',materials=[alley+'M_ER_AlleyPlaster',pale,concrete,wood,sand,rust,glass],wall=sand,floor=alley+'M_ER_AlleyRoof',ceiling=alley+'M_ER_AlleyRoof',grounds=[alley+'M_ER_ThreeSands'],shell=wh+'M_ER_WH_Metal'),
-    FireTraining=dict(name='Warehouse',materials=[plaster,brick,concrete,wood,stone,rust,glass],wall=concrete,floor=wet,ceiling=wh+'WarehouseTheme/MI_ER_WH_RoofSteel',grounds=[wet],shell=wh+'M_ER_WH_Metal'),
-    Rooms=dict(name='Tunnels',materials=[plaster,brick,cast,wood,stone,rust,glass],wall=cast,floor=wet,ceiling=cast,grounds=[wet],shell=wh+'M_ER_WH_Metal'),
+    CentralBuilding=dict(name='Urban',materials=[plaster,brick,concrete,wood,stone,rust,glass],wall=concrete,floor=deck,ceiling=deck,grounds=[sf+'asphalt_11',sf+'grass_02',sf+'snow_01'],shell=wh+'M_ER_IndustrialShellSteel'),
+    MiddleEasternAlleys=dict(name='Stone',materials=[alley+'M_ER_AlleyPlaster',pale,concrete,wood,sand,rust,glass],wall=sand,floor=alley+'M_ER_AlleyRoof',ceiling=alley+'M_ER_AlleyRoof',grounds=[alley+'M_ER_ThreeSands'],shell=wh+'M_ER_IndustrialShellSteel'),
+    FireTraining=dict(name='Training Hall',materials=[plaster,brick,concrete,wood,stone,rust,glass],wall=concrete,floor=dry,ceiling=art+'FireTraining/Procedural/M_ER_FireTraining_CeilingSteel',grounds=[dry],shell=wh+'M_ER_IndustrialShellSteel'),
+    Rooms=dict(name='Tunnels',materials=[plaster,brick,cast,wood,stone,rust,glass],wall=cast,floor=dry,ceiling=cast,grounds=[dry],shell=wh+'M_ER_IndustrialShellSteel'),
     Village=dict(name='Jungle',materials=[plaster,brick,concrete,village+'Timber',stone,village+'Corrugated',glass],wall=village+'Timber',floor=village+'Timber',ceiling=village+'Corrugated',grounds=[village+'Ground'],shell=art+'Village/Topology/M_Village_GraySheet'),
 )
 def disk(path):return private/('Content/'+path.removeprefix('/Game/')+'.uasset')
@@ -86,9 +86,13 @@ for name in names:
     else:
         factory=ue.DataAssetFactory();factory.set_editor_property('data_asset_class',ue.ERMapThemeLibrary)
         library=tools.create_asset('DA_Theme_'+name,base.rstrip('/'),ue.ERMapThemeLibrary,factory)
-    theme=ue.ERMapThemePalette()
-    for key,value in dict(name=spec['name'],materials=[load(p) for p in spec['materials']],wall=load(spec['wall']),floor=load(spec['floor']),ceiling=load(spec['ceiling']),grounds=[load(p) for p in spec['grounds']],shell_steel=load(spec['shell']),ladder_steel=load(ladder),deck_steel=load(deck),preserve_cargo_paint=True).items():
-        theme.set_editor_property(key,value)
+    # Retain the explicit ceiling/wall finish migration when older setup is rerun.
+    if name=='FireTraining' and a.get_metadata_tag(library,'ERFireTrainingFinishesRevision')=='1':
+        theme=list(library.get_editor_property('themes'))[0]
+    else:
+        theme=ue.ERMapThemePalette()
+        for key,value in dict(name=spec['name'],materials=[load(p) for p in spec['materials']],wall=load(spec['wall']),floor=load(spec['floor']),ceiling=load(spec['ceiling']),grounds=[load(p) for p in spec['grounds']],shell_steel=load(spec['shell']),ladder_steel=load(ladder),deck_steel=load(deck),preserve_cargo_paint=True).items():
+            theme.set_editor_property(key,value)
     library.set_editor_property('themes',[theme]);save(library)
     recipe.set_editor_property('theme_library',library)
     if a.get_metadata_tag(recipe,'ERMapPaletteRevision')!='1':

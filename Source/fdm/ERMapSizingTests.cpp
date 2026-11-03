@@ -93,6 +93,20 @@ TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralCon
     O->SetBoolField(TEXT("circular"),L.CircularArena);O->SetBoolField(TEXT("central_hill"),L.CentralHill);
     O->SetField(TEXT("hill_center"),Vector(L.HillCenter));O->SetNumberField(TEXT("hill_height_m"),L.HillHeight/100);
     O->SetField(TEXT("building_center"),Vector(L.CentralBuildingCenter));
+    O->SetField(TEXT("building_size_m"),Vector(L.CentralBuildingSize));
+    O->SetNumberField(TEXT("central_shape"),L.CentralShape);O->SetNumberField(TEXT("crossing_rule"),int32(L.CrossingRule));
+    O->SetNumberField(TEXT("secondary_buildings"),L.SecondaryStructures.Num());
+    TArray<TSharedPtr<FJsonValue>> TerrainProfile;
+    for(const auto& Knot:L.VillageTerrainProfile)TerrainProfile.Add(MakeShared<FJsonValueArray>(TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueNumber>(Knot.X/100),MakeShared<FJsonValueNumber>(Knot.Y/100)}));
+    O->SetArrayField(TEXT("village_terrain_profile"),TerrainProfile);
+    O->SetNumberField(TEXT("ground_rooms"),L.FeatureNames.FilterByPredicate([](FName Feature){return Feature==TEXT("GroundRoom");}).Num()*2);
+    O->SetNumberField(TEXT("ground_covers"),L.CentralLowCovers*2);
+    TArray<TSharedPtr<FJsonValue>> FiringPositions;
+    for(const auto& Site:L.CoverSites)if(Site.FiringStair!=INDEX_NONE)
+    {
+        auto F=MakeShared<FJsonObject>();F->SetField(TEXT("point"),Vector(Site.FiringPosition));F->SetField(TEXT("path"),Points(L.StairRoutes[Site.FiringStair]));FiringPositions.Add(MakeShared<FJsonValueObject>(F));
+    }
+    O->SetArrayField(TEXT("firing_positions"),FiringPositions);
     O->SetField(TEXT("dimensions_m"),Vector(L.ArenaSize));O->SetStringField(TEXT("theme"),L.ThemeName.ToString());
     O->SetNumberField(TEXT("building_floors"),L.BuildingFloors);O->SetNumberField(TEXT("blocks"),L.VillageBlocks.Num());
     int32 Storeys=0;for(const auto& P:L.VillageBlocks)Storeys=FMath::Max(Storeys,P.Storeys);
@@ -110,6 +124,7 @@ TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralCon
         }
         O->SetArrayField(TEXT("room_details"),Details);
     }
+    O->SetNumberField(TEXT("catwalk_variant"),L.WarehouseCatwalkVariant);O->SetNumberField(TEXT("indoor_height_m"),L.IndoorCeiling/100);
     O->SetNumberField(TEXT("naves"),L.WarehouseNaves);O->SetNumberField(TEXT("bays"),L.WarehouseBays);O->SetNumberField(TEXT("rooms"),L.Rooms.Num());
     TArray<TSharedPtr<FJsonValue>> Solids,Floors,Routes,Spawns,Shell;
     auto Box=[&](const FTransform& Frame,FVector Min,FVector Max,int32 Material)
@@ -117,7 +132,10 @@ TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralCon
         const FBox Bounds=FBox(Min,Max).TransformBy(Frame);if(Bounds.GetSize().Z<80)return;
         TArray<FVector> Corners;for(int32 Z=0;Z<2;++Z)for(int32 Y=0;Y<2;++Y)for(int32 X=0;X<2;++X)
             Corners.Add(Frame.TransformPosition({X ? Max.X:Min.X,Y ? Max.Y:Min.Y,Z ? Max.Z:Min.Z}));
-        auto S=MakeShared<FJsonObject>();S->SetField(TEXT("corners"),Points(Corners));S->SetNumberField(TEXT("material"),Material);Solids.Add(MakeShared<FJsonValueObject>(S));
+        auto S=MakeShared<FJsonObject>();S->SetField(TEXT("corners"),Points(Corners));S->SetNumberField(TEXT("material"),Material);
+        const FVector2D XY(Bounds.GetCenter());
+        const float Ground=L.GradedTerrain ? (L.CircularArena ? ERProcedural::CentralGroundHeight(L,XY):ERProcedural::AlleyGroundHeight(L,XY)):0;
+        S->SetNumberField(TEXT("ground_z_m"),Ground/100);Solids.Add(MakeShared<FJsonValueObject>(S));
     };
     for(const auto& P:L.Panels)
     {
@@ -134,6 +152,13 @@ TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralCon
     }
     for(const auto& P:L.FixedPieces)if(!P.VisualOnly && !P.CollisionOnly)
         Box(FTransform(P.Transform.GetRotation(),P.Transform.GetLocation()),-P.Transform.GetScale3D()*50,P.Transform.GetScale3D()*50,uint8(P.Material));
+    TArray<TSharedPtr<FJsonValue>> UpperDecks;
+    if(Id==TEXT("FireTraining"))for(const auto& Deck:L.ElevatedDecks)
+    {
+        auto D=MakeShared<FJsonObject>();D->SetNumberField(TEXT("height_m"),Deck.Max.Z/100);
+        D->SetField(TEXT("outline"),Points({{Deck.Min.X,Deck.Min.Y,Deck.Max.Z},{Deck.Max.X,Deck.Min.Y,Deck.Max.Z},{Deck.Max.X,Deck.Max.Y,Deck.Max.Z},{Deck.Min.X,Deck.Max.Y,Deck.Max.Z}}));UpperDecks.Add(MakeShared<FJsonValueObject>(D));
+    }
+    O->SetArrayField(TEXT("upper_decks"),UpperDecks);
     auto Floor=[&](const TArray<FVector>& P){Floors.Add(Points(P));};
     for(const auto& R:L.RoomNodes)
     {TArray<FVector> P;for(auto V:R.Polygon)P.Add(R.Center+FVector(V,0));Floor(P);}
@@ -142,6 +167,7 @@ TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralCon
         const FVector Across=FVector::CrossProduct((E.End-E.Start).GetSafeNormal2D(),FVector::UpVector)*E.Width*.5;
         Floor({E.Start+Across,E.End+Across,E.End-Across,E.Start-Across});
     }
+    for(const auto& B:L.CentralFootprints)Floor({{B.Min.X,B.Min.Y,B.Min.Z},{B.Max.X,B.Min.Y,B.Min.Z},{B.Max.X,B.Max.Y,B.Min.Z},{B.Min.X,B.Max.Y,B.Min.Z}});
     for(const auto& B:L.TownBuildings)Floor({{B.Min.X,B.Min.Y,B.Min.Z},{B.Max.X,B.Min.Y,B.Min.Z},{B.Max.X,B.Max.Y,B.Min.Z},{B.Min.X,B.Max.Y,B.Min.Z}});
     auto Paths=[&](const TArray<TArray<FVector>>& Set,const TCHAR* Kind)
     {for(const auto& Path:Set)if(Path.Num()>1){auto R=MakeShared<FJsonObject>();R->SetStringField(TEXT("kind"),Kind);R->SetField(TEXT("points"),Points(Path));Routes.Add(MakeShared<FJsonValueObject>(R));}};
@@ -151,6 +177,12 @@ TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralCon
     if(!L.UnderpassRoute.IsEmpty())Paths({L.UnderpassRoute},TEXT("lower"));
     for(int32 Team=0;Team<2;++Team)for(const auto& S:Team ? L.OmegaSpawns:L.AlphaSpawns)
     {auto P=MakeShared<FJsonObject>();P->SetNumberField(TEXT("team"),Team);P->SetField(TEXT("point"),Vector(S.GetLocation()));Spawns.Add(MakeShared<FJsonValueObject>(P));}
+    TArray<TSharedPtr<FJsonValue>> Zones;
+    for(const auto& Zone:L.SpawnZones)
+    {
+        auto Z=MakeShared<FJsonObject>();Z->SetNumberField(TEXT("team"),Zone.Team);Z->SetNumberField(TEXT("first_start"),Zone.FirstStart);Z->SetNumberField(TEXT("count"),Zone.StartCount);Z->SetField(TEXT("center"),Vector(Zone.Center));Z->SetField(TEXT("exit"),Points(Zone.ExitRoute));Zones.Add(MakeShared<FJsonValueObject>(Z));
+    }
+    O->SetArrayField(TEXT("spawn_zones"),Zones);
     for(const auto& F:L.RoomShell)
     {
         const FVector Normal=FVector::CrossProduct(F.B-F.A,F.C-F.A).GetSafeNormal();
@@ -199,9 +231,29 @@ bool FERMapSizingTest::RunTest(const FString&)
                 TestTrue(TEXT("room footprints remain inside measured arena"),FMath::Abs(Node.Center.X)+Node.Size.X*.5+20<=L.ArenaSize.X*.5 && FMath::Abs(Node.Center.Y)+Node.Size.Y*.5+20<=L.ArenaSize.Y*.5);
             if(L.UnderpassAxis==1)for(int32 I=1;I<L.UnderpassRoute.Num();++I)
                 TestTrue(TEXT("underground approach never folds back into ramp"),L.UnderpassRoute[I].Y>=L.UnderpassRoute[I-1].Y-.01);
+            if(Id==TEXT("MiddleEasternAlleys") && TeamSize==3)
+            {
+                TestTrue(TEXT("3v3 central cross alley has multiple elbows"),L.RoomAccessRoutes.Num()>=2 && L.RoomAccessRoutes[0].Num()>=4);
+                if(!L.RoomAccessRoutes.IsEmpty())
+                {
+                    double MinY=0,MaxY=-10000;
+                    for(const auto& Point:L.RoomAccessRoutes[0]){MinY=FMath::Min(MinY,Point.Y);MaxY=FMath::Max(MaxY,Point.Y);}
+                    TestTrue(TEXT("3v3 central cross alley changes level in plan by at least3m"),MaxY-MinY>=300);
+                }
+                double CentralHouseArea=0;
+                for(const auto& House:L.Houses)
+                {
+                    const auto Size=House.Frame.GetScale3D();
+                    const FBox Footprint=FBox(-FVector(Size.X,Size.Y,0)*.5,FVector(Size.X,Size.Y,0)*.5+FVector(0,0,Size.Z)).TransformBy(FTransform(House.Frame.GetRotation(),House.Frame.GetLocation()));
+                    const double Depth=FMath::Max(0.,FMath::Min(1000.,Footprint.Max.Y)-FMath::Max(-1000.,Footprint.Min.Y));
+                    CentralHouseArea+=Footprint.GetSize().X*Depth/10000.;
+                }
+                TestTrue(TEXT("3v3 center contains at least80m2 of house footprints in its middle20m band"),CentralHouseArea>=80.);
+                TestEqual(TEXT("3v3 center is a built district rather than a reserved square"),L.DistrictOpenHalfDepth,0.f);
+            }
             if(Id==TEXT("CentralBuilding"))TestTrue(TEXT("central arena is near square"),FMath::Max(L.ArenaSize.X,L.ArenaSize.Y)<=FMath::Min(L.ArenaSize.X,L.ArenaSize.Y)*1.1f);
-            if(Id==TEXT("FireTraining") && TeamSize<=3)TestEqual(TEXT("through3vs3 the warehouse has one nave"),L.WarehouseNaves,1);
-            if(Id==TEXT("FireTraining"))TestTrue(TEXT("warehouse length always exceeds width by at least twenty percent"),L.ArenaSize.Y>=L.ArenaSize.X*1.2f);
+            if(Id==TEXT("FireTraining"))TestEqual(TEXT("procedural hall has no nave grid"),L.WarehouseNaves,0);
+            if(Id==TEXT("FireTraining"))TestTrue(TEXT("training hall stays compact"),FMath::Max(L.ArenaSize.X,L.ArenaSize.Y)<=FMath::Min(L.ArenaSize.X,L.ArenaSize.Y)*1.5f);
             if(Id==TEXT("Rooms"))TestTrue(TEXT("bases have separate mouths and no single-corridor choke"),IndependentRoomBaseAccess(L));
             if(Id==TEXT("Village") && TeamSize>=2)
             {
@@ -213,7 +265,7 @@ bool FERMapSizingTest::RunTest(const FString&)
             {
                 TestTrue(TEXT("compact central building has one floor"),Id!=TEXT("CentralBuilding") || L.BuildingFloors==1);
                 TestTrue(TEXT("compact alleys have two approaches"),Id!=TEXT("MiddleEasternAlleys") || L.DistrictAccesses==2);
-                TestTrue(TEXT("compact warehouse has one nave"),Id!=TEXT("FireTraining") || L.WarehouseNaves==1);
+                TestTrue(TEXT("compact training hall has no nave grid"),Id!=TEXT("FireTraining") || L.WarehouseNaves==0);
                 TestTrue(TEXT("compact rooms have four, six or eight rooms"),Id!=TEXT("Rooms") || L.Rooms.Num()==6 || (TeamSize==2 && (L.Rooms.Num()==4 || L.Rooms.Num()==8)));
                 TestTrue(TEXT("compact village has one or two central blocks"),Id!=TEXT("Village") || L.VillageBlocks.Num()==1 || (TeamSize==2 && L.VillageBlocks.Num()==2));
             }
@@ -222,7 +274,7 @@ bool FERMapSizingTest::RunTest(const FString&)
                 TestTrue(TEXT("repeat seed accepted"),ERProcedural::Build(C,B,Again));
                 TestEqual(TEXT("deterministic bounds"),L.ArenaSize,Again.ArenaSize);TestEqual(TEXT("deterministic panel count"),L.Panels.Num(),Again.Panels.Num());
                 Plans.Add(MakeShared<FJsonValueObject>(Plan(L,C,Id,TeamSize,Seed)));
-                UE_LOG(LogTemp,Display,TEXT("ER_MAP_PLAN template=%s team=%d seed=%d dimensions_m=%.2fx%.2f"),*Id,TeamSize,Seed,L.ArenaSize.X/100,L.ArenaSize.Y/100);
+                UE_LOG(LogTemp,Display,TEXT("ER_MAP_PLAN template=%s team=%d seed=%d dimensions_m=%.2fx%.2f spawn_zones=%d"),*Id,TeamSize,Seed,L.ArenaSize.X/100,L.ArenaSize.Y/100,L.SpawnZones.Num()/2);
             }
         }
         if(Count>=32 && TeamSize>=2 && TeamSize<=3)
@@ -258,6 +310,7 @@ bool FERMapSizingPhysicsTest::RunTest(const FString&)
         if(TestTrue(*(Id+TEXT(" physical generation")),Map->Regenerate()))
         {
             const auto& L=Map->GetLayout();TestTrue(TEXT("valid calibrated cells"),Map->ValidateCells());
+            TestTrue(TEXT("all spawn zones and their exits pass real collision"),ERProcedural::SpawnZonesClearInWorld(World,Map->GetActorTransform(),L));
             FCollisionQueryParams Q(SCENE_QUERY_STAT(ERMapSizingPhysics),false);FHitResult Hit;const auto Capsule=FCollisionShape::MakeCapsule(34,92.5);
             for(const auto* Starts:{&L.AlphaSpawns,&L.OmegaSpawns})for(const auto& P:*Starts)
             {
@@ -303,7 +356,7 @@ bool FERMapDensityBudgetTest::RunTest(const FString&)
             FERProceduralConfig C;C.TemplateAsset=T;C.ExpectedTeamSize=N;C.Seed=Seed;FERBlockRoomConfig B;FERProceduralLayout L;
             if(!TestTrue(*FString::Printf(TEXT("%s %dv%d seed%d builds inside density budget"),*Id,N,N,Seed),ERProcedural::Build(C,B,L)))return false;
             TestTrue(TEXT("actual perimeter area within ten percent of1500m² per team member"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-ERProcedural::TargetAreaM2(N))<=ERProcedural::TargetAreaM2(N)*.1+.01);
-            if(Id==TEXT("FireTraining"))TestTrue(TEXT("every team size keeps the warehouse longitudinal"),L.ArenaSize.Y>=L.ArenaSize.X*1.2f);
+            if(Id==TEXT("FireTraining"))TestTrue(TEXT("every training-hall size stays compact"),FMath::Max(L.ArenaSize.X,L.ArenaSize.Y)<=FMath::Min(L.ArenaSize.X,L.ArenaSize.Y)*1.5f);
             if(Id==TEXT("Rooms"))TestTrue(TEXT("every room profile has independent base access"),IndependentRoomBaseAccess(L));
             if(N>1)for(const auto& Hole:L.UnderpassBreaches)
             {

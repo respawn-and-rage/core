@@ -29,7 +29,7 @@ if a.get_metadata_tag(library,'ERMapVarietyRevision')!='1':
     for theme in [industrial,desert]:
         for prop in ['shell_steel','ladder_steel','deck_steel']:
             role=warehouse.get_editor_property(prop)
-            if not role:raise RuntimeError('Install Warehouse steel roles with setup_warehouse_steel.py first')
+            if not role:raise RuntimeError('Shared Industrial steel roles are missing; restore them from the private asset repository')
             theme.set_editor_property(prop,role)
         materials=list(theme.get_editor_property('materials'))
         materials[5]=warehouse.get_editor_property('materials')[5]

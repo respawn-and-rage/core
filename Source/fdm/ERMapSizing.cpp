@@ -5,7 +5,7 @@
 bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed)
 {
     if(TeamSize<1 || TeamSize>16)return false;
-    T.SizingTeamSize=TeamSize;
+    T.SizingTeamSize=TeamSize;T.CompositionSeed=Seed;
     T.SizingRoomsGroundOnly=TeamSize==1;
     FRandomStream Composition(int32(HashCombine(uint32(Seed),0x56415259u)));
     const float Area=TargetAreaM2(TeamSize);
@@ -31,8 +31,8 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
         }
         else Envelope(1.f,3000,3400);
         T.CentralBuilding.ArenaMin=T.CentralBuilding.ArenaMax=T.SizingArena;
-        T.CentralBuilding.BuildingWidth={1800,Grid(1800,2400)};
-        T.CentralBuilding.BuildingDepth={2200,Grid(2200,3000)};
+        T.CentralBuilding.BuildingWidth=T.CentralBuilding.CircularTerrain ? FVector2D(1600,FMath::GridSnap(FMath::Min(4800.f,float(T.SizingArena.X)*.46f),100.f)):FVector2D(1800,Grid(1800,2400));
+        T.CentralBuilding.BuildingDepth=T.CentralBuilding.CircularTerrain ? FVector2D(2000,FMath::GridSnap(FMath::Min(6000.f,float(T.SizingArena.Y)*.56f),100.f)):FVector2D(2200,Grid(2200,3000));
         T.CentralBuilding.MinFloors=1;T.CentralBuilding.MaxFloors=TeamSize<=2 ? 1:TeamSize<=4 ? 2:3;
         break;
     case EERMapArchetype::MiddleEasternAlleys:
@@ -45,11 +45,9 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
         break;
     case EERMapArchetype::FireTraining:
         T.FireTraining.FloorArea={Area*.9f,Area*1.1f};
-        T.FireTraining.MinBays=TeamSize==1 ? 8:TeamSize<=4 ? 10:14;T.FireTraining.MaxBays=64;
-        T.FireTraining.MinNaves=1;T.FireTraining.MaxNaves=TeamSize<=3 ? 1:4;
-        T.FireTraining.MaxAspect=TeamSize<=3 ? 10:3;
-        T.FireTraining.MinHeightBands=2;T.FireTraining.MaxHeightBands=TeamSize<=2 ? 2:4;
-        T.FireTraining.MaxPlazas=TeamSize<=2 ? 0:3;
+        T.FireTraining.MaxAspect=1.5f;
+        T.FireTraining.MinCeilingHeight=800;T.FireTraining.MaxCeilingHeight=TeamSize<=2 ? 1000:1400;
+        T.FireTraining.MaxPlazas=0;
         break;
     case EERMapArchetype::Rooms:
     {

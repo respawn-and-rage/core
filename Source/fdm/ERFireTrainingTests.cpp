@@ -1,9 +1,11 @@
 #include "ERProceduralMap.h"
 #include "ERMapCatalog.h"
+#include "ERMapPlayability.h"
 #include "ERLadder.h"
 #include "ERCharacter.h"
 #include "Misc/AutomationTest.h"
 #include "Engine/World.h"
+#include "Engine/OverlapResult.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/Material.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -14,7 +16,6 @@ namespace
 UERMapTemplate* GreyboxFireTraining(const TCHAR* Id)
 {
     auto* T=NewObject<UERMapTemplate>();T->TemplateId=Id;T->Archetype=EERMapArchetype::FireTraining;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize=FVector(2460,5540,1120);
-    for(int32 Width:{1600,2000,2400}){FERWarehouseWidthKit K;K.WidthCm=Width;T->FireTraining.Widths.Add(K);}
     T->FireTraining.SteelSurface=NewObject<UMaterial>(T,TEXT("TestSteel"));
     for(int32 I=0;I<3;++I)T->FireTraining.ContainerSurfaces.Add(NewObject<UMaterial>(T,*FString::Printf(TEXT("TestPaint%d"),I)));
     return T;
@@ -26,96 +27,51 @@ bool FERFireTrainingLayoutTest::RunTest(const FString& Parameters)
 {
     auto* T=GreyboxFireTraining(TEXT("test.fire-training"));
     FERProceduralConfig C;C.TemplateAsset=T;FERBlockRoomConfig B;FERProceduralLayout L,Again;
-    TSet<int32> Widths,Bands,Bays,Attempts,Naves,TotalWidths;int32 Plazas=0;float MaxArea=0,MaxLength=0;TMap<FName,int32> Features;TSet<FString> Shapes;
-    float MaxElevated=0,MaxOverhead=0,MinOpen=1,SumElevated=0;
-    auto Key=[](FVector Center,FVector Size){return FString::Printf(TEXT("%d:%d:%d/%d:%d:%d"),FMath::RoundToInt(Center.X*100),FMath::RoundToInt(Center.Y*100),FMath::RoundToInt(Center.Z*100),FMath::RoundToInt(Size.X*100),FMath::RoundToInt(Size.Y*100),FMath::RoundToInt(Size.Z*100));};
+    TSet<int32> Widths,Depths,Heights,CatwalkHeights,Variants;int32 Islands=0;
     TArray<int32> Seeds;for(int32 I=0;I<512;++I)Seeds.Add(I);Seeds.Append({7919,-17,INT32_MIN,INT32_MAX});
     for(int32 Seed:Seeds)
     {
         C.Seed=Seed;
-        if(!ERProcedural::Build(C,B,L)){AddError(FString::Printf(TEXT("Fire Training rejected seed=%d"),Seed));continue;}
-        Widths.Add(FMath::RoundToInt(L.WarehouseNaveWidth));Naves.Add(L.WarehouseNaves);TotalWidths.Add(FMath::RoundToInt(L.WarehouseWidth));
-        TestEqual(TEXT("total width is whole naves"),L.WarehouseWidth,L.WarehouseNaveWidth*L.WarehouseNaves);
-        TestTrue(TEXT("no tube-shaped hall"),420.f*L.WarehouseBays<=L.WarehouseWidth*T->FireTraining.MaxAspect+1);
-        MaxArea=FMath::Max(MaxArea,L.WarehouseWidth*420*L.WarehouseBays/1e4f);MaxLength=FMath::Max(MaxLength,420.f*L.WarehouseBays);
-        Plazas+=L.Plazas.Num()/2;
-        for(const auto& P:L.Plazas)for(const auto& Box:L.Containers)
-            TestFalse(TEXT("plazas stay empty of cargo"),FBox(-Box.Size*.5,Box.Size*.5).TransformBy(Box.Frame).Intersect(P.ExpandBy(-1)));
-        Bands.Add(L.WarehouseBands);Bays.Add(L.WarehouseBays);Attempts.Add(L.LayoutAttempt);
-        Shapes.Add(FString::Printf(TEXT("%d/%d/%d"),FMath::RoundToInt(L.WarehouseWidth),L.WarehouseBays,L.WarehouseBands));
-        for(const FName& F:L.FeatureNames)Features.FindOrAdd(F)++;
-        const float Area=L.WarehouseWidth*420*L.WarehouseBays/1e4f;
-        if(L.LayoutAttempt<ERProcedural::FireTrainingAttempts-1)
-            TestTrue(TEXT("similar floor area across width/length variants"),Area>=T->FireTraining.FloorArea.X && Area<=T->FireTraining.FloorArea.Y);
-        TestEqual(TEXT("eave follows wall bands"),L.IndoorCeiling,300.f*L.WarehouseBands);
+        if(!ERProcedural::Build(C,B,L)){AddError(FString::Printf(TEXT("Fire Training rejected seed=%d"),Seed));return false;}
+        Widths.Add(FMath::RoundToInt32(L.WarehouseWidth));Depths.Add(FMath::RoundToInt32(L.WarehouseLength));Heights.Add(FMath::RoundToInt32(L.IndoorCeiling));Variants.Add(L.WarehouseCatwalkVariant);
+        TestEqual(TEXT("no nave grid"),L.WarehouseNaves,0);
+        TestTrue(TEXT("hall stays compact"),FMath::Max(L.ArenaSize.X,L.ArenaSize.Y)<=FMath::Min(L.ArenaSize.X,L.ArenaSize.Y)*1.5f);
+        TestTrue(TEXT("area in configured range"),ERProcedural::PlayableAreaM2(L)>=T->FireTraining.FloorArea.X && ERProcedural::PlayableAreaM2(L)<=T->FireTraining.FloorArea.Y);
         TestEqual(TEXT("10 starts per team"),L.AlphaSpawns.Num(),10);
-        for(int32 I=0;I<L.AlphaSpawns.Num();++I){auto P=L.AlphaSpawns[I].GetLocation();P.X=-P.X;P.Y=-P.Y;TestTrue(TEXT("half-turn starts"),P.Equals(L.OmegaSpawns[I].GetLocation()));}
-        TestEqual(TEXT("two fortified base courts"),L.WarehouseBaseCourts.Num(),2);
-        TestEqual(TEXT("each base has an accessible building roof"),L.Bases.Num(),2);
-        TestEqual(TEXT("two flanks and both halves of the cross-map bridge"),L.WarehouseCatwalks.Num(),4);
-        TestTrue(TEXT("catwalk network always has complete traversal paths"),L.CrossingRoutes.Num()>=3);
-        for(const auto& Base:L.Bases)
+        TestEqual(TEXT("two protected courts"),L.WarehouseBaseCourts.Num(),2);
+        TestEqual(TEXT("two bases with local roofs"),L.Bases.Num(),2);
+        TestTrue(TEXT("paired flanks and bridge segments"),L.WarehouseCatwalks.Num()>=4);
+        TestTrue(TEXT("hall is longitudinal"),L.ArenaSize.Y>=L.ArenaSize.X*1.12f);
+        TestTrue(TEXT("interior through-rooms"),L.FeatureNames.FilterByPredicate([](FName Feature){return Feature==TEXT("GroundRoom");}).Num()>=(L.WarehouseWidth*L.WarehouseLength<22000000 ? 0:2));
+        TestTrue(TEXT("real crossing routes"),L.CrossingRoutes.Num()>=3);
+        for(int32 I=0;I<L.AlphaSpawns.Num();++I){const auto P=L.AlphaSpawns[I].GetLocation();TestTrue(TEXT("paired starts"),L.OmegaSpawns[I].GetLocation().Equals({-P.X,-P.Y,P.Z}));}
+        TestTrue(TEXT("all opposing starts occluded"),ERPlayability::InitialSpawnsOccluded(L));
+        TestTrue(TEXT("elevated budget"),L.ElevatedRatio<=T->FireTraining.ElevatedMaxRatio+.001f);
+        TestTrue(TEXT("overhead budget"),L.OverheadRatio<=T->FireTraining.OverheadMaxRatio+.001f);
+        TestTrue(TEXT("large open volume"),L.OpenRegionRatio>=T->FireTraining.OpenRegionMinRatio);
+        for(const auto& Deck:L.ElevatedDecks)TestTrue(TEXT("standing headroom"),Deck.Max.Z+200<=L.IndoorCeiling);
+        for(int32 Access:L.ElevatedAccesses)TestTrue(TEXT("two independent accesses"),Access>=2);
+        for(const auto& Walk:L.WarehouseCatwalks)CatwalkHeights.Add(FMath::RoundToInt32(Walk.Max.Z));
+        Islands+=L.FeatureNames.Contains(FName(TEXT("UpperIsland"))) ? 1:0;
+        int32 Roofs=0;
+        for(const auto& Piece:L.FixedPieces)
         {
-            TestTrue(TEXT("base building has one or two storeys"),Base.RoofZ==300 || Base.RoofZ==600);
-            TestTrue(TEXT("all starts remain in their protected court"),L.WarehouseBaseCourts.ContainsByPredicate([&](const FBox& Court){return Court.IsInside(Base.Frame.GetLocation()+FVector(0,0,100));}));
+            TestNull(TEXT("geometry has no imported mesh dependency"),Piece.Mesh);
+            TestFalse(TEXT("no hidden substitute shell"),Piece.CollisionOnly);
+            if(Piece.Roof){++Roofs;TestTrue(TEXT("solid visible roof"),!Piece.VisualOnly && FMath::IsNearlyEqual(Piece.Transform.GetLocation().Z-Piece.Transform.GetScale3D().Z*50,L.IndoorCeiling));}
         }
-        const float HalfLength=210.f*L.WarehouseBays;
-        TestTrue(TEXT("flank walkway bypasses most of the hall length"),L.WarehouseCatwalks[0].GetSize().Y>=2*HalfLength-3001);
-        TestTrue(TEXT("bridge connects the two flanks"),L.CrossingRoutes[2][0].X<0 && L.CrossingRoutes[2].Last().X>0);
-        const float CatwalkZ=L.WarehouseCatwalks[0].Max.Z;
-        TestTrue(TEXT("walkways are raised near the lighting"),CatwalkZ>=L.IndoorCeiling-205 && CatwalkZ<=L.IndoorCeiling-185);
-        for(const auto& D:L.WarehouseCatwalks)TestEqual(TEXT("all connected walkways share the high walking plane"),D.Max.Z,double(CatwalkZ));
-        // One open volume: narrow routes stay inside the floor-area budgets.
-        TestTrue(TEXT("elevated projection within budget"),L.ElevatedRatio<=T->FireTraining.ElevatedMaxRatio+1e-3f);
-        TestTrue(TEXT("overhead closure within budget"),L.OverheadRatio<=T->FireTraining.OverheadMaxRatio+1e-3f);
-        TestTrue(TEXT("large connected region open to the roof"),L.OpenRegionRatio>=T->FireTraining.OpenRegionMinRatio);
-        MaxElevated=FMath::Max(MaxElevated,L.ElevatedRatio);MaxOverhead=FMath::Max(MaxOverhead,L.OverheadRatio);MinOpen=FMath::Min(MinOpen,L.OpenRegionRatio);SumElevated+=L.ElevatedRatio;
-        const float Length=420.f*L.WarehouseBays;
-        for(const auto& D:L.ElevatedDecks)
-        {
-            TestTrue(TEXT("decks are local, not a continuous floor"),D.GetSize().X<L.WarehouseWidth*.5f || D.GetSize().Y<Length*.15f);
-            const float Clearance=FMath::IsNearlyEqual(D.Max.Z,CatwalkZ) ? 200:250;
-            TestTrue(TEXT("deck headroom under the arched roof"),ERProcedural::WarehouseRoofHeight(L.WarehouseNaveWidth,L.WarehouseNaves,L.IndoorCeiling,D.Min.X)>=D.Max.Z+Clearance && ERProcedural::WarehouseRoofHeight(L.WarehouseNaveWidth,L.WarehouseNaves,L.IndoorCeiling,D.Max.X)>=D.Max.Z+Clearance);
-        }
-        for(int32 A:L.ElevatedAccesses)TestTrue(TEXT("two independent accesses per elevated area"),A>=2);
-        for(int32 I=0;I<L.Ladders.Num();I+=2)TestTrue(TEXT("ladders are half-turn pairs"),(L.Ladders[I].Frame*FTransform(FRotator(0,180,0))).Equals(L.Ladders[I+1].Frame));
-        TestTrue(TEXT("most start-to-start lines meet cover"),L.SpawnCoverRatio>=.75f);
-        TSet<FString> Solids;
-        for(const auto& P:L.Panels){const auto Box=FBox(FVector::ZeroVector,P.Size).TransformBy(P.Transform);Solids.Add(Key(Box.GetCenter(),Box.GetSize()));}
-        for(const auto& P:L.Panels){const auto Box=FBox(FVector::ZeroVector,P.Size).TransformBy(P.Transform);auto V=Box.GetCenter();V.X=-V.X;V.Y=-V.Y;if(!Solids.Contains(Key(V,Box.GetSize()))){AddError(TEXT("unpaired cell geometry"));return false;}}
-        TestTrue(TEXT("timber construction is destructible"),L.Panels.ContainsByPredicate([](const auto& P){return P.Material==EERBlockMaterial::Wood;}));
-        for(const auto& P:L.Panels)if(P.Strength==8)TestTrue(TEXT("containers use the cargo palette"),T->FireTraining.ContainerSurfaces.Contains(P.Surface));
-        // Bands raise only the envelope: no walkable fixed slab spans the hall.
-        for(const auto& P:L.FixedPieces)
-        {
-            const FVector S=P.Transform.GetScale3D()*100;
-            TestFalse(TEXT("no automatic upper floor"),P.Transform.GetLocation().Z>100 && S.Z<=25 && S.X*S.Y>L.WarehouseWidth*Length*.25f);
-        }
+        TestEqual(TEXT("one closed procedural ceiling"),Roofs,1);
+        for(const auto& Plaza:L.Plazas)for(const auto& Cargo:L.Containers)TestFalse(TEXT("plazas stay clear"),FBox(-Cargo.Size*.5,Cargo.Size*.5).TransformBy(Cargo.Frame).Intersect(Plaza.ExpandBy(-1)));
     }
-    AddInfo(FString::Printf(TEXT("ER_FIRE_TRAINING_LAYOUT seeds=%d shapes=%d widths=%d naves=%d total_widths=%d bands=%d bays=%d attempts=%d plazas=%d max_area=%.0f max_length=%.0f max_elevated=%.3f mean_elevated=%.3f max_overhead=%.3f min_open=%.3f"),
-        Seeds.Num(),Shapes.Num(),Widths.Num(),Naves.Num(),TotalWidths.Num(),Bands.Num(),Bays.Num(),Attempts.Num(),Plazas,MaxArea,MaxLength,MaxElevated,SumElevated/Seeds.Num(),MaxOverhead,MinOpen));
-    for(const auto& F:Features)AddInfo(FString::Printf(TEXT("ER_FIRE_TRAINING_FEATURE %s=%d"),*F.Key.ToString(),F.Value));
-    TestEqual(TEXT("three kit widths sampled"),Widths.Num(),3);
-    TestEqual(TEXT("two to four wall bands sampled"),Bands.Num(),3);
-    TestEqual(TEXT("one to four naves sampled"),Naves.Num(),4);
-    TestTrue(TEXT("large halls reserve empty plazas"),Plazas>50);
-    TestTrue(TEXT("lengths vary with the width"),Bays.Num()>=5);
-    for(const TCHAR* Name:{TEXT("Catwalk"),TEXT("CatwalkBridge"),TEXT("Corridor"),TEXT("FortifiedBase"),TEXT("BaseRoof"),TEXT("SteelParapets"),TEXT("Container"),TEXT("ContainerStack")})
-        TestTrue(FString::Printf(TEXT("feature sampled: %s"),Name),Features.Contains(FName(Name)));
-    C.Seed=42;TestTrue(TEXT("first deterministic build"),ERProcedural::Build(C,B,L));TestTrue(TEXT("repeat"),ERProcedural::Build(C,B,Again));
-    TestEqual(TEXT("panel count stable"),L.Panels.Num(),Again.Panels.Num());TestEqual(TEXT("attempt stable"),L.LayoutAttempt,Again.LayoutAttempt);
-    for(int32 I=0;I<L.Panels.Num() && I<Again.Panels.Num();++I)TestTrue(TEXT("panel identity stable"),L.Panels[I].Id==Again.Panels[I].Id && L.Panels[I].Transform.Equals(Again.Panels[I].Transform));
-    // The final attempt is the verified fallback for every accepted recipe.
-    C.LayoutAttempt=ERProcedural::FireTrainingAttempts-1;FERProceduralLayout Fallback;
-    TestTrue(TEXT("reference layout builds"),ERProcedural::BuildTemplate(C,B,Fallback,FERCellSettings()));
-    TestEqual(TEXT("reference layout is the narrow kit"),FMath::RoundToInt(Fallback.WarehouseWidth),1600);
-    TestTrue(TEXT("reference layout keeps a catwalk"),Fallback.FeatureNames.Contains(FName(TEXT("Catwalk"))));
-    C.LayoutAttempt=0;
+    TestTrue(TEXT("free widths"),Widths.Num()>10);TestTrue(TEXT("free depths"),Depths.Num()>10);TestTrue(TEXT("free ceiling heights"),Heights.Num()>5);
+    TestTrue(TEXT("varied catwalk heights"),CatwalkHeights.Num()>5);TestEqual(TEXT("six high route patterns"),Variants.Num(),6);TestTrue(TEXT("separate-height islands sampled"),Islands>0);
+    C.Seed=42;TestTrue(TEXT("deterministic build"),ERProcedural::Build(C,B,L));TestTrue(TEXT("repeat build"),ERProcedural::Build(C,B,Again));
+    TestEqual(TEXT("panel count stable"),L.Panels.Num(),Again.Panels.Num());TestEqual(TEXT("fixed count stable"),L.FixedPieces.Num(),Again.FixedPieces.Num());
+    for(int32 I=0;I<L.Panels.Num();++I)TestTrue(TEXT("cells stable"),L.Panels[I].Id==Again.Panels[I].Id && L.Panels[I].Transform.Equals(Again.Panels[I].Transform));
+    C.LayoutAttempt=ERProcedural::FireTrainingAttempts-1;TestTrue(TEXT("safe reference layout"),ERProcedural::BuildTemplate(C,B,L,FERCellSettings()));
     const int32 Count=L.Panels.Num();T->FireTraining.ContinuousUpperFloors=true;
-    TestFalse(TEXT("continuous upper floors are rejected"),ERProcedural::Build(C,B,L));TestEqual(TEXT("rejection is atomic"),L.Panels.Num(),Count);
-    T->FireTraining.ContinuousUpperFloors=false;T->FireTraining.Widths[1].RoofBay=NewObject<UStaticMesh>(T);
-    TestFalse(TEXT("an incomplete width kit is never stretched or mixed"),ERProcedural::Build(C,B,L));
-    TestTrue(TEXT("Fire Training belongs to the match rotation"),ERMaps::Rotation().Contains(FName(TEXT("/Game/EclipseRecoil/Maps/L_FireTraining"))));
+    TestFalse(TEXT("global upper floors rejected"),ERProcedural::Build(C,B,L));TestEqual(TEXT("atomic rejection"),L.Panels.Num(),Count);
+    AddInfo(FString::Printf(TEXT("ER_FIRE_PROCEDURAL seeds=%d widths=%d depths=%d ceilings=%d catwalk_heights=%d patterns=%d islands=%d"),Seeds.Num(),Widths.Num(),Depths.Num(),Heights.Num(),CatwalkHeights.Num(),Variants.Num(),Islands));
     return true;
 }
 
@@ -125,7 +81,7 @@ bool FERFireTrainingPhysicsTest::RunTest(const FString& Parameters)
     auto* Asset=LoadObject<UERMapTemplate>(nullptr,TEXT("/Game/EclipseRecoil/Art/MapTemplates/DA_FireTraining.DA_FireTraining"));
     if(!TestNotNull(TEXT("Fire Training template asset"),Asset))return false;
     TestEqual(TEXT("asset archetype"),Asset->Archetype,EERMapArchetype::FireTraining);
-    TestEqual(TEXT("complete kit for three widths"),Asset->FireTraining.Widths.Num(),3);
+    TestTrue(TEXT("warehouse mesh references unbound"),Asset->FireTraining.Widths.IsEmpty() && !Asset->FireTraining.SideWallBay && !Asset->FireTraining.ParapetModule);
     UWorld::InitializationValues V;V.AllowAudioPlayback(false).CreateNavigation(false).CreateAISystem(false).CreateFXSystem(false).EnableTraceCollision(true);
     auto* World=UWorld::CreateWorld(EWorldType::Game,false,NAME_None,nullptr,true,ERHIFeatureLevel::Num,&V);if(!World)return false;
     auto* Map=World->SpawnActor<AERProceduralMap>();Map->LayoutConfig.TemplateAsset=Asset;Map->bCeilings=true;
@@ -138,16 +94,8 @@ bool FERFireTrainingPhysicsTest::RunTest(const FString& Parameters)
         Map->LayoutConfig.Seed=Seed;
         if(!TestTrue(FString::Printf(TEXT("physical generation seed=%d"),Seed),Map->Regenerate()))continue;
         const auto& L=Map->GetLayout();TestTrue(TEXT("valid cell chunks"),Map->ValidateCells());Widths.Add(FMath::RoundToInt(L.WarehouseWidth));
-        // Kit modules keep unit scale; width/length/height come from repetition.
-        TInlineComponentArray<UInstancedStaticMeshComponent*> Groups(Map);int32 KitInstances=0;
-        for(auto* Group:Groups)if(Group->GetStaticMesh() && Group->GetStaticMesh()->GetName().StartsWith(TEXT("SM_ER_WH_")))
-            for(int32 I=0;I<Group->GetInstanceCount();++I)
-            {
-                FTransform X;Group->GetInstanceTransform(I,X,false);++KitInstances;
-                TestTrue(TEXT("kit instance at unit scale"),X.GetScale3D().Equals(FVector::OneVector,1e-3));
-            }
-        TestTrue(TEXT("envelope assembled from repeated modules"),KitInstances>L.WarehouseBays*4);
-        const float HalfW=L.WarehouseWidth*.5f,HL=210.f*L.WarehouseBays;
+        for(const auto& Piece:L.FixedPieces)TestNull(TEXT("procedural geometry uses no warehouse mesh"),Piece.Mesh);
+        const float HalfW=L.WarehouseWidth*.5f,HL=L.WarehouseLength*.5f;
         // The envelope closes on every side, up to the eave, with real collision.
         for(float Z:{100.f,L.IndoorCeiling-60})for(float Y:{-HL*.5f,0.f,HL*.5f})
         {
@@ -156,7 +104,7 @@ bool FERFireTrainingPhysicsTest::RunTest(const FString& Parameters)
         }
         TestTrue(TEXT("end wall blocks pawns"),World->SweepSingleByChannel(Hit,{0,-HL+100,150},{0,-HL-100,150},FQuat::Identity,ECC_Pawn,FCollisionShape::MakeSphere(20),Q));
         TestTrue(TEXT("roof stops shots below the ridge"),World->LineTraceSingleByChannel(Hit,{0,0,L.IndoorCeiling-50},{0,0,L.IndoorCeiling+400},ECC_GameTraceChannel1,Q) && Hit.ImpactPoint.Z<L.IndoorCeiling+230);
-        TestNotNull(TEXT("original steel barrier is bound to the recipe"),Asset->FireTraining.ParapetModule.Get());
+
         // The protected court blocks ground approaches on all four sides.
         for(const auto& Court:L.WarehouseBaseCourts)
         {
@@ -179,23 +127,15 @@ bool FERFireTrainingPhysicsTest::RunTest(const FString& Parameters)
             }
         }
         const float CatwalkZ=L.WarehouseCatwalks[0].Max.Z;
-        const auto* Kit=Asset->FireTraining.Widths.FindByPredicate([&](const auto& K){return K.WidthCm==FMath::RoundToInt(L.WarehouseNaveWidth);});
-        if(TestNotNull(TEXT("selected warehouse kit"),Kit))
+        TestTrue(TEXT("standing clearance below flat ceiling"),CatwalkZ+200<=L.IndoorCeiling);
+        const auto& Flank=L.WarehouseCatwalks[0];
+        const float Inner=Flank.Max.X;
+        for(float Y=Flank.Min.Y+50;Y<Flank.Max.Y-50;Y+=100)
         {
-            const float LampBottom=L.IndoorCeiling+Kit->RoofLamps->GetBoundingBox().Min.Z;
-            TestTrue(TEXT("standing head passes just below the lowest lighting"),LampBottom-(CatwalkZ+185)>=15 && LampBottom-(CatwalkZ+185)<40);
-            TestEqual(TEXT("walkway uses the maximum permitted height"),CatwalkZ,ERProcedural::WarehouseCatwalkHeight(*Kit,L.WarehouseNaves,L.IndoorCeiling));
+            bool Mouth=false;for(int32 I=2;I<L.CrossingRoutes.Num();++I)Mouth|=FMath::Abs(Y-L.CrossingRoutes[I][0].Y)<180;
+            if(Mouth)continue;
+            TestTrue(TEXT("inner parapet blocks walking off"),World->SweepSingleByChannel(Hit,{Inner-70,Y,CatwalkZ+100},{Inner+70,Y,CatwalkZ+100},FQuat::Identity,ECC_Pawn,FCollisionShape::MakeSphere(20),Q));
         }
-        // Both flanks have real parapets; ladder access is through the end caps.
-        const float YA=-HL+1500,YB=HL-1500,Inner=-HalfW+340;
-        for(float Y=YA+40;Y<YB-40;Y+=100)
-        {
-            if(FMath::Abs(Y)<360)continue;
-            TestTrue(TEXT("inner steel parapet blocks walking off the flank"),World->SweepSingleByChannel(Hit,{Inner-70,Y,CatwalkZ+100},{Inner+70,Y,CatwalkZ+100},FQuat::Identity,ECC_Pawn,FCollisionShape::MakeSphere(20),Q));
-        }
-        const float BridgeY=L.CrossingRoutes[2][0].Y;
-        TestTrue(TEXT("bridge parapet blocks a side step"),World->SweepSingleByChannel(Hit,{0,BridgeY,CatwalkZ+100},{0,BridgeY+150,CatwalkZ+100},FQuat::Identity,ECC_Pawn,FCollisionShape::MakeSphere(20),Q));
-        TestFalse(TEXT("bridge has no invisible tall barrier"),World->SweepSingleByChannel(Hit,{0,BridgeY,CatwalkZ+160},{0,BridgeY+150,CatwalkZ+160},FQuat::Identity,ECC_Pawn,FCollisionShape::MakeSphere(20),Q));
         // No mezzanine: probe the plan for walkable surfaces above the floor.
         int32 Raised=0,Samples=0;
         for(float X=-HalfW+50;X<HalfW;X+=100)for(float Y=-HL+50;Y<HL;Y+=100)
@@ -209,10 +149,19 @@ bool FERFireTrainingPhysicsTest::RunTest(const FString& Parameters)
             auto* Ladder=World->SpawnActor<AERLadder>(AERLadder::StaticClass(),Desc.Frame);
             Ladder->Height=Desc.Height;Ladder->DeckHeight=Desc.DeckHeight;
             // Ladder heights are local to the actor, whose base may be a deck.
+            bool LoggedClimb=false;
             for(float Z=0;Z<=Desc.Height;Z+=25)
             {
                 TestTrue(TEXT("real destructible rungs cover climb"),Ladder->HasRung(Z));
-                TestFalse(FString::Printf(TEXT("climbing capsule clear seed=%d ladder=%s z=%.0f"),Seed,*Desc.Frame.GetLocation().ToString(),Z),World->OverlapBlockingTestByChannel(Ladder->ClimbPosition(Z+2.5f,92.5f),FQuat::Identity,ECC_Pawn,Capsule,Q));
+                const auto Position=Ladder->ClimbPosition(Z+2.5f,92.5f);
+                const bool Blocked=World->OverlapBlockingTestByChannel(Position,FQuat::Identity,ECC_Pawn,Capsule,Q);
+                if(Blocked && !LoggedClimb)
+                {
+                    TArray<FOverlapResult> Hits;World->OverlapMultiByChannel(Hits,Position,FQuat::Identity,ECC_Pawn,Capsule,Q);
+                    for(const auto& H:Hits)if(auto* Part=H.GetComponent())UE_LOG(LogTemp,Display,TEXT("ER_FIRE_CLIMB_BLOCK seed=%d base=%s point=%s part=%s bounds=%s"),Seed,*Desc.Frame.GetLocation().ToString(),*Position.ToString(),*Part->GetName(),*Part->Bounds.GetBox().ToString());
+                    LoggedClimb=true;
+                }
+                TestFalse(FString::Printf(TEXT("climbing capsule clear seed=%d ladder=%s z=%.0f"),Seed,*Desc.Frame.GetLocation().ToString(),Z),Blocked);
             }
             const FVector Exit=Ladder->Landing(92.5f);
             // Exercise the actual swept roof transition at the authored top,
@@ -234,14 +183,9 @@ bool FERFireTrainingPhysicsTest::RunTest(const FString& Parameters)
         const auto& R=L.Routes[1];
         for(int32 I=0;I<R.Num();++I)
             TestFalse(TEXT("patrol loop clear"),World->SweepSingleByChannel(Hit,R[I],R[(I+1)%R.Num()],FQuat::Identity,ECC_Pawn,Capsule,Q));
-        // Timber rooms are real destructible cells: shoot the wall beside the door.
-        bool Timber=false;
-        for(const auto& Route:L.RoomAccessRoutes)if(Route.Num()==4 && Route[0].Z<150 && Route[2].X>Route[1].X)
-        {
-            const FVector From=Route[1]+FVector(0,150,-50);
-            if(World->LineTraceSingleByChannel(Hit,From,From+FVector(120,0,0),ECC_GameTraceChannel1,Q)){FERCellId Id;Timber|=Map->ResolveCell(Hit,Id);}
-        }
-        TestTrue(TEXT("timber walls resolve to destructible cells"),Timber);
+        const auto& Base=L.Bases[0];FERCellId Cell;
+        TestTrue(TEXT("base timber is destructible"),World->LineTraceSingleByChannel(Hit,Base.Point({0,0,150}),Base.Point({400,0,150}),ECC_GameTraceChannel1,Q) && Map->ResolveCell(Hit,Cell));
+
     }
     TestTrue(TEXT("physical seeds cover several widths"),Widths.Num()>=2);
     World->DestroyWorld(false);return true;

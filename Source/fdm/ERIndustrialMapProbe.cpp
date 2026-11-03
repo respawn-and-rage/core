@@ -171,6 +171,15 @@ void AERIndustrialMapProbe::Tick(float Delta)
             else
             {
                 Check(WalkPeakZ>Path.Last().Z-25,TEXT("actual_pawn_walked_stair_flight"));
+                if(const auto* Site=Map->GetLayout().CoverSites.FindByPredicate([&](const auto& Cover){return Cover.FiringStair==Flight;}))
+                {
+                    Check(FMath::Abs(C->GetActorLocation().Z-Site->FiringPosition.Z)<25,TEXT("actual_pawn_reached_cover_firing_platform"));
+                    PC->SetControlRotation(Direction.Rotation());C->SetActorRotation(Direction.Rotation());
+                    const FVector Eye=C->GetPawnViewLocation();FHitResult FiringHit;FCollisionQueryParams FiringQuery(SCENE_QUERY_STAT(ERCoverFiring),false,C);
+                    Check(!GetWorld()->LineTraceSingleByChannel(FiringHit,Eye,Eye+Direction*160,ECC_GameTraceChannel1,FiringQuery),TEXT("actual_cover_firing_sight_clear"));
+                    const auto ShotsBefore=C->Weapon->AuthorizedShotCount;C->Weapon->StartFire();C->Weapon->StopFire();
+                    Check(C->Weapon->AuthorizedShotCount==ShotsBefore+1 && FVector::Dist2D(C->Weapon->LastShotTraceStart,C->Weapon->LastShotTraceEnd)>120,TEXT("actual_rifle_fires_over_cover"));
+                }
                 if(WallAccess)Check(C->GetActorLocation().Z>90 && C->GetActorLocation().Z<110,TEXT("actual_pawn_crossed_3m_wall_and_descended"));
                 C->GetCharacterMovement()->StopMovementImmediately();++Flight;Walking=false;
             }
@@ -204,8 +213,11 @@ void AERIndustrialMapProbe::Tick(float Delta)
         Check(Flight==Map->GetLayout().StairRoutes.Num(),TEXT("all_floors_both_stairs_walked"));
         Check(LadderIndex==Map->GetLayout().Ladders.Num(),TEXT("all_generated_ladders_climbed"));
         // An actual authorized rifle shot after reducing a local band to 1HP.
-        const float WallX=Map->GetLayout().CentralBuildingCenter.X-Map->GetLayout().CentralBuildingSize.X*.5;
-        C->TeleportTo({WallX+220,200,Map->GetLayout().CentralBuildingCenter.Z+100},FRotator(0,180,0));C->GetCharacterMovement()->StopMovementImmediately();PC->SetControlRotation(FRotator(0,180,0));
+        float WallX=Map->GetLayout().CentralBuildingCenter.X-Map->GetLayout().CentralBuildingSize.X*.5;
+        const float ShotY=Map->GetLayout().CircularArena ? 60.f:200.f;
+        for(const auto& Footprint:Map->GetLayout().CentralFootprints)
+            if(ShotY>Footprint.Min.Y && ShotY<Footprint.Max.Y){WallX=Footprint.Min.X;break;}
+        C->TeleportTo({WallX+220,ShotY,Map->GetLayout().CentralBuildingCenter.Z+100},FRotator(0,180,0));C->GetCharacterMovement()->StopMovementImmediately();PC->SetControlRotation(FRotator(0,180,0));
         FHitResult Hit;FERCellId Id;FCollisionQueryParams Q(SCENE_QUERY_STAT(ERIndustrialShot),false,C);
         const FVector Eye=C->GetPawnViewLocation();
         const bool Found=GetWorld()->LineTraceSingleByChannel(Hit,Eye,Eye-FVector(500,0,0),ECC_GameTraceChannel1,Q) && Map->ResolveCell(Hit,Id);

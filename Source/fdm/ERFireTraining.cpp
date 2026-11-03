@@ -58,109 +58,38 @@ FBox HalfTurn(const FBox& B){return FBox(FVector(-B.Max.X,-B.Max.Y,B.Min.Z),FVec
 
 namespace ERProcedural
 {
-float WarehouseRoofHeight(float NaveWidth,int32 Naves,float Eave,float X)
-{
-    // Source arch: 16m span and 2m rise (17m radius); wider kits add a flat crown.
-    // Each nave carries its own arch; valleys between naves sit at the eave.
-    const float Total=NaveWidth*Naves;
-    const int32 Nave=FMath::Clamp(FMath::FloorToInt((X+Total*.5f)/NaveWidth),0,Naves-1);
-    const float Local=X+Total*.5f-NaveWidth*(Nave+.5f);
-    const float Flat=FMath::Max(0.f,NaveWidth-1600)*.5f;
-    const float A=FMath::Clamp(FMath::Abs(Local)-Flat,0.f,800.f);
-    return Eave+FMath::Sqrt(1700.f*1700.f-A*A)-1500.f;
-}
-
-float WarehouseCatwalkHeight(const FERWarehouseWidthKit& Kit,int32 Naves,float Eave)
-{
-    // Source lamps hang 14.21cm above the eave at their lowest point. Greybox
-    // tests use those measured kit offsets; production reads the actual meshes.
-    const float Lamps=Kit.RoofLamps ? Kit.RoofLamps->GetBoundingBox().Min.Z:14.21f;
-    // Crossings between naves also pass under the low roof valleys. Flanks sit
-    // 1.2m from the wall, beyond the 85cm knee brackets below the outer ribs.
-    const float Roof=Kit.RoofBay ? Kit.RoofBay->GetBoundingBox().Min.Z:-2.39f;
-    const float Soffit=Eave+(Naves>1 ? FMath::Min(Lamps,Roof):Lamps);
-    return FMath::FloorToFloat((Soffit-200.f)/5.f)*5.f;
-}
-
 bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<FERMapTemplatePiece>& Pieces,FERProceduralLayout& L,TArray<FVector>& Patrol)
 {
     const auto& V=T.FireTraining;
+    auto Fail=[&](const TCHAR* Stage){UE_LOG(LogTemp,Warning,TEXT("ER_FIRE_BUILD_REJECT seed=%d attempt=%d stage=%s"),Seed,Attempt,Stage);return false;};
     auto Ratio=[](float X){return FMath::IsFinite(X) && X>0 && X<=1;};
-    if(T.Symmetry!=EERTemplateSymmetry::HalfTurn || V.ContinuousUpperFloors || V.FloorArea.ContainsNaN() || V.FloorArea.X<300 || V.FloorArea.Y>(T.SizingTeamSize>0 ? 26400:10000) || V.FloorArea.X>V.FloorArea.Y ||
-        V.MinBays<6 || V.MaxBays>(T.SizingTeamSize>0 ? 64:36) || V.MinBays>V.MaxBays || V.MinHeightBands<1 || V.MaxHeightBands>5 ||
-        V.MinNaves<1 || V.MaxNaves>4 || V.MinNaves>V.MaxNaves || !FMath::IsFinite(V.MaxAspect) || V.MaxAspect<1.5f || V.MaxPlazas<0 || V.MaxPlazas>3 || V.MinHeightBands>V.MaxHeightBands ||
+    if(T.Symmetry!=EERTemplateSymmetry::HalfTurn || V.ContinuousUpperFloors || V.FloorArea.ContainsNaN() || V.FloorArea.X<300 || V.FloorArea.Y>26400 || V.FloorArea.X>V.FloorArea.Y ||
+        !FMath::IsFinite(V.MinCeilingHeight) || !FMath::IsFinite(V.MaxCeilingHeight) || V.MinCeilingHeight<700 || V.MaxCeilingHeight>1800 || V.MinCeilingHeight>V.MaxCeilingHeight || FMath::CeilToInt32(V.MinCeilingHeight/50)>FMath::FloorToInt32(V.MaxCeilingHeight/50) ||
+        !FMath::IsFinite(V.MaxAspect) || V.MaxAspect<1 || V.MaxPlazas<0 || V.MaxPlazas>3 ||
         !Ratio(V.ElevatedTargetRatio) || !Ratio(V.ElevatedMaxRatio) || !Ratio(V.OverheadMaxRatio) || !Ratio(V.OpenRegionMinRatio) ||
-        V.ElevatedTargetRatio>V.ElevatedMaxRatio || V.ElevatedMaxRatio>V.OverheadMaxRatio || V.Widths.IsEmpty() || V.Widths.Num()>3)return false;
-    if(V.ParapetModule && (V.ParapetModule->GetBoundingBox().GetSize().ContainsNaN() || V.ParapetModule->GetBoundingBox().GetSize().GetMin()<.1f))return false;
-    for(const auto* Palette:{&V.WoodSurfaces,&V.ConcreteSurfaces,&V.ContainerSurfaces})if(Palette->Num()>8 || Palette->Contains(nullptr))return false;
-    // Either the complete prepared kit or a pure greybox (tests); never a mix.
-    const TArray<UStaticMesh*> Shared={V.SideWallBay,V.SideWallLamps,V.Post,V.EndPortal};
-    const bool Kit=!Shared.Contains(nullptr);
-    if(!Kit && Shared.ContainsByPredicate([](UStaticMesh* M){return M!=nullptr;}))return false;
-    auto Near=[](float A,float B,float Tolerance=2){return FMath::IsNearlyEqual(A,B,Tolerance);};
-    auto Valid=[](UStaticMesh* M){return M && !M->GetBoundingBox().GetSize().ContainsNaN() && M->GetBoundingBox().GetSize().GetMin()>.1;};
-    if(Kit)
-    {
-        for(auto* M:Shared)if(!Valid(M))return false;
-        const FVector Wall=V.SideWallBay->GetBoundingBox().GetSize(),Post=V.Post->GetBoundingBox().GetSize();
-        if(!Near(Wall.Y,380) || !Near(Wall.Z,300) || !Near(Post.Z,300) || !Near(Post.X,20) || !Near(Post.Y,20))return false;
-    }
-    TSet<int32> Seen;
-    for(const auto& K:V.Widths)
-    {
-        if((K.WidthCm!=1600 && K.WidthCm!=2000 && K.WidthCm!=2400) || Seen.Contains(K.WidthCm))return false;
-        Seen.Add(K.WidthCm);
-        const TArray<UStaticMesh*> Parts={K.RoofBay,K.RoofArch,K.RoofLamps,K.EndGround,K.EndBand,K.EndCrown};
-        if(!Kit){if(Parts.ContainsByPredicate([](UStaticMesh* M){return M!=nullptr;}))return false;continue;}
-        for(auto* M:Parts)if(!Valid(M))return false;
-        if(!Near(K.RoofArch->GetBoundingBox().GetSize().X,K.WidthCm) || !Near(K.RoofBay->GetBoundingBox().GetSize().Y,400) ||
-           !Near(K.RoofArch->GetBoundingBox().GetSize().Y,20) || !Near(K.EndBand->GetBoundingBox().GetSize().Z,300) ||
-           K.EndBand->GetBoundingBox().GetSize().X>K.WidthCm)return false;
-    }
-    // The last attempt is the verified reference layout: one narrowest nave,
-    // twenty-two bays, two bands and the base structures only.
+        V.ElevatedTargetRatio>V.ElevatedMaxRatio || V.ElevatedMaxRatio>V.OverheadMaxRatio)return Fail(TEXT("recipe"));
+    for(const auto* Palette:{&V.WoodSurfaces,&V.ConcreteSurfaces,&V.ContainerSurfaces})if(Palette->Num()>8 || Palette->Contains(nullptr))return Fail(TEXT("palette"));
     const bool Reference=Attempt==FireTrainingAttempts-1;
     FRandomStream R(Reference ? 0x46495245:int32(HashCombine(uint32(Seed),uint32(Attempt)*0x9E3779B9u)));
-    auto Pick=[&](float A,float B){return float(R.RandRange(int32(A/50),int32(B/50))*50);};
+    auto Pick=[&](float A,float B){return float(R.RandRange(FMath::CeilToInt32(A/50),FMath::FloorToInt32(B/50))*50);};
     auto Chance=[&](float P){return !Reference && R.FRand()<P;};
-    const FERWarehouseWidthKit* Width=nullptr;int32 Bays=0,Naves=1;
+    const float Target=T.SizingTeamSize>0 || Reference ? (V.FloorArea.X+V.FloorArea.Y)*.5f:R.FRandRange(V.FloorArea.X,V.FloorArea.Y);
+    const float Aspect=FMath::Min(V.MaxAspect,1.5f);
+    TArray<FVector2D> Options;
+    for(float Width=3200;Width<=20000;Width+=100)
     {
-        struct FOption{const FERWarehouseWidthKit* Kit;int32 Naves,Bays;};
-        TArray<FOption> Options;
-        for(const auto& K:V.Widths)for(int32 Count=V.MinNaves;Count<=V.MaxNaves;++Count)for(int32 N=V.MinBays;N<=V.MaxBays;++N)
-        {
-            if(T.ReflectionBuild && N%2!=0)continue;
-            const float Total=K.WidthCm*Count,Area=T.SizingTeamSize>0 ? (Total+60)*(420.f*N+80)/1e4f:Total*420.f*N/1e4f;
-            if(Area>=V.FloorArea.X && Area<=V.FloorArea.Y && 420.f*N<=Total*V.MaxAspect && 420.f*N+80>=(Total+60)*1.2f)Options.Add({&K,Count,N});
-        }
-        if(Reference)
-        {
-            for(const auto& K:V.Widths)if(!Width || K.WidthCm<Width->WidthCm)Width=&K;
-            Bays=FMath::Clamp(22,V.MinBays,V.MaxBays);Naves=V.MinNaves;
-            if(T.SizingTeamSize>0)
-            {
-                if(Options.IsEmpty())return false;
-                const auto& O=Options[Options.Num()/2];Width=O.Kit;Naves=O.Naves;Bays=O.Bays;
-            }
-        }
-        else
-        {
-            if(Options.IsEmpty()){UE_LOG(LogTemp,Warning,TEXT("ER_FIRE_TRAINING_NO_SIZE seed=%d"),Seed);return false;}
-            // Nave count, then kit width, then length: every width class is equally likely.
-            TArray<int32> Counts;for(const auto& O:Options)Counts.AddUnique(O.Naves);
-            Naves=Counts[R.RandRange(0,Counts.Num()-1)];
-            TArray<int32> Widths;for(const auto& O:Options)if(O.Naves==Naves)Widths.AddUnique(O.Kit->WidthCm);
-            const int32 Chosen=Widths[R.RandRange(0,Widths.Num()-1)];
-            TArray<int32> Lengths;for(const auto& O:Options)if(O.Naves==Naves && O.Kit->WidthCm==Chosen){Width=O.Kit;Lengths.Add(O.Bays);}
-            Bays=Lengths[R.RandRange(0,Lengths.Num()-1)];
-        }
+        const float Depth=FMath::GridSnap(Target*10000/(Width+60)-80,100.f);
+        const float Area=(Width+60)*(Depth+80)/10000;
+        if(Depth+80>=(Width+60)*1.12f && Depth>=3800 && FMath::Max(Width+60,Depth+80)<=FMath::Min(Width+60,Depth+80)*Aspect && Area>=V.FloorArea.X && Area<=V.FloorArea.Y)Options.Add({Width,Depth});
     }
-    const int32 Bands=Reference ? FMath::Clamp(2,V.MinHeightBands,V.MaxHeightBands):R.RandRange(V.MinHeightBands,V.MaxHeightBands);
-    const float NaveW=Width->WidthCm,W=NaveW*Naves,Length=420.f*Bays,HL=Length*.5f,Eave=300.f*Bands,Ridge=Eave+200;
-    if(Length+80<(W+60)*1.2f)return false;
-    L.ArenaSize=FVector(W+60,Length+80,Ridge+20);
-    L.WarehouseBays=Bays;L.WarehouseBands=Bands;L.WarehouseNaves=Naves;L.WarehouseNaveWidth=NaveW;
-    L.WarehouseWidth=W;L.IndoorCeiling=Eave;L.LayoutAttempt=Attempt;
+    if(Options.IsEmpty())return Fail(TEXT("dimensions"));
+    const auto Dimensions=Options[Reference ? Options.Num()/2:R.RandRange(0,Options.Num()-1)];
+    const float W=Dimensions.X,Length=Dimensions.Y,HL=Length*.5f;
+    const float Eave=Reference ? FMath::Clamp(900.f,V.MinCeilingHeight,V.MaxCeilingHeight):Pick(V.MinCeilingHeight,V.MaxCeilingHeight);
+    const int32 Bands=FMath::FloorToInt32(Eave/300); // cargo headroom classification, not wall modules
+    L.ArenaSize={W+60,Length+80,Eave+20};
+    L.WarehouseBays=0;L.WarehouseBands=0;L.WarehouseNaves=0;L.WarehouseNaveWidth=0;
+    L.WarehouseWidth=W;L.WarehouseLength=Length;L.IndoorCeiling=Eave;L.LayoutAttempt=Attempt;
     L.GroundSurface=V.GroundSurface;
     auto Surface=[&](const TArray<TObjectPtr<UMaterialInterface>>& Palette,uint32 Salt)->UMaterialInterface*
     {return Palette.IsEmpty() ? nullptr:Palette[HashCombineFast(uint32(Seed),Salt)%Palette.Num()].Get();};
@@ -174,96 +103,20 @@ bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<F
         if(Fixed)B.FixedSurface=Finish;else B.CellSurface=Finish;
         return B;
     };
-    // Kit modules keep unit scale: the piece box is the mesh's own bounds.
-    auto Module=[&](UStaticMesh* Mesh,FVector Origin,bool Pair,bool Visual,bool Roof=false)
-    {
-        const FBox B=Mesh->GetBoundingBox();
-        auto& P=Pieces.AddDefaulted_GetRef();P.Center=Origin+B.GetCenter();P.Size=B.GetSize();
-        if(P.Center.Z-P.Size.Z*.5f<0)P.Center.Z=P.Size.Z*.5f;
-        if(!Pair){P.Center.X=0;P.Center.Y=0;}
-        P.Material=EERBlockMaterial::Metal;P.Destructible=false;P.Mirrored=Pair;P.FixedMesh=Mesh;
-        P.VisualOnly=Visual;P.MeshCollision=!Visual;P.Roof=Roof;
-    };
-    // Half-turn emission for a complete symmetric set: pieces centred on the
-    // west/south side keep their pair, centred ones stay single, the rest are
-    // the copies and are skipped.
-    auto Emit=[&](UStaticMesh* Mesh,FVector Origin,bool Visual,bool Roof=false)
-    {
-        const FVector C=Origin+Mesh->GetBoundingBox().GetCenter();
-        const bool CX=FMath::Abs(C.X)<1,CY=FMath::Abs(C.Y)<1;
-        if(C.X>1 || (CX && C.Y>1))return;
-        Module(Mesh,Origin,!(CX && CY),Visual,Roof);
-    };
-    // ---- Envelope: repeated modules only. Bands raise walls; no floor is added.
+    // Closed visible shell: collision comes from these same procedural solids.
     const float XO=-W*.5f,XI0=XO+20,XI1=-XO-20;
-    // Valleys between naves: open column lines under a steel gutter.
-    TArray<float> Valleys;for(int32 J=1;J<Naves;++J)Valleys.Add(XO+NaveW*J);
-    if(Kit)
-    {
-        for(int32 K=0;K<Bays;++K)
-        {
-            const float Y=-HL+420*K+210;
-            for(int32 Band=0;Band<Bands;++Band)Emit(V.SideWallBay,{XO,Y,300.f*Band},false);
-            Emit(V.SideWallLamps,{XO,Y,300.f*(Bands-1)},true);
-            for(int32 J=0;J<Naves;++J)
-            {
-                const float X=XO+NaveW*(J+.5f);
-                Emit(Width->RoofBay,{X,Y,Eave},false,true);
-                if(K%2==0)Emit(Width->RoofLamps,{X,Y,Eave},true,true);
-            }
-        }
-        for(int32 Boundary=0;Boundary<=Bays;++Boundary)
-        {
-            const float Y=-HL+420*Boundary;
-            // Shared boundary members exist once: posts belong to the boundary, not a bay.
-            const TArray<float> Offsets=Boundary==0 ? TArray<float>{0,20}:Boundary==Bays ? TArray<float>{-20,0}:TArray<float>{-20,0,20};
-            for(int32 Band=0;Band<Bands;++Band)for(float D:Offsets)
-            {
-                Emit(V.Post,{XO,Y+D,300.f*Band},false);
-                for(float X:Valleys)Emit(V.Post,{X-10,Y+D,300.f*Band},false);
-            }
-            for(int32 J=0;J<Naves;++J)Emit(Width->RoofArch,{XO+NaveW*(J+.5f),Y,Eave},false,true);
-        }
-        for(int32 J=0;J<Naves;++J)for(float Y:{-HL-10,HL+10})
-        {
-            const float X=XO+NaveW*(J+.5f);
-            Emit(Width->EndGround,{X,Y,0},false);Emit(V.EndPortal,{X,Y,0},true);
-            for(int32 Band=1;Band<Bands;++Band)Emit(Width->EndBand,{X,Y,300.f*Band},false);
-            Emit(Width->EndCrown,{X,Y,Eave},false);
-        }
-    }
-    else
-    {
-        Box({XO+10,0,Eave*.5f},{20,Length+20,Eave},EERBlockMaterial::Metal,true);
-        Box({0,-HL-5,Ridge*.5f},{W-40,10,Ridge},EERBlockMaterial::Metal,true);
-    }
-    for(float X:Valleys)
-    {
-        if(X>1)continue;
-        // Hidden column volumes keep routes, cover and cargo clear of the posts.
-        for(int32 Boundary=0;Boundary<=Bays;++Boundary)
-        {
-            const float Y=-HL+420*Boundary,Y0=Boundary==0 ? Y:Y-30,Y1=Boundary==Bays ? Y:Y+30;
-            if(FMath::Abs(X)<1 && (Y0+Y1)*.5f>1)continue;
-            auto& C=Box({X,(Y0+Y1)*.5f,Eave*.5f},{20,Y1-Y0,Eave},EERBlockMaterial::Metal,true);
-            C.CollisionOnly=Kit;C.FixedSurface=Kit ? nullptr:C.FixedSurface;C.Mirrored=!(FMath::Abs(X)<1 && FMath::Abs((Y0+Y1)*.5f)<1);
-            if(!C.Mirrored)C.Center=FVector(0,0,C.Center.Z);
-        }
-        auto& Gutter=Box({X,0,Eave+10},{40,Length,20},EERBlockMaterial::Metal,true);
-        Gutter.Mirrored=FMath::Abs(X)>=1;if(!Gutter.Mirrored)Gutter.Center.X=0;
-    }
-    // Hidden backstops behind the thin sheets; the hidden ceiling closes the top.
-    auto Backstop=[&](FVector Center,FVector Size){auto& B=Box(Center,Size,EERBlockMaterial::Metal,true);B.CollisionOnly=true;B.FixedSurface=nullptr;};
-    Backstop({XO-15,0,L.ArenaSize.Z*.5f},{30,Length+80,L.ArenaSize.Z});
-    Backstop({0,-HL-25,L.ArenaSize.Z*.5f},{W,30,L.ArenaSize.Z});
-
+    Box({XO+10,0,Eave*.5f},{20,Length,Eave},EERBlockMaterial::Concrete,true);
+    Box({0,-HL+10,Eave*.5f},{W-40,20,Eave},EERBlockMaterial::Concrete,true);
+    auto& Roof=Box({0,0,Eave+10},{W,Length,20},EERBlockMaterial::Metal,true);
+    Roof.Mirrored=false;Roof.Roof=true;
     // ---- Plan: west catwalk band, two lanes around central cargo, east rooms.
-    const float Dw=220,DeckZ=300,CatwalkX=XI0+100;
-    const float CatwalkZ=WarehouseCatwalkHeight(*Width,Naves,Eave);
+    const float Dw=Reference ? 220:R.RandRange(0,2)*40.f+180,DeckZ=300,CatwalkX=XI0+(Reference ? 100:Pick(100,400));
+    const float CatwalkZ=Reference ? FMath::Min(500.f,Eave-250):Pick(350,Eave-250);
+    L.WarehouseCatwalkVariant=Reference ? 0:R.RandRange(0,5);
     const float Dr=W<=1600 ? 400:W<=2000 ? Pick(450,500):Pick(500,600);
     const float XR0=XI1-Dr,XWL=XI0+Dw+170,XEL=XR0-170,CB0=XWL+150,CB1=XEL-150;
     const float YFront=-HL+1350;
-    const bool Elevated=Bands>=2 && WarehouseRoofHeight(NaveW,Naves,Eave,XI0)>=DeckZ+250;
+    const bool Elevated=Eave>=DeckZ+250;
     FERPlanGrid Grid;Grid.Init({XI0,-HL},{XI1,HL});
     FERPlanGrid Trial;
     // Bits: 1 walkable above ground, 2 any overhead closure, 4 a wide closure.
@@ -280,7 +133,7 @@ bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<F
         for(const FBox& Copy:{B,HalfTurn(B)}){L.ElevatedDecks.Add(Copy);L.OverheadClosures.Add(Copy);L.ElevatedAccesses.Add(Accesses);}
         Grid.Add(B,Mask(B));Grid.Add(HalfTurn(B),Mask(B));
     };
-    auto Headroom=[&](float X0,float X1,float Top,float Clearance=250){return FMath::Min(WarehouseRoofHeight(NaveW,Naves,Eave,X0),WarehouseRoofHeight(NaveW,Naves,Eave,X1))>=Top+Clearance;};
+    auto Headroom=[&](float X0,float X1,float Top,float Clearance=250){return Eave>=Top+Clearance;};
     auto Rail=[&](float X0,float X1,float Y0,float Y1,float Z)
     {
         if(X1-X0>1 && Y1-Y0>1)
@@ -311,7 +164,7 @@ bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<F
         Part(Cursor,Span,0,Height);
     };
     // Calibrated 2mm destructible steel, exactly as the industrial ladders.
-    auto Ladder=[&](FVector Base,float Yaw,float Rise,bool Anchored,bool LevelExit=false)
+    auto Ladder=[&](FVector Base,float Yaw,float Rise,bool Anchored,bool LevelExit=true)
     {
         const FTransform Frame(FRotator(0,Yaw,0),Base);const float Height=Rise+110;
         auto Part=[&](FVector P,FVector Size,bool Root){auto& B=Box(Frame.TransformPosition(P),Size,EERBlockMaterial::Metal,false);B.RotationYaw=Yaw;B.Anchored=Root && Anchored;};
@@ -333,17 +186,18 @@ bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<F
     {
         const FTransform F(FRotator(0,Yaw,0),Base);
         Reserved.Add(FTransform(F.GetRotation(),F.TransformPosition({90,0,100}),{160,180,200}));
-        Reserved.Add(FTransform(F.GetRotation(),F.TransformPosition({-60,0,Rise+100}),{140,180,200}));
+        Reserved.Add(FTransform(F.GetRotation(),F.TransformPosition({55,0,(Rise+200)*.5f}),{100,180,Rise+200}));
+        Reserved.Add(FTransform(F.GetRotation(),F.TransformPosition({-30,0,Rise+100}),{280,180,200}));
     };
     Reserve({0,-HL+300,150},{W,620,300}); // Spawn strip and front crossing.
 
     // ---- Protected bases. The warehouse wall is never the base's only cover.
     // A concrete court with two offset gates surrounds an enterable one-storey
     // barracks. Its steel roof always has two independent exterior ladders.
-    const float SpawnX=Naves%2 ? 0:-NaveW*.5f;
+    const float SpawnX=0;
     const float BX0=SpawnX-300,BX1=SpawnX+300,BY0=-HL+70,BY1=-HL+650;
     const float CX0=SpawnX-600,CX1=SpawnX+600,CY0=-HL+40,CY1=-HL+1150;
-    if(!Elevated || !Headroom(BX0,BX1,DeckZ))return false;
+    if(!Elevated || !Headroom(BX0,BX1,DeckZ))return Fail(TEXT("base"));
     auto ConcreteWall=[&](float X0,float X1,float Y0,float Y1)
     {Box({(X0+X1)*.5f,(Y0+Y1)*.5f,140},{X1-X0,Y1-Y0,280},EERBlockMaterial::Concrete,false);};
     ConcreteWall(CX0,CX1,CY0,CY0+20);
@@ -384,48 +238,134 @@ bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<F
     L.FeatureNames.Append({TEXT("FortifiedBase"),TEXT("BaseRoof")});
     for(int32 I=0;I<10;++I)L.AlphaSpawns.Add(FTransform(FRotator(0,90,0),FVector(SpawnX+(I%4-1.5f)*90.f,-HL+150+(I/4)*110.f,100)));
 
-    // ---- Mandatory steel H-route: two full-length flank walkways joined by
-    // a cross-map bridge. Only the ladder mouths and bridge junctions are open.
-    const float YA=-HL+1500,YB=HL-1500;
+    // Independent orthogonal routes: straight, ring and bent crossings. Rails
+    // follow the boundary of the complete deck union, leaving every junction open.
+    const float EndInset=FMath::Min(Reference ? 1500.f:Pick(1200,1750),HL-500);
+    const float YA=-HL+EndInset,YB=-YA;
     const FBox Flank(FVector(CatwalkX,YA,CatwalkZ-20),FVector(CatwalkX+Dw,YB,CatwalkZ));
-    // Mid-bay crossings avoid full-height columns on every nave line. With
-    // even bay counts, paired crossbars at +/-210cm pass either side of the rib.
-    const bool DoubleBridge=Naves>1 && Bays%2==0;
-    const float BridgeY=DoubleBridge ? 210:0;
-    const FBox Bridge(FVector(CatwalkX+Dw,BridgeY-110,CatwalkZ-20),FVector(DoubleBridge ? -CatwalkX-Dw:0,BridgeY+110,CatwalkZ));
-    if(YB-YA<600 || !Fits({Flank,Bridge}) || !Headroom(CatwalkX,CatwalkX+Dw,CatwalkZ,200))return false;
-    Slab(CatwalkX,CatwalkX+Dw,YA,YB,CatwalkZ);Slab(Bridge.Min.X,Bridge.Max.X,Bridge.Min.Y,Bridge.Max.Y,CatwalkZ);
-    Elevate(Flank,2);Elevate(Bridge,4);
-    L.WarehouseCatwalks={Flank,HalfTurn(Flank),Bridge,HalfTurn(Bridge)};
-    const float LadderX=CatwalkX+Dw*.5f;
-    // End ladders avoid the ground patrol lanes and room walls. Their notched
-    // mouths let the player step horizontally onto the deck below the lights.
+    const float LadderX=CatwalkX+Dw*.5f,EastX=-LadderX;
+    const float Bend=FMath::Min(YB-250,Reference ? 350.f:Pick(350,FMath::Max(350.f,YB*.65f)));
+    const float Kink=Reference ? 400.f:Pick(350,FMath::Max(350.f,W*.18f));
+    TArray<TArray<FVector>> HighPaths;
+    auto Point=[&](float X,float Y){return FVector(X,Y,CatwalkZ+100);};
+    const int32 Pattern=L.WarehouseCatwalkVariant;
+    if(Pattern==0)HighPaths.Add({Point(LadderX,0),Point(EastX,0)});
+    else if(Pattern==1 || Pattern==2)
+    {
+        const float Y=Pattern==1 ? Bend:YB-200;
+        HighPaths.Add({Point(LadderX,-Y),Point(EastX,-Y)});
+        HighPaths.Add({Point(LadderX,Y),Point(EastX,Y)});
+    }
+    else if(Pattern==3)
+        HighPaths.Add({Point(LadderX,-Bend),Point(-Kink,-Bend),Point(-Kink,Bend),Point(EastX,Bend)});
+    else if(Pattern==4)
+        HighPaths.Add({Point(LadderX,-Bend),Point(-Kink,-Bend),Point(-Kink,0),Point(0,0)});
+    else
+        HighPaths.Add({Point(LadderX,-Bend),Point(-Kink,-Bend),Point(-Kink,0),Point(Kink,0),Point(Kink,Bend),Point(EastX,Bend)});
+    TArray<FBox> Network{Flank};
+    for(const auto& Path:HighPaths)for(int32 I=1;I<Path.Num();++I)
+    {
+        const auto& A=Path[I-1];const auto& B=Path[I];
+        const bool Horizontal=FMath::IsNearlyEqual(A.Y,B.Y);
+        Network.Add(FBox(FVector(FMath::Min(A.X,B.X)-(Horizontal ? 0:Dw*.5f),FMath::Min(A.Y,B.Y)-(Horizontal ? Dw*.5f:0),CatwalkZ-20),
+            FVector(FMath::Max(A.X,B.X)+(Horizontal ? 0:Dw*.5f),FMath::Max(A.Y,B.Y)+(Horizontal ? Dw*.5f:0),CatwalkZ)));
+    }
+    // Join corner squares so turning a real capsule never leaves an unsupported gap.
+    for(const auto& Path:HighPaths)for(int32 I=1;I<Path.Num()-1;++I)
+    {
+        const auto& P=Path[I];Network.Add(FBox(FVector(P.X-Dw*.5f,P.Y-Dw*.5f,CatwalkZ-20),FVector(P.X+Dw*.5f,P.Y+Dw*.5f,CatwalkZ)));
+    }
+    if(YB-YA<600 || !Fits(Network) || !Headroom(CatwalkX,CatwalkX+Dw,CatwalkZ,200)){UE_LOG(LogTemp,Warning,TEXT("ER_FIRE_NETWORK_REJECT span=%.0f elevated=%.3f overhead=%.3f open=%.3f"),YB-YA,Trial.Ratio(1),Trial.Ratio(2),Trial.LargestOpen(2,4));return Fail(TEXT("network"));}
+    const auto HalfNetwork=Network;
+    for(const auto& Deck:HalfNetwork)
+    {
+        const auto Paired=HalfTurn(Deck);
+        if(!Network.ContainsByPredicate([&](const FBox& Existing){return Existing.Min.Equals(Paired.Min,.01) && Existing.Max.Equals(Paired.Max,.01);}))Network.Add(Paired);
+    }
+    L.WarehouseCatwalks={Flank,HalfTurn(Flank)};
+    auto KeepCanonical=[&]()
+    {
+        auto& Piece=Pieces.Last();
+        if(Piece.Center.Y>.01 || (FMath::IsNearlyZero(Piece.Center.Y,.01) && Piece.Center.X>.01)){Pieces.Pop();return;}
+        Piece.Mirrored=!FMath::IsNearlyZero(Piece.Center.X,.01) || !FMath::IsNearlyZero(Piece.Center.Y,.01);
+    };
+    TArray<double> CutsX,CutsY;
+    for(const auto& Deck:Network){CutsX.AddUnique(Deck.Min.X);CutsX.AddUnique(Deck.Max.X);CutsY.AddUnique(Deck.Min.Y);CutsY.AddUnique(Deck.Max.Y);}
+    CutsX.Sort();CutsY.Sort();
+    for(int32 I=1;I<CutsX.Num();++I)for(int32 J=1;J<CutsY.Num();++J)
+    {
+        const FVector Mid((CutsX[I-1]+CutsX[I])*.5,(CutsY[J-1]+CutsY[J])*.5,CatwalkZ-10);
+        if(!Network.ContainsByPredicate([&](const FBox& Deck){return Deck.IsInside(Mid);}))continue;
+        Slab(CutsX[I-1],CutsX[I],CutsY[J-1],CutsY[J],CatwalkZ);KeepCanonical();
+    }
+    for(const auto& Deck:Network)
+    {
+        Grid.Add(Deck,Mask(Deck));L.ElevatedDecks.Add(Deck);L.OverheadClosures.Add(Deck);L.ElevatedAccesses.Add(2);
+    }
+    for(int32 I=1;I<HalfNetwork.Num();++I){L.WarehouseCatwalks.Add(HalfNetwork[I]);L.WarehouseCatwalks.Add(HalfTurn(HalfNetwork[I]));}
+    TArray<FVector4> Boundary;
+    // Cut adjacent decks and ladder mouths out of each boundary interval.
+    for(const auto& Deck:Network)for(int32 Edge=0;Edge<4;++Edge)
+    {
+        const bool AlongX=Edge<2;const float Sign=(Edge%2)==0 ? -1.f:1.f;
+        const float Fixed=AlongX ? (Sign<0 ? Deck.Min.Y:Deck.Max.Y):(Sign<0 ? Deck.Min.X:Deck.Max.X);
+        TArray<FVector2D> Segments{{AlongX ? Deck.Min.X:Deck.Min.Y,AlongX ? Deck.Max.X:Deck.Max.Y}};
+        auto Cut=[&](float A,float B)
+        {
+            TArray<FVector2D> Kept;
+            for(const auto& Segment:Segments)
+            {
+                if(B<=Segment.X || A>=Segment.Y)Kept.Add(Segment);
+                else{if(A>Segment.X)Kept.Add({Segment.X,A});if(B<Segment.Y)Kept.Add({B,Segment.Y});}
+            }
+            Segments=MoveTemp(Kept);
+        };
+        for(const auto& Other:Network)
+        {
+            const float Outside=Fixed+Sign*.5f;
+            if(AlongX ? Outside>Other.Min.Y && Outside<Other.Max.Y:Outside>Other.Min.X && Outside<Other.Max.X)
+                Cut(AlongX ? Other.Min.X:Other.Min.Y,AlongX ? Other.Max.X:Other.Max.Y);
+        }
+        if(AlongX && (FMath::IsNearlyEqual(Fixed,YA) || FMath::IsNearlyEqual(Fixed,YB)))
+            for(float X:{LadderX,EastX})Cut(X-85,X+85);
+        for(const auto& Segment:Segments)
+        {
+            if(Segment.Y-Segment.X<2)continue;
+            double A=Segment.X,B=Segment.Y;
+            for(int32 I=0;I<Boundary.Num();)
+            {
+                const auto& Existing=Boundary[I];
+                if(Existing.X==(AlongX ? 1:0) && FMath::IsNearlyEqual(Existing.Y,double(Fixed)) && Existing.Z<=B+.01 && Existing.W>=A-.01)
+                {A=FMath::Min(A,Existing.Z);B=FMath::Max(B,Existing.W);Boundary.RemoveAt(I);I=0;}
+                else ++I;
+            }
+            Boundary.Add(FVector4(AlongX ? 1:0,Fixed,A,B));
+        }
+    }
+    for(const auto& Edge:Boundary)
+    {
+        if(Edge.W-Edge.Z<6)continue;
+        if(Edge.X>0)Rail(Edge.Z+2.5f,Edge.W-2.5f,Edge.Y-2.5f,Edge.Y+2.5f,CatwalkZ);
+        else Rail(Edge.Y-2.5f,Edge.Y+2.5f,Edge.Z,Edge.W,CatwalkZ);
+        KeepCanonical();
+    }
     for(const FVector2D End:{FVector2D(YA,-90),FVector2D(YB,90)})
     {
         const FVector Base(LadderX,End.X+(End.Y<0 ? -35:35),0);
         Ladder(Base,End.Y,CatwalkZ,true,true);ReserveLadder(Base,End.Y,CatwalkZ);
-        Rail(CatwalkX+5,LadderX-85,End.X<0 ? YA:YB-5,End.X<0 ? YA+5:YB,CatwalkZ);
-        Rail(LadderX+85,CatwalkX+Dw-5,End.X<0 ? YA:YB-5,End.X<0 ? YA+5:YB,CatwalkZ);
     }
-    Rail(CatwalkX,CatwalkX+5,YA,YB,CatwalkZ);
-    TArray<FVector2D> Mouths{{BridgeY-110,BridgeY+110}};
-    if(DoubleBridge)Mouths.Add({-BridgeY-110,-BridgeY+110});
-    Mouths.Sort([](const FVector2D& A,const FVector2D& B){return A.X<B.X;});
-    float Cursor=YA;
-    for(const auto& Mouth:Mouths){Rail(CatwalkX+Dw-5,CatwalkX+Dw,Cursor,Mouth.X,CatwalkZ);Cursor=Mouth.Y;}
-    Rail(CatwalkX+Dw-5,CatwalkX+Dw,Cursor,YB,CatwalkZ);
-    Rail(Bridge.Min.X,Bridge.Max.X,Bridge.Min.Y,Bridge.Min.Y+5,CatwalkZ);
-    Rail(Bridge.Min.X,Bridge.Max.X,Bridge.Max.Y-5,Bridge.Max.Y,CatwalkZ);
-    // Metadata includes the entire continuous route, not only a half-bridge.
-    L.CrossingRoutes.Add({{LadderX,YA+100,CatwalkZ+100},{LadderX,YB-100,CatwalkZ+100}});
-    L.CrossingRoutes.Add({{-LadderX,YA+100,CatwalkZ+100},{-LadderX,YB-100,CatwalkZ+100}});
-    L.CrossingRoutes.Add({{LadderX,BridgeY,CatwalkZ+100},{-LadderX,BridgeY,CatwalkZ+100}});
-    if(DoubleBridge)L.CrossingRoutes.Add({{LadderX,-BridgeY,CatwalkZ+100},{-LadderX,-BridgeY,CatwalkZ+100}});
+    L.CrossingRoutes.Add({Point(LadderX,YA+100),Point(LadderX,YB-100)});
+    L.CrossingRoutes.Add({Point(EastX,YA+100),Point(EastX,YB-100)});
+    for(const auto& Path:HighPaths)
+    {
+        L.CrossingRoutes.Add(Path);TArray<FVector> Paired;
+        for(const auto& P:Path)Paired.Add({-P.X,-P.Y,P.Z});L.CrossingRoutes.Add(MoveTemp(Paired));
+    }
     L.FeatureNames.Append({TEXT("Catwalk"),TEXT("CatwalkBridge"),TEXT("SteelParapets")});
     // Keep the narrow high decks clear of the original wall knee brackets.
     // Local timber corridor beneath the south-west walkway, with two real doors.
     const float CorridorEnd=FMath::Min(-450.f,YA+1260);
-    if(CorridorEnd-YA>=600)
+    if(CorridorEnd-YA>=900)
     {
         const float DoorA=YA+540,DoorB=CorridorEnd-180;
         Timber(XI0+Dw,YA,true,CorridorEnd-YA,0,280,{{DoorA-YA,120,0,220},{DoorB-YA,120,0,220}});
@@ -441,6 +381,14 @@ bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<F
         const float YR0=NextRoom,YR1=FMath::Min(-450.f,YR0+(Reference ? 800:Pick(600,1100))),Lr=YR1-YR0;
         NextRoom=YR1+Pick(600,1100);
         if(Lr<500 || (Block>0 && !Chance(.75f)))break;
+        const FBox RoomBounds(FVector(XR0-40,YR0-40,0),FVector(XI1+40,YR1+40,300));
+        bool AccessClear=true;
+        for(const auto& Access:Reserved)
+        {
+            const FBox Bounds=FBox(-Access.GetScale3D()*.5,Access.GetScale3D()*.5).TransformBy(FTransform(Access.GetRotation(),Access.GetLocation()));
+            if(RoomBounds.Intersect(Bounds) || RoomBounds.Intersect(HalfTurn(Bounds))){AccessClear=false;break;}
+        }
+        if(!AccessClear)continue;
         const float Door=Lr*.5f,Mid=(XR0+XI1)*.5f;
         Timber(XR0,YR0,true,Lr,0,280,{{Door,120,0,220}});
         Timber(XR0+12,YR0,false,XI1-XR0-12,0,280,{});
@@ -455,20 +403,7 @@ bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<F
     for(const auto& P:South)Patrol.Add(P);
     for(const auto& P:South)Patrol.Add({-P.X,-P.Y,P.Z});
 
-    // ---- Larger halls reserve empty plazas in the central band before furnishing.
     const float Area=W*Length/1e4f;
-    const int32 PlazaCount=Reference ? 0:FMath::Min(V.MaxPlazas,FMath::FloorToInt(Area/2000));
-    for(int32 Try=0;Try<12 && L.Plazas.Num()<PlazaCount*2;++Try)
-    {
-        const float SX=FMath::Min(Pick(1000,1800),CB1-CB0),SY=Pick(1000,1800);
-        const float YMin=-HL+1550+SY*.5f,YMax=-300-SY*.5f;
-        if(SX<800 || YMax<YMin)break;
-        const FVector C(FMath::Clamp(Pick(CB0,CB1),CB0+SX*.5f,CB1-SX*.5f),FMath::Clamp(Pick(YMin,YMax),YMin,YMax),300);
-        const FBox Plaza(C-FVector(SX*.5f,SY*.5f,300),C+FVector(SX*.5f,SY*.5f,300));
-        if(L.Plazas.ContainsByPredicate([&](const FBox& O){return O.ExpandBy(400).Intersect(Plaza);}))continue;
-        L.Plazas.Add(Plaza);L.Plazas.Add(HalfTurn(Plaza));Reserve(C,Plaza.GetSize());
-        L.FeatureNames.Add(TEXT("Plaza"));
-    }
 
     // ---- Validated placement of cargo and low cover (complete groups only).
     TArray<FTransform> Occupied;
@@ -501,31 +436,89 @@ bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<F
         return FMath::LineBoxIntersection(Bounds,A,B,B-A);
     };
     auto Approach=[](const FERLayoutLadder& Item){return FTransform(Item.Frame.GetRotation(),Item.Frame.TransformPosition({90,0,100}),{160,180,200});};
+    auto ClimbSpace=[](const FERLayoutLadder& Item)
+    {return FTransform(Item.Frame.GetRotation(),Item.Frame.TransformPosition({55,0,(Item.DeckHeight+200)*.5f}),{100,180,Item.DeckHeight+200});};
+    auto LandingSpace=[](const FERLayoutLadder& Item)
+    {return FTransform(Item.Frame.GetRotation(),Item.Frame.TransformPosition({-30,0,Item.DeckHeight+100}),{280,180,200});};
+    int32 PlacementReject=0;
     auto Accept=[&](int32 First,int32 FirstLadder,float Margin)
     {
-        TArray<FTransform> Added;Frames(First,Added);bool Ok=true;
+        TArray<FTransform> Added;Frames(First,Added);bool Ok=true;PlacementReject=0;
         // New ladders need a clear standing approach in front of their rungs.
         for(int32 I=FirstLadder;I<L.Ladders.Num() && Ok;I+=2)
-            if(L.Ladders[I].Frame.GetLocation().Z<1)for(const auto& O:Occupied)if(Overlap(Approach(L.Ladders[I]),O,0)){Ok=false;break;}
+            if(L.Ladders[I].Frame.GetLocation().Z<1)for(const auto& O:Occupied)if(Overlap(Approach(L.Ladders[I]),O,0) || Overlap(ClimbSpace(L.Ladders[I]),O,0) || Overlap(LandingSpace(L.Ladders[I]),O,0)){Ok=false;break;}
         for(int32 I=0;I<Added.Num() && Ok;++I)
         {
             const auto& F=Added[I];
             const FBox B=FBox(-F.GetScale3D()*.5,F.GetScale3D()*.5).TransformBy(FTransform(F.GetRotation(),F.GetLocation()));
             Ok=B.Min.X>=XI0+40 && B.Max.X<=XI1-40 && B.Min.Y>=-HL+40 && B.Max.Y<=HL-40;
-            for(const auto& O:Occupied)if(Ok && Overlap(F,O,Margin))Ok=false;
-            for(const auto& O:Reserved)if(Ok && (Overlap(F,O,0) || Overlap(F,FTransform(FRotator(0,180,0),FVector(-O.GetLocation().X,-O.GetLocation().Y,O.GetLocation().Z),O.GetScale3D()),0)))Ok=false;
-            for(int32 J=0;J<Patrol.Num() && Ok;++J)if(Blocked(Patrol[J],Patrol[(J+1)%Patrol.Num()],F,93))Ok=false;
+            for(const auto& O:Occupied)if(Ok && Overlap(F,O,Margin)){Ok=false;PlacementReject=2;}
+            for(const auto& O:Reserved)if(Ok && (Overlap(F,O,0) || Overlap(F,FTransform(FRotator(0,180,0),FVector(-O.GetLocation().X,-O.GetLocation().Y,O.GetLocation().Z),O.GetScale3D()),0))){Ok=false;PlacementReject=3;}
+            for(int32 J=0;J<Patrol.Num() && Ok;++J)if(Blocked(Patrol[J],Patrol[(J+1)%Patrol.Num()],F,93)){Ok=false;PlacementReject=4;}
             for(const auto* Paths:{&L.RoomAccessRoutes,&L.CrossingRoutes,&L.StairRoutes})for(const auto& Path:*Paths)
                 for(int32 J=1;J<Path.Num() && Ok;++J)
                     for(int32 Copy=0;Copy<2 && Ok;++Copy)
                     {
                         const FVector A=Copy ? FVector(-Path[J-1].X,-Path[J-1].Y,Path[J-1].Z):Path[J-1],B2=Copy ? FVector(-Path[J].X,-Path[J].Y,Path[J].Z):Path[J];
-                        if(Blocked(A,B2,F,93))Ok=false;
+                        if(Blocked(A,B2,F,93)){Ok=false;PlacementReject=5;}
                     }
         }
         if(!Ok){Pieces.SetNum(First);L.Ladders.SetNum(FirstLadder);return false;}
         Occupied.Append(Added);return true;
     };
+    // Through-rooms in the interior, including the central band. Two offset
+    // doors and an optional internal return create cover without dead-end boxes.
+    int32 GroundRooms=0;int32 RoomRejects[6]={};
+    const int32 RoomsWanted=FMath::Clamp(FMath::RoundToInt32(Area/650),2,16);
+    const float RoomX0=XWL+180,RoomX1=XEL-180;
+    for(int32 Try=0;Try<240 && GroundRooms<RoomsWanted;++Try)
+    {
+        const float SX=Pick(500,850),SY=Pick(500,850);
+        if(RoomX1-RoomX0<SX+150 || HL<1650+SY)continue;
+        const float X=Pick(RoomX0+SX*.5f,RoomX1-SX*.5f);
+        // Every third candidate approaches the middle rather than the end courts.
+        const float Y=Try%3==0 ? -SY*.5f-150:Pick(-HL+1500+SY*.5f,-SY*.5f-150);
+        const float X0=X-SX*.5f,X1=X+SX*.5f,Y0=Y-SY*.5f,Y1=Y+SY*.5f;
+        const int32 First=Pieces.Num();const float DoorA=SY*.3f,DoorB=SY*.7f;
+        Timber(X0,Y0,true,SY,0,280,{{DoorA,140,0,220}});
+        Timber(X1-12,Y0,true,SY,0,280,{{DoorB,140,0,220}});
+        Timber(X0+12,Y0,false,SX-24,0,280,{{SX*.65f,160,100,200}});
+        Timber(X0+12,Y1-12,false,SX-24,0,280,{{SX*.35f,160,100,200}});
+        if(R.RandBool())Timber(X0+SX*.5f,Y0+12,true,SY*.3f,0,220,{});
+        if(!Accept(First,L.Ladders.Num(),110)){++RoomRejects[PlacementReject];continue;}
+        const TArray<FVector> Route{{X0-120,Y0+DoorA,100},{X0+150,Y0+DoorA,100},{X,Y,100},{X1-150,Y0+DoorB,100},{X1+120,Y0+DoorB,100}};
+        L.RoomAccessRoutes.Add(Route);TArray<FVector> Paired;
+        for(const auto& P:Route)Paired.Add({-P.X,-P.Y,P.Z});L.RoomAccessRoutes.Add(MoveTemp(Paired));
+        for(const auto& P:Route)Reserve(P,{180,180,200});
+        L.FeatureNames.Add(TEXT("GroundRoom"));++GroundRooms;
+    }
+    if(Area>=2200 && GroundRooms<2){UE_LOG(LogTemp,Warning,TEXT("ER_FIRE_ROOMS_REJECT seed=%d attempt=%d rooms=%d width=%.0f length=%.0f occupied=%d reserved=%d patrol=%d route=%d"),Seed,Attempt,GroundRooms,W,Length,RoomRejects[2],RoomRejects[3],RoomRejects[4],RoomRejects[5]);return false;}
+    // Paired local islands on a different height plane, with two real accesses.
+    if(!Reference && W>4500 && Chance(.7f))
+    {
+        const float Z=CatwalkZ>=650 ? CatwalkZ-300:CatwalkZ+300;
+        const float X=Pick(XWL+400,XEL-400),Y=FMath::Clamp(-HL*.25f,-HL+1800,-600.f);
+        const FBox Island(FVector(X-300,Y-400,Z-20),FVector(X+300,Y+400,Z));
+        if(Headroom(X-300,X+300,Z) && Fits({Island}))
+        {
+            const int32 First=Pieces.Num(),FirstLadder=L.Ladders.Num();
+            Slab(X-300,X+300,Y-400,Y+400,Z);
+            for(float Side:{-1.f,1.f})
+            {
+                const float Edge=X+Side*300,Yaw=Side<0 ? 180:0;
+                Ladder({Edge+Side*35,Y,0},Yaw,Z,true,true);
+                Rail(Edge-2.5f,Edge+2.5f,Y-395,Y-85,Z);Rail(Edge-2.5f,Edge+2.5f,Y+85,Y+395,Z);
+            }
+            Rail(X-302.5f,X+302.5f,Y-400,Y-395,Z);Rail(X-302.5f,X+302.5f,Y+395,Y+400,Z);
+            if(Accept(First,FirstLadder,40))
+            {
+                Elevate(Island,2);L.FeatureNames.Add(TEXT("UpperIsland"));
+                for(int32 I=FirstLadder;I<L.Ladders.Num();I+=2)ReserveLadder(L.Ladders[I].Frame.GetLocation(),L.Ladders[I].Frame.Rotator().Yaw,Z);
+                L.RooftopRoutes.Add({{X-200,Y,Z+100},{X+200,Y,Z+100}});
+                L.RooftopRoutes.Add({{-X+200,-Y,Z+100},{-X-200,-Y,Z+100}});
+            }
+        }
+    }
     // Containers: hollow reinforced steel cells; stacks only under a tall roof.
     auto Container=[&](FVector Center,FVector Size,int32 Index)->FERMapTemplatePiece&
     {
@@ -594,16 +587,18 @@ bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<F
     int32 Cover=0;
     TArray<float> CoverX{XWL-80,XEL+80};
     for(float X=CB0;X<=CB1+1;X+=FMath::Max(300.f,(CB1-CB0)/FMath::Max(2,FMath::RoundToInt((CB1-CB0)/650))))CoverX.Add(X);
-    for(float Y=-HL+950;Y<-350;Y+=Pick(300,450))for(float X:CoverX)
+    for(float Y=-HL+950;Y<-120;Y+=Pick(250,350))for(float X:CoverX)
     {
-        if(!Chance(.55f))continue;
-        const int32 Kind=R.RandRange(0,3);const int32 First=Pieces.Num();
+        if(!Chance(.85f))continue;
+        const int32 Kind=R.RandRange(0,5);const int32 First=Pieces.Num();
         const FVector P(X+Pick(-100,100),Y+Pick(-100,100),0);
         if(Kind==0)Box(P+FVector(0,0,55),{110,110,110},EERBlockMaterial::Wood,false);
         else if(Kind==1){Box(P+FVector(0,0,55),{110,110,110},EERBlockMaterial::Wood,false);Box(P+FVector(0,0,165),{110,110,110},EERBlockMaterial::Wood,false);}
         else if(Kind==2)Box(P+FVector(0,0,45),R.RandBool() ? FVector(300,50,90):FVector(50,300,90),EERBlockMaterial::Concrete,false);
-        else Box(P+FVector(0,0,100),R.RandBool() ? FVector(240,12,200):FVector(12,240,200),EERBlockMaterial::Wood,false);
-        if(Accept(First,L.Ladders.Num(),60))++Cover;
+        else if(Kind==3)Box(P+FVector(0,0,100),R.RandBool() ? FVector(240,12,200):FVector(12,240,200),EERBlockMaterial::Wood,false);
+        if(Kind==4){Box(P+FVector(0,0,60),{320,35,120},EERBlockMaterial::Concrete,false);Box(P+FVector(-142,100,60),{35,165,120},EERBlockMaterial::Concrete,false);}
+        if(Kind==5){Box(P+FVector(0,0,65),{200,120,130},EERBlockMaterial::Wood,false);Box(P+FVector(45,0,175),{110,110,90},EERBlockMaterial::Wood,false);}
+        if(Accept(First,L.Ladders.Num(),75))++Cover;
     }
     L.CentralLowCovers=Cover;
     // ---- Budgets and fairness checks on the complete composition.
@@ -622,6 +617,6 @@ bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<F
     L.SpawnCoverRatio=float(Hidden)/FMath::Max(1,Lines);
     if(L.SpawnCoverRatio<.75f)return Reject(TEXT("spawn-lines"));
     L.CentralBuildingSize=FVector(W,Length,Eave);
-    return Pieces.Num()<=4096;
+    return Pieces.Num()<=4096 ? true:Fail(TEXT("pieces"));
 }
 }

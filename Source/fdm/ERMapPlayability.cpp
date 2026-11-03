@@ -1,5 +1,6 @@
 #include "ERMapPlayability.h"
 #include "ERProceduralMap.h"
+#include "ERLayoutSolids.h"
 #include "Algo/Reverse.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -51,76 +52,7 @@ bool Reaches(const TArray<int32>& Parent,const TArray<int32>& To)
 
 // Known solids of a layout, before any physics exists. A hollow skin or a mesh collider is
 // counted in Unknown instead of being guessed: it can only hide more, never less.
-struct FLayoutSolids
-{
-    struct FSolid{FTransform Frame;FVector Half;FBox Bounds;bool bPawn,bSight;};
-    TArray<FSolid> Solids;
-    TArray<FVector> Triangles;
-    int32 Unknown=0;
-    void Add(const FQuat& Rotation,FVector Center,FVector Size,bool Pawn,bool Sight)
-    {
-        const FTransform Frame(Rotation,Center);const FVector Half=Size*.5;
-        Solids.Add({Frame,Half,FBox(-Half,Half).TransformBy(Frame),Pawn,Sight});
-    }
-    explicit FLayoutSolids(const FERProceduralLayout& L):FLayoutSolids(L,L.Panels){}
-    FLayoutSolids(const FERProceduralLayout& L,const TArray<FERCellPanelDesc>& Panels,bool VisibleOnly=false)
-    {
-        for(const auto& P:L.FixedPieces)
-        {
-            if(P.VisualOnly || (VisibleOnly && (P.CollisionOnly || P.Mesh || P.Material==EERBlockMaterial::Glass)))continue;
-            if(P.MeshCollision){++Unknown;continue;}
-            Add(P.Transform.GetRotation(),P.Transform.GetLocation(),P.Transform.GetScale3D()*100,true,!P.PawnBarrier);
-        }
-        for(const auto& P:Panels)
-        {
-            if(!P.Skin.IsEmpty() && !P.bSolidSkin){++Unknown;continue;}
-            const bool Sight=P.Material!=EERBlockMaterial::Glass;
-            TArray<double> X{0,P.Size.X},Z{0,P.Size.Z};
-            for(const auto& H:P.Holes)
-            {
-                X.AddUnique(FMath::Clamp<double>(H.Min.X,0,P.Size.X));X.AddUnique(FMath::Clamp<double>(H.Max.X,0,P.Size.X));
-                Z.AddUnique(FMath::Clamp<double>(H.Min.Y,0,P.Size.Z));Z.AddUnique(FMath::Clamp<double>(H.Max.Y,0,P.Size.Z));
-            }
-            X.Sort();Z.Sort();
-            for(int32 I=1;I<X.Num();++I)for(int32 J=1;J<Z.Num();++J)
-            {
-                const FVector2D Mid((X[I-1]+X[I])*.5,(Z[J-1]+Z[J])*.5);
-                if(P.Holes.ContainsByPredicate([&](const FBox2D& H){return H.IsInside(Mid);}))continue;
-                Add(P.Transform.GetRotation(),P.Transform.TransformPosition({Mid.X,P.Size.Y*.5,Mid.Y}),{X[I]-X[I-1],P.Size.Y,Z[J]-Z[J-1]},true,Sight);
-            }
-        }
-        for(const auto& F:L.RoomShell)
-        {
-            Triangles.Append({F.A,F.B,F.C});
-            if(!F.C.Equals(F.D,.001))Triangles.Append({F.A,F.C,F.D});
-        }
-        if(L.GradedTerrain)++Unknown;
-    }
-    bool Crosses(const FSolid& S,FVector A,FVector B,FVector Margin) const
-    {
-        if(!S.Bounds.ExpandBy(Margin).Intersect(FBox(ForceInit)+A+B))return false;
-        const FVector LocalA=S.Frame.InverseTransformPositionNoScale(A),LocalB=S.Frame.InverseTransformPositionNoScale(B);
-        return FMath::LineBoxIntersection(FBox(-S.Half-Margin,S.Half+Margin),LocalA,LocalB,LocalB-LocalA);
-    }
-    bool PawnClear(FVector A,FVector B) const
-    {
-        return !Solids.ContainsByPredicate([&](const FSolid& S){return S.bPawn && Crosses(S,A,B,FVector(PawnRadius,PawnRadius,PawnHalfHeight));});
-    }
-    bool SightClear(FVector A,FVector B) const
-    {
-        // Solids shrink by a centimetre: a ray grazing an edge reads as open, as cell collision may
-        // let it pass, so the layout stage can only overstate what opposing starts see.
-        if(Solids.ContainsByPredicate([&](const FSolid& S){return S.bSight && Crosses(S,A,B,-(FVector(1).ComponentMin(S.Half*.5)));}))return false;
-        const FBox Ray=FBox(ForceInit)+A+B;
-        for(int32 I=0;I+2<Triangles.Num();I+=3)
-        {
-            const FVector& T0=Triangles[I];const FVector& T1=Triangles[I+1];const FVector& T2=Triangles[I+2];
-            if(!Ray.Intersect(FBox(ForceInit)+T0+T1+T2))continue;
-            FVector Point,Normal;if(FMath::SegmentTriangleIntersection(A,B,T0,T1,T2,Point,Normal))return false;
-        }
-        return true;
-    }
-};
+using ERLayoutQueries::FLayoutSolids;
 
 // Dense metadata is resampled at turns, slopes and every few metres, keeping graphs small.
 TArray<FVector> ThinRoute(const TArray<FVector>& Dense)
@@ -158,7 +90,7 @@ public:
             Add({V.Frame.TransformPosition({90,0,100}),V.Frame.TransformPosition({-60,0,V.DeckHeight+100})},FString::Printf(TEXT("%s%d"),Source,I),EERTacticalMove::Ladder);
         }
     }
-    void Finish(const FBox& AlphaZone,const FBox& OmegaZone)
+    void Finish(const TArray<FBox>& AlphaZones,const TArray<FBox>& OmegaZones)
     {
         CutCrossings();
         for(int32 I=0;I<Routes.Num();++I)if(!Routes[I].bClosed)
@@ -180,7 +112,8 @@ public:
         }
         auto ZoneOf=[&](FVector Q)
         {
-            for(int32 Team=0;Team<2;++Team)if((Team ? OmegaZone:AlphaZone).IsInsideOrOnXY(Q) && Q.Z<=(Team ? OmegaZone:AlphaZone).Max.Z)return Team;
+            for(int32 Team=0;Team<2;++Team)for(const auto& Zone:Team ? OmegaZones:AlphaZones)
+                if(Zone.IsInsideOrOnXY(Q) && Q.Z<=Zone.Max.Z)return Team;
             return int32(INDEX_NONE);
         };
         for(const auto& Link:Links)
@@ -297,6 +230,9 @@ void BuildRoomsGraph(const FERProceduralLayout& L,FERTacticalGraph& G)
         const auto& R=L.RoomNodes[I];auto& V=G.Nodes.AddDefaulted_GetRef();
         V.Position=R.Center;V.Source=FString::Printf(TEXT("room%d"),I);V.bBase=R.Base;
         V.Kind=R.Junction ? EERTacticalNodeKind::Junction:R.Upper ? EERTacticalNodeKind::Upper:EERTacticalNodeKind::Room;
+        // With explicit secondary spawn nodes, retain the original base room
+        // in the spawn set as well; it must not disappear from path metrics.
+        if(R.Base && L.SpawnZones.Num()>2)V.Kind=EERTacticalNodeKind::Spawn;
         if(R.Base)V.Team=FVector::DistSquared2D(R.Center,Alpha)<=FVector::DistSquared2D(R.Center,Omega) ? 0:1;
     }
     for(int32 I=0;I<L.RoomLinks.Num();++I)
@@ -307,6 +243,31 @@ void BuildRoomsGraph(const FERProceduralLayout& L,FERTacticalGraph& G)
         const int32 Edge=G.AddEdge(E.A,E.B,Sloped ? EERTacticalMove::Ramp:EERTacticalMove::Walk,FString::Printf(TEXT("link%d"),I),Route,E.Width-2*E.Cut);
         if(Edge!=INDEX_NONE && Route)G.Edges[Edge].Path=L.RoomAccessRoutes[I];
     }
+    // Each secondary pocket is a separate base in the exact room graph. Join
+    // it along the already furnished corridor polyline, never across a wall.
+    for(const auto& Zone:L.SpawnZones)if(Zone.FirstStart>0 && Zone.ExitRoute.Num()>1)
+    {
+        const FVector Join=Zone.ExitRoute.Last();double Best=100.;int32 LinkIndex=INDEX_NONE,Segment=0;
+        for(int32 I=0;I<L.RoomLinks.Num() && I<L.RoomAccessRoutes.Num();++I)
+        {
+            const auto& Path=L.RoomAccessRoutes[I];
+            for(int32 J=1;J<Path.Num();++J)
+            {
+                const double Distance=FVector::Dist(Join,FMath::ClosestPointOnSegment(Join,Path[J-1],Path[J]));
+                if(Distance<Best){Best=Distance;LinkIndex=I;Segment=J;}
+            }
+        }
+        auto& Node=G.Nodes.AddDefaulted_GetRef();Node.Position=Zone.Center;Node.Kind=EERTacticalNodeKind::Spawn;Node.Team=Zone.Team;Node.bBase=true;Node.Source=TEXT("spawn-zone");
+        if(LinkIndex==INDEX_NONE)continue;
+        const auto& Link=L.RoomLinks[LinkIndex];const auto& Route=L.RoomAccessRoutes[LinkIndex];
+        const bool TowardA=FVector::DistSquared(Join,Route[0])<FVector::DistSquared(Join,Route.Last());
+        const int32 Edge=G.AddEdge(G.Nodes.Num()-1,TowardA ? Link.A:Link.B,EERTacticalMove::Walk,TEXT("spawn-zone-exit"),true,300);
+        if(Edge==INDEX_NONE)continue;
+        auto& Path=G.Edges[Edge].Path;Path=Zone.ExitRoute;
+        if(TowardA){for(int32 J=Segment-1;J>=0;--J)Path.Add(Route[J]);}
+        else {for(int32 J=Segment;J<Route.Num();++J)Path.Add(Route[J]);}
+    }
+
 }
 
 FBox SpawnZone(const TArray<FTransform>& Starts,const FERPlayabilityPolicy& P,const TArray<FBox>& Courts)
@@ -315,6 +276,17 @@ FBox SpawnZone(const TArray<FTransform>& Starts,const FERPlayabilityPolicy& P,co
     if(!Zone.IsValid)return Zone;
     for(const auto& Court:Courts)if(Court.IsInsideOrOnXY(Zone.GetCenter()))return FBox(Court.Min,FVector(Court.Max.X,Court.Max.Y,Zone.Max.Z+P.BaseMargin));
     return Zone.ExpandBy(FVector(P.BaseMargin,P.BaseMargin,P.BaseMargin));
+}
+
+TArray<FBox> SpawnZones(const FERProceduralLayout& L,int32 Team,const FERPlayabilityPolicy& P)
+{
+    const auto& Bank=Team ? L.OmegaSpawns:L.AlphaSpawns;TArray<FBox> Out;
+    for(const auto& Zone:L.SpawnZones)if(Zone.Team==Team)
+    {
+        TArray<FTransform> Starts;for(int32 I=Zone.FirstStart;I<Zone.FirstStart+Zone.StartCount && I<Bank.Num();++I)Starts.Add(Bank[I]);
+        Out.Add(SpawnZone(Starts,P,Zone.FirstStart==0 ? L.WarehouseBaseCourts:TArray<FBox>{}));
+    }
+    if(Out.IsEmpty())Out.Add(SpawnZone(Bank,P,L.WarehouseBaseCourts));return Out;
 }
 
 void BuildRoutesGraph(const FERProceduralLayout& L,EERMapArchetype Archetype,const FERPlayabilityPolicy& P,FERTacticalGraph& G)
@@ -348,7 +320,7 @@ void BuildRoutesGraph(const FERProceduralLayout& L,EERMapArchetype Archetype,con
     if(Alleys)Builder.Add(L.UpperRoute,TEXT("upper"),EERTacticalMove::Stairs);
     Builder.AddLadders(L.Ladders,TEXT("ladder"));
     Builder.AddLadders(L.VillageUpperLadders,TEXT("upperladder"));
-    Builder.Finish(SpawnZone(L.AlphaSpawns,P,L.WarehouseBaseCourts),SpawnZone(L.OmegaSpawns,P,L.WarehouseBaseCourts));
+    Builder.Finish(SpawnZones(L,0,P),SpawnZones(L,1,P));
     if(Builder.UnknownSolids()>0)G.Note+=FString::Printf(TEXT("; %d hollow or mesh solids are unknown before physics"),Builder.UnknownSolids());
 }
 

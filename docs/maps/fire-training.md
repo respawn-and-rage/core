@@ -2,22 +2,43 @@
 
 Shared rules are in [MAPS.md](../MAPS.md).
 
-**Code:** `ERFireTraining.cpp`.
+**Code:** `ERFireTraining.cpp`, `ERFireTrainingTests.cpp`, `ERFireTrainingProbe.cpp`,
+`scripts/setup_fire_training_procedural.py`.
 
-One open warehouse hall from the owner's kit: never stretched, no storeys.
+A closed procedural training hall: visible concrete walls and a flat steel ceiling provide
+matching collision. Width, depth and ceiling height are independent of the retired
+warehouse modules; length is always at least 1.12 times width and at most 1.5 times width. Team sizing
+retains the common floor-area budget. The shell stays closed during gameplay even
+when the general ceiling display option is disabled.
 
-- 1–4 naves of 16/20/24m with open column lines; 4.2m bays; 2–4 bands of 3m wall height.
-  Through 3v3 exactly one nave grows lengthwise; from 4v4 more naves are allowed. Outside
-  length is always ≥1.2× width.
-- Two concrete-walled base courts with offset gates, an enterable barracks holding all
-  starts, a 3m roof, two ladders each.
-- Mandatory 2.2m steel flank walkways as high as lamps and roof allow (2m standing clearance),
-  joined by cross bridges, four notched end ladders, 127cm industrial parapets.
-- Ground timber rooms and corridors, containers, low cover, empty plazas.
-- Budgets on a 50cm raster: elevated ≤30%, overhead ≤40%, open-to-roof ≥45%. Two accesses per
-  elevated area. Roof groups are hidden from minimap capture. A verified reference
-  fallback ends the bounded retries. Asset licence is unknown: confirm before public use.
+- Two protected concrete courts with offset gates, enterable timber barracks,
+  3m local roofs and two exterior ladders each. Shared 1–3 spawn zones remain paired
+  and every opposing start pair is occluded.
+- High steel routes vary in width, wall inset, end position and height. H crossings,
+  paired inner bridges, an end-linked ring, double doglegs, offset connections and S routes provide six patterns. Rails follow the deck union so junctions remain open.
+  Optional paired islands occupy a separate height plane with two ladder accesses.
+- Ground timber rooms and corridors include paired interior through-rooms with offset doors, window openings and optional internal returns. Destructible cargo and denser staggered groups of six cover types fill the ground; only movement and ladder volumes remain reserved.
+  Clear routes, full climbing shafts and ladder exit sweeps are reserved before
+  furnishing. Ladders step off at deck level instead of overshooting into overhead decks.
+- Elevated projection ≤30%, overhead ≤40%, and a connected region open to the ceiling
+  ≥45%, measured on the shared 50cm plan raster. Every elevated area has at least
+  two independent accesses and checked standing headroom.
+- Roof groups are omitted from minimap capture. Bounded attempts end with a safe
+  procedural reference composition. Lighting is generated on a ceiling grid with soft white point lights. A neutral
+  specified ambient cubemap replaces the blue atmospheric capture; setup is scoped
+  to Fire Training through `setup_fire_training_lighting.py`.
+
+The warehouse kit, wet concrete and their import sources are retired. The floor uses dry light concrete. Shared steel derivatives live in the Industrial library.
+`setup_remove_warehouse.py` audits references and verifies an external rollback before removal. `setup_fire_training_finishes.py` binds neutral steel plates with world-space
+2×4m joints to the ceiling and concrete to the outer walls, without resizing textures. Geometry uses generated solids, cell constructions
+and procedural steel barriers. Legacy kit properties remain readable for serialized
+asset compatibility and do not constrain generation.
 
 ## Verify
 
-`test-fire-training.py` (`--render`, `--network`). Native: `EclipseRecoil.Destruction.FireTraining*`.
+`verify_warehouse_removal.py` checks all production package dependencies and shared palette bindings.
+Native: `EclipseRecoil.Destruction.FireTraining*`, `EclipseRecoil.Maps.TeamSizing`,
+`EclipseRecoil.Maps.DensityBudgets`, `EclipseRecoil.Maps.SpawnZones`.
+`preview-map-sizing.py --verify-seeds 512` exports measured plans.
+`test-fire-training.py` (`--game`, `--render`, `--network`, `--team-size 3`) checks real ladder movement,
+closed-shell collision, material rendering, regeneration and initial/late snapshots.

@@ -39,6 +39,8 @@ struct FERLayoutCover
     FVector Size,Hide,Entry,SightFrom,SightTo;
     EERBlockMaterial Material=EERBlockMaterial::Brick;
     float HalfHeight=92.5f;
+    int32 FiringStair=INDEX_NONE;
+    FVector FiringPosition=FVector::ZeroVector;
 };
 struct FERLayoutContainer { FTransform Frame; FVector Size; };
 struct FERLayoutSecondary { FTransform Frame; FVector Size; int32 Floors=1; EERBlockMaterial Material=EERBlockMaterial::Brick; bool Tower=false; bool LadderAccess=false; };
@@ -57,8 +59,16 @@ struct FERVillageBlock
     int32 Storeys=1;
     bool SelfSymmetric=false;
 };
+// Contiguous ranges refer to the existing per-team start arrays.
+struct FERLayoutSpawnZone
+{
+    int32 Team=0,FirstStart=0,StartCount=0;
+    FVector Center=FVector::ZeroVector;
+    TArray<FVector> ExitRoute;
+};
 struct FERProceduralLayout
 {
+    TArray<FERLayoutSpawnZone> SpawnZones;
     TArray<FERLayoutRect> Rooms, Corridors;
     TArray<FERLayoutWall> Walls;
     TArray<FERLayoutOpening> Openings;
@@ -103,6 +113,9 @@ struct FERProceduralLayout
     FVector TownCrossing=FVector::ZeroVector;
     EERCrossingRule CrossingRule=EERCrossingRule::OpenYard;
     int32 BuildingFloors=0;
+    int32 CentralShape=0;
+    TArray<FBox> CentralFootprints;
+    TArray<FTransform> CentralEntrances;
     FVector CentralBuildingSize=FVector::ZeroVector;
     FVector CentralBuildingCenter=FVector::ZeroVector;
     bool TerracedBuilding=false;
@@ -117,7 +130,8 @@ struct FERProceduralLayout
     TArray<FVector> WallBridges;
     // Fire Training warehouse: narrow connected walkways, protected base courts.
     int32 WarehouseBays=0,WarehouseBands=0,WarehouseNaves=0,LayoutAttempt=0;
-    float WarehouseWidth=0,WarehouseNaveWidth=0,IndoorCeiling=0; // Width is the total of all naves. // IndoorCeiling: eave height, recon flies below the roof.
+    float WarehouseWidth=0,WarehouseLength=0,WarehouseNaveWidth=0,IndoorCeiling=0;
+    int32 WarehouseCatwalkVariant=0; // Procedural footprint and flat roof underside.
     float ElevatedRatio=0,OverheadRatio=0,OpenRegionRatio=0,SpawnCoverRatio=0;
     TArray<FBox> ElevatedDecks;      // Walkable surfaces above the ground (both halves).
     TArray<FBox> OverheadClosures;   // Every horizontal closure above the ground.
@@ -135,6 +149,7 @@ struct FERProceduralLayout
     TArray<FERLayoutLadder> VillageUpperLadders;
     TArray<int32> VillageAccessFlights;
     int32 VillageBaseVariant=0;
+    TArray<FVector2D> VillageTerrainProfile; // Y/elevation knots; constant across X.
     TArray<FBox> WarehouseBaseCourts,WarehouseCatwalks;
     int32 RoomsTheme=0;
     int32 RoomsMacroVariant=INDEX_NONE; // Baked plan in use: lanes*1000+sample, or legacy.
@@ -152,13 +167,15 @@ struct FERProceduralLayout
 };
 namespace ERProcedural
 {
+    bool SpawnZonesClearInWorld(class UWorld* World,const FTransform& Frame,const FERProceduralLayout& Layout);
+    bool BuildSpawnZones(int32 Seed,FERProceduralLayout& Layout,const FERCellSettings& Cells);
     bool ConfigureTeamSize(class UERMapTemplate& Template,int32 ExpectedTeamSize,int32 Seed=42);
     inline float TargetAreaM2(int32 ExpectedTeamSize) { return ExpectedTeamSize*1500.f; }
     inline bool ValidTeamArea(FVector Size,int32 ExpectedTeamSize)
     { const double Area=Size.X*Size.Y/10000.,Target=TargetAreaM2(ExpectedTeamSize);return FMath::IsFinite(Area) && Area>=Target*.9-.01 && Area<=Target*1.1+.01; }
     bool FoldLayoutToMirror(FERProceduralLayout& Layout,const FERCellSettings& Cells);
     double PlayableAreaM2(const FERProceduralLayout& Layout);
-    bool BuildCircularCentralBuilding(const UERMapTemplate& Template,int32 Seed,TArray<FERMapTemplatePiece>& Pieces,FERProceduralLayout& Layout,TArray<FVector>& Patrol);
+    bool BuildCircularCentralBuilding(const UERMapTemplate& Template,int32 Seed,TArray<FERMapTemplatePiece>& Pieces,FERProceduralLayout& Layout,TArray<FVector>& Patrol,int32 CrossingOverride=0);
     float CentralGroundHeight(const FERProceduralLayout& Layout,FVector2D Position);
     void BuildCentralTerrain(class UDynamicMeshComponent* Component,const FERProceduralLayout& Layout);
     bool ApplyMapTheme(const FERProceduralConfig& Config,FERProceduralLayout& Layout);
@@ -174,6 +191,10 @@ namespace ERProcedural
     bool PlanAlleyUnderpass(const UERMapTemplate& Template,int32 Seed,FVector Base,TArray<FERMapTemplatePiece>& Pieces,FERProceduralLayout& Layout);
     bool BuildAlleyLowCover(const UERMapTemplate& Template,int32 Seed,TArray<FERMapTemplatePiece>& Pieces,FERProceduralLayout& Layout);
     float AlleyRampHeight(const FERAlleyRamp& Ramp,FVector2D Position);
+    float VillageGroundHeight(const FERProceduralLayout& Layout,FVector2D Position);
+    void PlanVillageTerrain(FERProceduralLayout& Layout,int32 Seed,float Envelope,const TArray<float>& WallYs);
+    void ApplyVillageTerrain(FERProceduralLayout& Layout);
+    void BuildVillageTerrain(class UDynamicMeshComponent* Component,const FERProceduralLayout& Layout);
     float AlleyGroundHeight(const FERProceduralLayout& Layout,FVector2D Position);
     float AlleyBaseHeight(FVector Arena,FVector2D Position,bool Balanced=false);
     void BuildAlleyTerrain(class UDynamicMeshComponent* Component,const FERProceduralLayout& Layout);
@@ -187,10 +208,7 @@ namespace ERProcedural
     // Attempts 0..FireTrainingAttempts-1 sample the seed; the last is the verified reference layout.
     constexpr int32 FireTrainingAttempts=8;
     bool BuildFireTraining(const class UERMapTemplate& Template,int32 Seed,int32 Attempt,TArray<struct FERMapTemplatePiece>& Pieces,FERProceduralLayout& Layout,TArray<FVector>& Patrol);
-    // Roof underside above a point across the width (any nave), for headroom checks.
-    float WarehouseRoofHeight(float NaveWidth,int32 Naves,float Eave,float X);
-    // Highest common walking plane below the kit lights/roof, with 2m clearance.
-    float WarehouseCatwalkHeight(const FERWarehouseWidthKit& Kit,int32 Naves,float Eave);
+
 }
 
 // Reuses the lab's 5cm cells, hitscan, explosion, support and replication.
