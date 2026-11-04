@@ -504,6 +504,11 @@ const FERTeamAppearance& AERCharacter::GetTeamAppearance() const
     return ERSkins::Select(Alpha ? AlphaSkins : OmegaSkins, Alpha ? AlphaAppearance : OmegaAppearance, State ? State->ActiveSkin : 0);
 }
 
+void AERCharacter::FaceRotation(FRotator NewControlRotation, float DeltaTime)
+{
+    const auto* Movement = Cast<UERMovement>(GetCharacterMovement());
+    Super::FaceRotation(Movement ? Movement->ConstrainProneRotation(FRotator(0,NewControlRotation.Yaw,0)) : NewControlRotation, DeltaTime);
+}
 void AERCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);

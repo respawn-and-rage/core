@@ -41,6 +41,7 @@ class FDM_API AERCharacter : public ACharacter
 public:
     UPROPERTY(VisibleAnywhere) TObjectPtr<class UERWounds> Wounds;
     AERCharacter(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
+    virtual void FaceRotation(FRotator NewControlRotation, float DeltaTime = 0.f) override;
     UFUNCTION(BlueprintCallable, Category="Training|Editor")
     static bool ValidateFieldClothing(class USkeletalMesh* TargetMesh, bool Skirt);
     UFUNCTION(BlueprintCallable, Category="Training|Editor")

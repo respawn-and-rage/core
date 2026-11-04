@@ -207,7 +207,7 @@ def card(d, plan, x, y, w, h, scale):
         if plan.get('circular') and 'building_size_m' in plan:
             bw,bd,_=plan['building_size_m'];floors=plan['building_floors']
             shapes={0:'rettangolare',1:'a H',2:'a croce',3:'a gradoni'}
-            rules={1:'aperto',2:'muro scavalcabile 1,2 m',3:'barriera fissa 3 m'}
+            rules={1:'aperto',2:'muro scavalcabile 1,2 m',3:'ringhiera con edificio laterale'}
             note=f"{bw:g} × {bd:g} m · {shapes.get(plan['central_shape'],'')} · {floors} "+('piano' if floors==1 else 'piani')+' · '+rules.get(plan['crossing_rule'],'')
             if plan.get('secondary_buildings'):note+=f" · {plan['secondary_buildings']} edifici minori"
             elif plan.get('central_hill'):note+=' · collina centrale'

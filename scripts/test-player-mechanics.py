@@ -12,7 +12,7 @@ try:
     def start(name,extra):
         h=(logs/f'player-mechanics-{name}.log').open('w');handles.append(h)
         pr=subprocess.Popen(common+extra,stdout=h,stderr=subprocess.STDOUT);procs.append(pr);return pr
-    host=start('host',['/Game/EclipseRecoil/Maps/L_Depot?listen?Name=Host','-port=17793']+(['-windowed','-ResX=1280','-ResY=720','-ERPerformanceAudit'] if args.render else ['-nullrhi']))
+    host=start('host',['/Game/EclipseRecoil/Maps/L_Depot?listen?ERFullArsenalTest?Name=Host','-port=17793']+(['-windowed','-ResX=1280','-ResY=720','-ERPerformanceAudit'] if args.render else ['-nullrhi']))
     end=time.monotonic()+60
     while time.monotonic()<end:
         if 'listening on port 17793' in (logs/'player-mechanics-host.log').read_text(errors='replace'):break

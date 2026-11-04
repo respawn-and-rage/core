@@ -52,10 +52,24 @@ Note that the gallery counts from 1: "gallery 8" is index 7. Role assignments ar
 - Ragdolls: owned `PA_ER_{Alpha,Omega}_Ragdoll`, 16 bodies/15 joints. Corpse meshes collapse
   hidden bones in `ERCorpseMeshComponent::FinalizeBoneTransform`.
 - Prone is procedural on team rigs through `UERPostureMesh`. Its extra hit volume stops at death.
+- Prone keeps the torso low, opens the thighs from the hips, and fits the arms
+  forward. Ground traces set the leg height and select reachable elbow support
+  points. The boot toes turn down across the shins for ground contact. Side probes
+  reduce thigh spread near obstacles, and elbows lift when a wall prevents
+  ground support.
+  Mesh-specific clothing/body clearances live in the `RespawnAndRage.ProneGrounding`
+  section of `DefaultGame.ini`. `ProneContactsLeft` and `ProneContactsRight` store
+  mesh-specific toe, knee and elbow offsets in centimetres (X, Y, Z).
+  `PronePelvisDepth` limits hip drop for meshes with low clothing.
+  `calibrate-prone-grounding.py --apply` measures the
+  visible torso/leg vertices of all 20 skins and updates only that section; anchored
+  hand and foot contacts are excluded from root-height calibration. Recheck
+  with `test-world-poses.py --prone --wall` and `test-hit-fidelity.py` afterwards.
 - Ground contact: `FeetOffset = -92.5 - soleHeight`, measured from foot vertices across the
   idle clip by `setup_character_grounding.py`. Rerun after an explicit catalog rebuild.
   `UERMovement::ApplyPosturePresentation` lowers live pawns a further 3cm: the capsule walks 2.15cm
-  above the floor and the live idle stands about .85cm taller than the clip. No terrain IK.
+  above the floor and the live idle stands about .85cm taller than the clip. Standing
+  and crouching have no terrain IK; prone has foot and elbow ground contact.
 
 ## Clothing
 
@@ -83,3 +97,5 @@ do not claim cybernetic limbs became human.
 `test-team-skins.py`, `test-target-skins.py`, `test-world-poses.py`, `test-field-clothing.py --render --preview`,
 `test-character-preview.py`, `verify_runtime_characters.py`, `test-network.py --skins`,
 `test-hit-fidelity.py` (live sole height against the floor).
+`test-world-poses.py --prone --wall` checks visible mesh floor clearance, elbows,
+weapon bounds and both palm contacts across all skins on server and client.

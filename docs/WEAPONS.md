@@ -117,6 +117,15 @@ WorldSupportPalmOffsetCm` is a per-skin correction. Pistols use a two-hand cup c
 
 `setup_world_weapon_pose.py` updates only the seven firearm presentation profiles.
 
+Held world poses query full weapon bounds against pawn-blocking geometry and
+try a bounded rearward/upward tuck while preserving aim direction. Movement sweeps
+reserve space ahead for the ready firearm. Both palms
+are fitted afterwards; traditional grips, including the knife, move through the
+right wrist before fitting the support hand. The FPS rig uses the camera's separate FirstPerson scale. Prone carry
+keeps the stock at shoulder height and changes the elbow bend pole. The prone torso
+and per-mesh ground clearance are described in [CHARACTERS](CHARACTERS.md). These cosmetic
+queries do not change shot direction or authoritative muzzle obstruction checks.
+
 ## FPS presentation
 
 The rig lives in `Characters/FirstPerson`; skin forearms come from `Teams/{Alpha,Omega}/
@@ -144,3 +153,5 @@ Always `test-reference-weapons.py` (`--render` for viewmodels), then as relevant
 `test-arsenal.py`, `test-scopes.py --render`, `test-world-poses.py`, `test-network.py --shot-feedback`,
 `test-hit-fidelity.py` (rendered figure against hit bodies; `--lag 0 25 50` for two-peer shot timing).
 Native: `EclipseRecoil.Weapons.ReferenceBallistics`, `EclipseRecoil.Weapons.ShotHistory`. Saved assets: `verify_sketchfab_weapons.py`.
+Use `test-world-poses.py --prone --wall` for elbow and full weapon bounds against
+a collision floor and thin cover on both peers; `EclipseRecoil.Movement.BodyClearance` covers thin walls.

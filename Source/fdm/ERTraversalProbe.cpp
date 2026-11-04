@@ -2,6 +2,7 @@
 #include "ERLadder.h"
 #include "ERCharacter.h"
 #include "ERMovement.h"
+#include "ERServerSettings.h"
 #include "ERWeapon.h"
 #include "ERMatch.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -69,7 +70,7 @@ void AERTraversalProbe::Tick(float Delta)
         auto* M=Cast<UERMovement>(C->GetCharacterMovement());
         if(LocalPhase!=Phase)
         {
-            LocalPhase=Phase;Time=PeakSpeed=0;SawLadder=Sent=false;
+            LocalPhase=Phase;Time=PeakSpeed=0;SawLadder=Sent=false;EquipmentChecks=0;
             for(FKey Key:{EKeys::W,EKeys::S,EKeys::SpaceBar})Input(PC,Key,IE_Released);
             PC->SetControlRotation(FRotator(0,Phase==4?0:180,0));
             if(Phase==6){for(int32 I=Fixture->GetInstanceCount()-1;I>=4;--I)Fixture->RemoveInstance(I);}
@@ -111,11 +112,16 @@ void AERTraversalProbe::Tick(float Delta)
         {
             if(SawLadder && !M->IsOnLadder() && C->GetActorLocation().Z>4400)Input(PC,EKeys::W,IE_Released);
             SawLadder|=M->IsOnLadder();
-            if(M->IsOnLadder())PeakSpeed=FMath::Max(PeakSpeed,FMath::Abs(M->Velocity.Z));
+            if(M->IsOnLadder())
+            {
+                PeakSpeed=FMath::Max(PeakSpeed,FMath::Abs(M->Velocity.Z));
+                if(C->IsWeaponStowed())EquipmentChecks|=1;
+                if(C->Weapon && C->Weapon->GetSpreadDegrees()>=C->Weapon->Data->StandingSpreadDegrees+C->Weapon->GetBloomDegrees()+.5f)EquipmentChecks|=2;
+            }
             if(Time>2 && !Sent)
             {
-                const bool Okay=SawLadder && FMath::IsNearlyEqual(PeakSpeed,Phase==2?144.f:180.f,3) && (Phase!=3 || C->IsWeaponStowed()) &&
-                    (Phase!=2 || C->Weapon->GetSpreadDegrees()>=C->Weapon->Data->StandingSpreadDegrees+C->Weapon->GetBloomDegrees()+.5f);
+                const bool Okay=SawLadder && FMath::IsNearlyEqual(PeakSpeed,ERServer::Get(GetWorld(),Phase==2?FName("Move.LadderLight"):FName("Move.LadderHeavy"))/.036f,3) && (Phase!=3 || (EquipmentChecks&1)!=0) &&
+                    (Phase!=2 || (EquipmentChecks&2)!=0);
                 UE_LOG(LogTemp,Display,TEXT("ER_TRAVERSAL_CLIENT_%s phase=%d predicted_ladder speed=%.1f unarmed=%d"),Okay?TEXT("PASS"):TEXT("FAIL"),Phase,PeakSpeed,C->IsWeaponStowed());Sent=true;
             }
         }
@@ -194,7 +200,7 @@ void AERTraversalProbe::Tick(float Delta)
     }
     else if((Phase==2 && Time>7) || (Phase==3 && Time>5.5f))
     {
-        Check(SawLadder && FMath::IsNearlyEqual(PeakSpeed,Phase==2?144.f:180.f,3) && Client->GetActorLocation().Z>4400 && !Client->IsWeaponStowed(),TEXT("server validated climb, speed and roof exit"));Next();
+        Check(SawLadder && FMath::IsNearlyEqual(PeakSpeed,ERServer::Get(GetWorld(),Phase==2?FName("Move.LadderLight"):FName("Move.LadderHeavy"))/.036f,3) && Client->GetActorLocation().Z>4400 && !Client->IsWeaponStowed(),TEXT("server validated climb, speed and roof exit"));Next();
     }
     else if(Phase==4 && Time>4){Check(SawLadder && Client->GetActorLocation().Z<4110,TEXT("descend from roof to ground"));Next();}
     else if(Phase==5 && Time>2){Check(SawFall && !M->IsOnLadder() && !Client->IsWeaponStowed(),TEXT("Space detaches and restores weapon"));Next();}

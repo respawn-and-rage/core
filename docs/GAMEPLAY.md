@@ -46,9 +46,15 @@ does not affect bot vision. Stationary targets keep team, skin and start across 
 
 Sprint: double-tap W within 300ms and hold, or hold E with W. Partial stamina can be
 spent by a fresh gesture; a held key never auto-restarts. Hold Ctrl/C to crouch, double
-tap to latch prone, press again to rise; standing waits for ceiling clearance. Forward
+tap to latch prone, press again to rise; prone entry passes through crouch before
+lowering to the floor. Standing waits for ceiling clearance. Forward
 input vaults; Space+forward climbs, also while airborne. `FindLedge` handles parapets
 down to 20cm wide.
+
+Prone reserves a horizontal body footprint before lowering. Movement sweeps that
+footprint as well as the central capsule; turns sample intervening orientations
+to stop the head and feet entering nearby cover. These checks run on the predicted
+owner and authority paths. Weapon presentation checks are in [WEAPONS](WEAPONS.md).
 
 Ladders use custom movement mode 2 (1 is mantle, 3 is the ladder-to-roof transition).
 W/S climbs, Space detaches. Pistols, knives and hand grenades stay usable; other
@@ -118,3 +124,7 @@ automatic respawn, bomb or capture modes. Competitive balance needs real playtes
 | Lobby, rotation, capacity | `test-lobby.py`, `test-round-rotation.py`, `test-capacity.py`, `test-admission.py --bots`, `test-session.py` |
 | Bots | `test-bots.py`, `test-bot-loadouts.py` |
 | Messages | `test-gameplay-messages.py`, `test-network.py --render` |
+
+Prone footprint and thin-wall regression: native
+`EclipseRecoil.Movement.BodyClearance`; floor and weapon contacts across all skins:
+`test-world-poses.py --prone --wall`.

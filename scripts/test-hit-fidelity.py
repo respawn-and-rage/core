@@ -48,7 +48,7 @@ def geometry():
         print(f'  deep_miss% {spread([number(r,"deep_miss_pct") for r in cells])}  deep_phantom% {spread([number(r,"deep_phantom_pct") for r in cells])}  feet_missed% {spread([number(r,"feet_missed_pct") for r in cells])}')
     # Bodies must follow the rendered bones in every state; soles touch flat floors when still.
     bodies=bool(pose) and all(number(r,'body_max_cm')<1 for r in pose)
-    soles=bool(pose) and all(abs(number(r,'sole_gap'))<1 for r in pose if r['posture']!='prone' and r['moving']=='0')
+    soles=bool(pose) and all(number(r,'sole_gap')>=-1 if r['posture']=='prone' else abs(number(r,'sole_gap'))<1 for r in pose if r['moving']=='0')
     print(f'ER_HIT_FIDELITY_RESULT bodies={int(bodies)} soles={int(soles)}')
     raise SystemExit(0 if code==0 and complete and bodies and soles else 1)
 

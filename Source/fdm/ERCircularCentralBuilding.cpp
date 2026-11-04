@@ -97,7 +97,6 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
         if(FMath::IsNearlyEqual(FloorZ,(L.BuildingFloors-1)*Stride))
             BuildingBox(AlongX ? FVector((Lo+Hi)*.5f,At,L.BuildingFloors*Stride+50):FVector(At,(Lo+Hi)*.5f,L.BuildingFloors*Stride+50),AlongX ? FVector(Hi-Lo,20,100):FVector(20,Hi-Lo,100),MainMaterial);
     };
-    TArray<FVector> NorthStair;
     for(int32 Floor=0;Floor<L.BuildingFloors;++Floor)
     {
         const float Z=Floor*Stride;
@@ -150,7 +149,6 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
             Stair.Add({BuildingX+StairX,At,Base+Z+Top+120});
         }
         Stair.Add({BuildingX+StairX,StairEnd+100,Base+Z+Stride+100});
-        if(Floor==0)NorthStair=Stair;
         L.StairRoutes.Add(Stair);for(auto& P:Stair)P=Mate(P);L.StairRoutes.Add(Stair);
         TArray<FVector> Entry{{BuildingX+OuterMin-100,DoorY,Base+Z+100},{BuildingX+OuterMin+160,DoorY,Base+Z+100}};
         L.RoomAccessRoutes.Add(Entry);for(auto& P:Entry)P=Mate(P);L.RoomAccessRoutes.Add(Entry);
@@ -190,6 +188,32 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
             TArray<FVector> Entry{{HouseX-HW*.5f-100,HouseY,H+100},{HouseX,HouseY,H+100}};L.RoomAccessRoutes.Add(Entry);for(auto& P:Entry)P=Mate(P);L.RoomAccessRoutes.Add(Entry);
             FlankX=FMath::Min(FlankX,(BuildingX+FMath::Max(MaxI,OuterMax)+HouseX-HW*.5f)*.5f);
         }
+    }
+    const bool WallDivision=L.CrossingRule==EERCrossingRule::ClimbableWall;
+    const bool RailingDivision=L.CrossingRule==EERCrossingRule::FencedCrossings;
+    const float FlankGround=CentralGroundHeight(L,{FlankX,0});
+    constexpr float AnnexHalfWidth=240,AnnexHalfDepth=350;
+    if(WallDivision || RailingDivision)
+        L.TerrainPads.Add(FBox(FVector(FlankX-AnnexHalfWidth-50,-AnnexHalfDepth-90,FlankGround),
+                              FVector(FlankX+AnnexHalfWidth+50,AnnexHalfDepth+90,FlankGround)));
+    if(RailingDivision)
+    {
+        // The side walls continue the divider across the seam. Two rooms
+        // connect the opposed ground entrances through an interior doorway.
+        for(float Side:{-1.f,1.f})
+        {
+            Box({FlankX+Side*(AnnexHalfWidth-10),0,FlankGround+150},
+                {20,2*AnnexHalfDepth,300},EERBlockMaterial::Brick,false,false);
+            Box({FlankX+Side*160,-AnnexHalfDepth+10,FlankGround+150},
+                {120,20,300},EERBlockMaterial::Brick);
+            Box({FlankX+Side*160,0,FlankGround+150},
+                {120,20,300},EERBlockMaterial::Brick,false,false);
+        }
+        Box({FlankX,-AnnexHalfDepth+10,FlankGround+270},{200,20,60},EERBlockMaterial::Brick);
+        Box({FlankX,0,FlankGround+270},{200,20,60},EERBlockMaterial::Brick,false,false);
+        Box({FlankX,0,FlankGround+310},{2*AnnexHalfWidth,2*AnnexHalfDepth,20},EERBlockMaterial::Brick,false,false,true);
+        L.SecondaryStructures.Add({FTransform(FVector(FlankX,0,FlankGround)),{2*AnnexHalfWidth,2*AnnexHalfDepth,320},1,EERBlockMaterial::Brick,false,false});
+        L.FeatureNames.Add(TEXT("RailingCrossingAnnex"));
     }
     // Small, varied cover groups; sample the north half and mirror every member.
     // Rear entries stay outside all return walls, even in the pocket profile.
@@ -248,24 +272,28 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
         if(FiringSteps){++Cover.FiringStair;Cover.FiringPosition=Mate(Cover.FiringPosition);}
         for(auto* Point:{&Cover.Hide,&Cover.Entry,&Cover.SightFrom,&Cover.SightTo})Point->Y=-Point->Y;L.CoverSites.Add(Cover);
     }
-    // Distinct separators span the full diameter, except for the solid outer
-    // walls already occupying the building seam. Hard walls are never mantleable;
-    // their crossing is through the first upper landing inside the building.
+    // The divider meets the building walls at the seam.
     if(L.CrossingRule!=EERCrossingRule::OpenYard)
     {
-        TArray<float> Cuts{-Radius+30,BuildingX+MinI,BuildingX+MinI+20,BuildingX+MaxI-20,BuildingX+MaxI,Radius-30};Cuts.Sort();
+        const bool Railing=L.CrossingRule==EERCrossingRule::FencedCrossings;
+        TArray<float> Cuts{-Radius+30,BuildingX+MinI,BuildingX+MinI+20,BuildingX+MaxI-20,BuildingX+MaxI,Radius-30};
+        if(Railing){Cuts.Add(FlankX-AnnexHalfWidth);Cuts.Add(FlankX+AnnexHalfWidth);}
+        Cuts.Sort();
         for(int32 I=1;I<Cuts.Num();++I)
         {
             const float A=Cuts[I-1],B=Cuts[I];if(B-A<1)continue;
             const float Mid=(A+B)*.5f;
+            if(Railing && FMath::Abs(Mid-FlankX)<AnnexHalfWidth)continue;
             if((Mid>BuildingX+MinI && Mid<BuildingX+MinI+20) || (Mid>BuildingX+MaxI-20 && Mid<BuildingX+MaxI))continue;
             const int32 Count=FMath::Max(1,FMath::CeilToInt32((B-A)/200));
             for(int32 J=0;J<Count;++J)
             {
                 const float Lo=FMath::Lerp(A,B,float(J)/Count),Hi=FMath::Lerp(A,B,float(J+1)/Count),CX=(Lo+Hi)*.5f;
                 const float H=FMath::Max3(CentralGroundHeight(L,{Lo,0}),CentralGroundHeight(L,{Hi,0}),CentralGroundHeight(L,{CX,0}));
-                const bool Hard=L.CrossingRule==EERCrossingRule::FencedCrossings;const float Top=H+(Hard ? 300:120);
-                Box({CX,0,Top*.5f},{Hi-Lo,40,Top},Hard ? EERBlockMaterial::Concrete:EERBlockMaterial::Brick,Hard,false);
+                if(Railing)
+                    Box({CX,0,H+ERIndustrialFence::ModuleHeightCm*.5f},{Hi-Lo,12,ERIndustrialFence::ModuleHeightCm},EERBlockMaterial::Metal,true,false).PawnBarrier=true;
+                else
+                    Box({CX,0,(H+120)*.5f},{Hi-Lo,40,H+120},EERBlockMaterial::Brick,false,false);
             }
         }
     }
@@ -292,17 +320,10 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
         {DoorOutside,-D*.5f-180},{DoorOutside,DoorY},{BuildingX+OuterMin+160,DoorY},{BuildingX+HallX,DoorY}};
     TArray<FVector> North;
     for(int32 I=1;I<Approach.Num();++I)Append(North,GroundPath(Approach[I-1],Approach[I]));
-    const float JoinY=L.CrossingRule==EERCrossingRule::FencedCrossings ? StairStart-100:-300;
-    Append(North,GroundPath(Approach.Last(),{BuildingX+HallX,JoinY}));
-    if(L.CrossingRule==EERCrossingRule::FencedCrossings)
+    Append(North,GroundPath(Approach.Last(),{BuildingX+HallX,-300}));
+    if(L.CrossingRule==EERCrossingRule::ClimbableWall)
     {
-        Append(North,GroundPath({BuildingX+HallX,JoinY},{BuildingX+StairX,JoinY}));
-        L.CrossingRoutes.Add(North);auto South=North;for(auto& P:South)P=Mate(P);L.CrossingRoutes.Add(South);
-        TArray<FVector> Upper{NorthStair.Last(),Mate(NorthStair.Last())};L.RooftopRoutes.Add(Upper);
-        Patrol=North;
-    }
-    else if(L.CrossingRule==EERCrossingRule::ClimbableWall)
-    {
+        L.FeatureNames.Add(TEXT("WallCrossingStairs"));
         TArray<FVector> Over{{BuildingX+HallX,-300,Base+100}};
         for(int32 I=0;I<6;++I)
         {
@@ -316,18 +337,42 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
         L.CrossingRoutes.Add(North);auto South=North;for(auto& P:South)P=Mate(P);L.CrossingRoutes.Add(South);
         Patrol=North;
     }
+    else if(RailingDivision)
+    {
+        L.CrossingRoutes.Add(North);
+        auto South=North;for(auto& Point:South)Point=Mate(Point);L.CrossingRoutes.Add(MoveTemp(South));
+        Patrol=North;
+    }
     else
     {
         TArray<FVector> Through=North;Append(Through,GroundPath({BuildingX+HallX,-300},{BuildingX+HallX,300}));
         auto South=North;for(auto& P:South)P=Mate(P);Algo::Reverse(South);Append(Through,South);L.CrossingRoutes.Add(Through);Patrol=Through;
     }
-    // Each flank approach joins the screened base; separated variants stop
-    // before the wall instead of publishing an obstructed ground route.
+    // Follow the flank to the stairs or through the annex.
     TArray<FVector> Flank;
     Append(Flank,GroundPath({-ScreenHalf-150,ScreenY+100},{FlankX,-D*.5f-180}));
-    const float FlankEnd=L.CrossingRule==EERCrossingRule::OpenYard ? Radius*.40f:-250;
-    Append(Flank,GroundPath({FlankX,-D*.5f-180},{FlankX,FlankEnd}));L.CrossingRoutes.Add(Flank);
-    if(L.CrossingRule!=EERCrossingRule::OpenYard){for(auto& P:Flank)P=Mate(P);L.CrossingRoutes.Add(Flank);}
+    Append(Flank,GroundPath({FlankX,-D*.5f-180},{FlankX,WallDivision ? -300.f:0.f}));
+    if(WallDivision)
+    {
+        TArray<FVector> Flight{{FlankX,-300,FlankGround+100}};
+        for(int32 Step=0;Step<6;++Step)
+        {
+            const float TreadY=-200+(Step+.5f)*30,Top=FlankGround+(Step+1)*20;
+            Box({FlankX,TreadY,Top*.5f},{180,30,Top},EERBlockMaterial::Concrete,true,true,true);
+            Flight.Add({FlankX,TreadY,Top+120});
+        }
+        const int32 LastTread=Flight.Num()-1;
+        Flight.Add({FlankX,-10,FlankGround+240});Flight.Add({FlankX,10,FlankGround+240});
+        for(int32 I=LastTread;I>=0;--I){const auto Point=Mate(Flight[I]);Flight.Add(Point);}
+        L.StairRoutes.Add(MoveTemp(Flight));
+        L.FeatureNames.Add(TEXT("ExteriorWallCrossingStairs"));
+    }
+    auto OtherFlank=Flank;
+    for(auto& Point:OtherFlank)Point=Mate(Point);
+    Algo::Reverse(OtherFlank);
+    if(WallDivision)L.CrossingRoutes.Add(MoveTemp(OtherFlank));
+    else Append(Flank,OtherFlank);
+    L.CrossingRoutes.Add(MoveTemp(Flank));
     for(int32 I=Patrol.Num()-2;I>0;--I){const FVector Point=Patrol[I];Patrol.Add(Point);}
     L.FeatureNames.Add(L.CentralHill ? TEXT("CentralHill"):TEXT("OpposedHill"));return true;
 }

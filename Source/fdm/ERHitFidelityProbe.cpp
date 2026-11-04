@@ -147,6 +147,18 @@ void AERHitFidelityProbe::Measure()
     const bool bFloor=GetWorld()->LineTraceSingleByChannel(Floor,Actor,Actor-FVector(0,0,500),ECC_Visibility,Query);
     const auto* M=Subject->GetCharacterMovement();
     const double FloorZ=bFloor ? Floor.ImpactPoint.Z:0;
+    if(PostureOf(Sample)==2)
+    {
+        FVector LowestPoint=FVector::ZeroVector;double LowestZ=DBL_MAX;
+        for(uint32 Vertex : Triangles)if(World[Vertex].Z<LowestZ){LowestZ=World[Vertex].Z;LowestPoint=World[Vertex];}
+        FName NearestBone;double NearestDistance=DBL_MAX;
+        for(int32 Bone=0;Bone<Ref.GetNum();++Bone)
+        {
+            const double Distance=FVector::DistSquared(Body->GetBoneTransform(Bone).GetLocation(),LowestPoint);
+            if(Distance<NearestDistance){NearestDistance=Distance;NearestBone=Ref.GetBoneName(Bone);}
+        }
+        UE_LOG(LogTemp,Display,TEXT("ER_PRONE_VERTEX_FLOOR sample=%d gap=%.3f nearest=%s point=%s"),Sample,LowestZ-FloorZ,*NearestBone.ToString(),*LowestPoint.ToString());
+    }
     float MaxCm=0,MaxDeg=0;FName WorstBone;
     for(const auto* Instance:Body->Bodies)
     {

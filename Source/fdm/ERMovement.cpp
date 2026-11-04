@@ -9,6 +9,8 @@
 #include "Net/UnrealNetwork.h"
 #include "GameFramework/Character.h"
 #include "Components/CapsuleComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Misc/ConfigCacheIni.h"
 
 namespace
 {
@@ -279,12 +281,18 @@ void UERMovement::UpdatePosture(float DeltaSeconds)
     if (!IsMovingOnGround() && Locomotion.HalfHeight >= 92.f) return;
     auto* Capsule = CharacterOwner->GetCapsuleComponent();
     const float Old = Capsule->GetUnscaledCapsuleHalfHeight();
-    const float Target = bProneWanted ? 34.f : (bWantsToCrouch ? 62.5f : 92.5f);
-    const bool ProneTransition = bProneWanted || Locomotion.ProneBlend > 0;
+    const bool EnterCrouchFirst = bProneWanted && Locomotion.ProneBlend <= 0.f && Old > 62.5f;
+    const bool LowerToProne = bProneWanted && !EnterCrouchFirst;
+    const float Target = LowerToProne ? 34.f : ((EnterCrouchFirst || bWantsToCrouch) ? 62.5f : 92.5f);
+    const bool ProneTransition = LowerToProne || Locomotion.ProneBlend > 0;
     const float Rate = ProneTransition ? 58.5f / ERServer::Get(GetWorld(),"Move.ProneTime") : 30.f / ERServer::Get(GetWorld(),"Move.CrouchTime");
     const float Next = FMath::FInterpConstantTo(Old, Target, DeltaSeconds, Rate);
     const float Scale = Capsule->GetShapeScale();
     const FVector Shift(0, 0, (Next - Old) * Scale);
+    // Reserve the complete lying footprint before lowering the body. The upright
+    // capsule alone cannot detect a wall alongside the future head or feet.
+    if (LowerToProne && Locomotion.ProneBlend < 1.f &&
+        !HasProneClearance(UpdatedComponent->GetComponentLocation(), UpdatedComponent->GetComponentQuat(), 1.f)) return;
     if (Next > Old)
     {
         FCollisionQueryParams Params(SCENE_QUERY_STAT(ERPosture), false, CharacterOwner);
@@ -296,10 +304,97 @@ void UERMovement::UpdatePosture(float DeltaSeconds)
     Capsule->SetCapsuleHalfHeight(Next, true);
     UpdatedComponent->MoveComponent(Shift, UpdatedComponent->GetComponentQuat(), false);
     Locomotion.HalfHeight = Next;
-    Locomotion.ProneBlend = FMath::FInterpConstantTo(Locomotion.ProneBlend, bProneWanted ? 1.f : 0.f, DeltaSeconds, 1.f / ERServer::Get(GetWorld(),"Move.ProneTime"));
-    CharacterOwner->bIsCrouched = !bProneWanted && Next < 92.f;
+    Locomotion.ProneBlend = FMath::FInterpConstantTo(Locomotion.ProneBlend, LowerToProne ? 1.f : 0.f, DeltaSeconds, 1.f / ERServer::Get(GetWorld(),"Move.ProneTime"));
+    CharacterOwner->bIsCrouched = !LowerToProne && Next < 92.f;
     bForceNextFloorCheck = true;
     ApplyPosturePresentation();
+}
+bool UERMovement::HasProneClearance(const FVector& Position, const FQuat& Rotation, float Blend) const
+{
+    if (!CharacterOwner || Blend <= 0.f) return true;
+    const auto* Capsule = CharacterOwner->GetCapsuleComponent();
+    const float Scale = Capsule->GetShapeScale();
+    const FVector Centre = Position + Rotation.RotateVector(FVector(30.f * Blend, 0, 35.f - Capsule->GetUnscaledCapsuleHalfHeight()) * Scale);
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(ERProneClearance), false, CharacterOwner);
+    for(float Side : {-5.f,0.f,5.f})
+        if(GetWorld()->OverlapBlockingTestByChannel(Centre+Rotation.RotateVector(FVector(0,Side*Blend*Scale,0)),
+            Rotation * FRotator(90,0,0).Quaternion(), Capsule->GetCollisionObjectType(),
+            FCollisionShape::MakeCapsule(32.f * Scale, (32.f + 83.f * Blend) * Scale), Query))return false;
+    return true;
+}
+FRotator UERMovement::ConstrainProneRotation(const FRotator& Rotation) const
+{
+    if (!UpdatedComponent || Locomotion.ProneBlend <= 0.f) return Rotation;
+    const FQuat Start = UpdatedComponent->GetComponentQuat(), End = Rotation.Quaternion();
+    const int32 Steps = FMath::Max(1, FMath::CeilToInt32(FMath::RadiansToDegrees(Start.AngularDistance(End)) / 2.0));
+    FQuat Accepted = Start;
+    for (int32 I = 1; I <= Steps; ++I)
+    {
+        const FQuat Candidate = FQuat::Slerp(Start, End, double(I) / Steps);
+        if (!HasProneClearance(UpdatedComponent->GetComponentLocation(), Candidate, Locomotion.ProneBlend)) break;
+        Accepted = Candidate;
+    }
+    return Accepted.Rotator();
+}
+bool UERMovement::MoveUpdatedComponentImpl(const FVector& Delta, const FQuat& NewRotation, bool bSweep, FHitResult* OutHit, ETeleportType Teleport)
+{
+    if (!bSweep || !CharacterOwner || Teleport != ETeleportType::None)
+        return Super::MoveUpdatedComponentImpl(Delta, NewRotation, bSweep, OutHit, Teleport);
+    const FQuat Rotation = ConstrainProneRotation(NewRotation.Rotator()).Quaternion();
+    const auto* Capsule = CharacterOwner->GetCapsuleComponent();
+    const float Scale = Capsule->GetShapeScale(), Blend = Locomotion.ProneBlend;
+    const FVector Centre = UpdatedComponent->GetComponentLocation() + Rotation.RotateVector(FVector(30.f * Blend,0,35.f-Capsule->GetUnscaledCapsuleHalfHeight()) * Scale);
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(ERProneMove), false, CharacterOwner);
+    FHitResult BodyHit;
+    bool Blocked=false;
+    const auto* Player = Cast<AERCharacter>(CharacterOwner);
+    const auto* Data = Player && Player->Weapon ? Player->Weapon->Data.Get() : nullptr;
+    if (Data && Data->Mesh && Data->bWorldReferencePose && !Player->IsWeaponStowed() && !Player->Health->bDead)
+    {
+        const FVector Forward = Rotation.GetForwardVector();
+        const auto Bounds = Data->Mesh->GetBounds();
+        const double MuzzleReach = FMath::Max(0.0, Bounds.Origin.X + Bounds.BoxExtent.X - Data->WorldStockContact.X) * Data->WorldWeaponScale;
+        // Reserve the horizontal space occupied by the ready weapon. The box
+        // begins in front of the torso and stays above the floor during sweeps.
+        const double Start = 20.0 * Scale;
+        const double End = FMath::Max(Start+8.0, FMath::Lerp(52.0,115.0,double(Blend))*Scale + MuzzleReach);
+        const FVector WeaponCentre = UpdatedComponent->GetComponentLocation() + Forward*((Start+End)*.5)
+            + FVector::UpVector*(FMath::Lerp(39.5,25.0-Capsule->GetUnscaledCapsuleHalfHeight(),double(Blend)))*Scale;
+        FHitResult Cover;
+        if (GetWorld()->SweepSingleByChannel(Cover, WeaponCentre, WeaponCentre+Delta, Rotation,
+            Capsule->GetCollisionObjectType(), FCollisionShape::MakeBox(FVector((End-Start)*.5,18*Scale,9*Scale)), Query)
+            && FMath::Abs(Cover.ImpactNormal.Z)<.5 && FVector::DotProduct(Delta,Cover.ImpactNormal)<0)
+        {
+            BodyHit=Cover;
+            BodyHit.Location-=WeaponCentre-UpdatedComponent->GetComponentLocation();
+            Blocked=true;
+        }
+    }
+    if (Blend>0.f)
+    for(float Side : {-5.f,0.f,5.f})
+    {
+        const FVector SideCentre=Centre+Rotation.RotateVector(FVector(0,Side*Blend*Scale,0));
+        FHitResult Candidate;
+        if(GetWorld()->SweepSingleByChannel(Candidate,SideCentre,SideCentre+Delta,
+            Rotation*FRotator(90,0,0).Quaternion(),Capsule->GetCollisionObjectType(),
+            FCollisionShape::MakeCapsule(32.f*Scale,(32.f+83.f*Blend)*Scale),Query) && (!Blocked || Candidate.Time<BodyHit.Time))
+        {
+            BodyHit=Candidate;
+            BodyHit.Location-=SideCentre-UpdatedComponent->GetComponentLocation();
+            Blocked=true;
+        }
+    }
+    if(Blocked)
+    {
+        BodyHit.TraceStart=UpdatedComponent->GetComponentLocation();
+        BodyHit.TraceEnd=BodyHit.TraceStart+Delta;
+    }
+    const float Fraction = Blocked ? FMath::Max(0.f, BodyHit.Time - .001f) : 1.f;
+    FHitResult CapsuleHit;
+    const bool Moved = Super::MoveUpdatedComponentImpl(Delta * Fraction, Rotation, true, &CapsuleHit, Teleport);
+    CapsuleHit.Time *= Fraction;
+    if (OutHit) *OutHit = CapsuleHit.bBlockingHit ? CapsuleHit : Blocked ? BodyHit : CapsuleHit;
+    return Moved;
 }
 float UERMovement::GetEyeOffset() const
 {
@@ -320,7 +415,10 @@ void UERMovement::ApplyPosturePresentation()
     // 2.15cm and the live idle stands about .85cm taller, so seat soles on the real floor.
     constexpr float FloorContact = 3.f;
     const float FeetOffset = (C->GetTeamAppearance().Mesh ? C->GetTeamAppearance().FeetOffset : -92.5f) - FloorContact;
-    const FVector MeshLocation = FMath::Lerp(FVector(0,0,FeetOffset + 92.5f - Locomotion.HalfHeight), FVector(-55,0,-18), Blend);
+    float ProneFloorOffset=0;
+    if(const auto* SkinMesh=C->GetTeamAppearance().Mesh.Get())
+        GConfig->GetFloat(TEXT("RespawnAndRage.ProneGrounding"),*SkinMesh->GetPathName(),ProneFloorOffset,GGameIni);
+    const FVector MeshLocation = FMath::Lerp(FVector(0,0,FeetOffset + 92.5f - Locomotion.HalfHeight), FVector(-55,0,-18+FMath::Clamp(ProneFloorOffset,0.f,30.f)), Blend);
     const FQuat Rotation = FQuat(FVector::YAxisVector, Blend * PI * .5f) * FRotator(0,-90,0).Quaternion();
     C->GetMesh()->SetRelativeLocationAndRotation(MeshLocation, Rotation);
     C->CacheInitialMeshOffset(MeshLocation, Rotation.Rotator());

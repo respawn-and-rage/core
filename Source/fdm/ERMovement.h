@@ -42,6 +42,8 @@ public:
     float GetStaminaFraction() const;
     float GetEyeOffset() const;
     void ApplyPosturePresentation();
+    bool HasProneClearance(const FVector& Position, const FQuat& Rotation, float Blend) const;
+    FRotator ConstrainProneRotation(const FRotator& Rotation) const;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Props) const override;
     virtual void Crouch(bool bClientSimulation = false) override {}
     virtual void UnCrouch(bool bClientSimulation = false) override {}
@@ -74,6 +76,7 @@ public:
     float TraversalElapsed = 0, TraversalDuration = 0;
     double RetryAfter = 0;
 protected:
+    virtual bool MoveUpdatedComponentImpl(const FVector& Delta, const FQuat& NewRotation, bool bSweep, FHitResult* OutHit = nullptr, ETeleportType Teleport = ETeleportType::None) override;
     virtual bool CanDelaySendingMove(const FSavedMovePtr& NewMove) override;
 private:
     bool bSendMoveNow = false;

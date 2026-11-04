@@ -22,8 +22,10 @@ Windowed outer walls, room wings, balconies and roof parapets follow the profile
 - Open: connected ground routes, with no central separator.
 - Climbable wall: 120cm destructible Brick separator, with paired steps inside the
   building, an open headroom well in the first deck, and mantle access elsewhere.
-- Fixed division: permanent 3m opaque barrier; ground crossing is blocked, while
-  the main stairs and first upper landing join the teams above it.
+- Railing division: the divider meets a small side building at its outer walls.
+  A ground route crosses the seam through its two connected rooms.
+- The wall division also has paired exterior stairs on the flank, away from
+  the main building.
 
 Lateral-hill layouts include 2–4 enterable secondary Brick buildings, each with
 an open doorway, destructible roof and a level terrain foundation. Flank routes
