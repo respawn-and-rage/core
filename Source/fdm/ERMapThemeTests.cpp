@@ -7,7 +7,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERMapThemeTest,"EclipseRecoil.Destruction.Shar
 bool FERMapThemeTest::RunTest(const FString& Parameters)
 {
     TSet<FName> SampleNames;TSet<const UERMapThemeLibrary*> Libraries;
-    for(const TCHAR* Name:{TEXT("CentralBuilding"),TEXT("MiddleEasternAlleys"),TEXT("FireTraining"),TEXT("Rooms"),TEXT("Village")})
+    for(const TCHAR* Name:{TEXT("CentralBuilding"),TEXT("MiddleEasternAlleys"),TEXT("FireTraining"),TEXT("Rooms"),TEXT("Village"),TEXT("Town")})
     {
         auto* Saved=LoadObject<UERMapTemplate>(nullptr,*FString::Printf(TEXT("/Game/EclipseRecoil/Art/MapTemplates/DA_%s"),Name));
         if(!TestNotNull(TEXT("production recipe"),Saved) || !TestNotNull(TEXT("shared library bound"),Saved->ThemeLibrary.Get()))return false;
@@ -118,7 +118,7 @@ bool FERMapThemeTest::RunTest(const FString& Parameters)
         if(Invalid->ThemeLibrary->Themes.Last().ShellSteel)
         {Invalid->ThemeLibrary->Themes.Last().DeckSteel=nullptr;TestFalse(TEXT("partial steel role palette rejected"),ERProcedural::Build(C,B,Prior));}
     }
-    TestEqual(TEXT("every template owns its palette library"),Libraries.Num(),5);
-    AddInfo(TEXT("ER_MAP_PALETTES templates=5 seeds=32 geometry=unchanged deterministic=PASS"));return true;
+    TestEqual(TEXT("every template owns its palette library"),Libraries.Num(),6);
+    AddInfo(TEXT("ER_MAP_PALETTES templates=6 seeds=32 geometry=unchanged deterministic=PASS"));return true;
 }
 #endif

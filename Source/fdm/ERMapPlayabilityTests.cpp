@@ -44,7 +44,7 @@ TArray<int32> IntegerList(const TCHAR* Key,const TCHAR* Default)
     TArray<int32> Out;for(const auto& W:Words)Out.Add(FCString::Atoi(*W));
     return Out;
 }
-const TCHAR* const PlayabilityTemplates[]={TEXT("CentralBuilding"),TEXT("MiddleEasternAlleys"),TEXT("FireTraining"),TEXT("Rooms"),TEXT("Village")};
+const TCHAR* const PlayabilityTemplates[]={TEXT("CentralBuilding"),TEXT("MiddleEasternAlleys"),TEXT("FireTraining"),TEXT("Rooms"),TEXT("Village"),TEXT("Town")};
 UERMapTemplate* LoadTemplate(const TCHAR* Id)
 {
     return LoadObject<UERMapTemplate>(nullptr,*(FString(TEXT("/Game/EclipseRecoil/Art/MapTemplates/DA_"))+Id));

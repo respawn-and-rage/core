@@ -23,6 +23,14 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
     };
     switch(T.Archetype)
     {
+    case EERMapArchetype::UrbanTown:
+    {
+        FRandomStream Shape(int32(HashCombine(uint32(Seed),0x544f574eu)));
+        const double Gross=Area/.72,Ratio=Shape.FRandRange(1.12f,1.3f);
+        const double Width=FMath::Max(4000.,FMath::GridSnap(FMath::Sqrt(Gross*10000/Ratio),50.));
+        T.SizingArena={Width,FMath::Max(5000.,FMath::GridSnap(Gross*10000/Width,50.))};
+    }
+        break;
     case EERMapArchetype::CentralBuilding:
         if(T.CentralBuilding.CircularTerrain)
         {
@@ -115,5 +123,5 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
     }
     default:break;
     }
-    return T.Archetype==EERMapArchetype::Rooms || T.Archetype==EERMapArchetype::Village || T.Archetype==EERMapArchetype::FireTraining || T.Archetype==EERMapArchetype::LegacyAssembly || (T.Archetype==EERMapArchetype::CentralBuilding && T.CentralBuilding.CircularTerrain ? FMath::Abs(PI*FMath::Square(T.SizingArena.X*.5)/10000-Area)<=Area*.1:ValidTeamArea(FVector(T.SizingArena,0),TeamSize));
+    return T.Archetype==EERMapArchetype::UrbanTown || T.Archetype==EERMapArchetype::Rooms || T.Archetype==EERMapArchetype::Village || T.Archetype==EERMapArchetype::FireTraining || T.Archetype==EERMapArchetype::LegacyAssembly || (T.Archetype==EERMapArchetype::CentralBuilding && T.CentralBuilding.CircularTerrain ? FMath::Abs(PI*FMath::Square(T.SizingArena.X*.5)/10000-Area)<=Area*.1:ValidTeamArea(FVector(T.SizingArena,0),TeamSize));
 }

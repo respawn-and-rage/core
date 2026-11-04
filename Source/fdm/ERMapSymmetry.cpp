@@ -161,7 +161,18 @@ bool FoldLayoutToMirror(FERProceduralLayout& L,const FERCellSettings& Cells)
     Points(L.ClimbPoints);Points(L.WallBridges);Points(L.RoomLightPoints);
     auto Boxes=[&](TArray<FBox>& Set)
     {TArray<FBox> Next;for(auto B:Set)if(B.Min.Y<0){B.Max.Y=FMath::Min(B.Max.Y,0.);Next.Add(B);Next.Add(ReflectBox(B));}Set=MoveTemp(Next);};
-    Boxes(L.TownBuildings);Boxes(L.TownCourts);Boxes(L.TerrainPads);Boxes(L.LowCovers);Boxes(L.UnderpassBreaches);Boxes(L.ElevatedDecks);Boxes(L.OverheadClosures);Boxes(L.Plazas);Boxes(L.VillageSideWalls);Boxes(L.VillageFloorHoles);Boxes(L.WarehouseBaseCourts);Boxes(L.WarehouseCatwalks);
+    Boxes(L.InaccessibleGround);Boxes(L.TownBuildings);Boxes(L.TownCourts);Boxes(L.TerrainPads);Boxes(L.LowCovers);Boxes(L.UnderpassBreaches);Boxes(L.ElevatedDecks);Boxes(L.OverheadClosures);Boxes(L.Plazas);Boxes(L.VillageSideWalls);Boxes(L.VillageFloorHoles);Boxes(L.WarehouseBaseCourts);Boxes(L.WarehouseCatwalks);
+    auto Polygons=[&](TArray<TArray<FVector>>& Set)
+    {
+        TArray<TArray<FVector>> Next;
+        for(const auto& Polygon:Set)
+        {
+            auto P=ClipPolygon(Polygon);if(P.Num()<3)continue;Next.Add(P);
+            for(auto& V:P)V=Reflect(V);Algo::Reverse(P);Next.Add(MoveTemp(P));
+        }
+        Set=MoveTemp(Next);
+    };
+    Polygons(L.InaccessibleGroundPolygons);Polygons(L.TownFootprints);
     auto Frames=[&](auto& Set)
     {auto Next=Set;Next.Reset();for(auto P:Set)if(P.Frame.GetLocation().Y<=0){Next.Add(P);if(P.Frame.GetLocation().Y<0){P.Frame=ReflectFrame(P.Frame);Next.Add(P);}}Set=MoveTemp(Next);};
     Frames(L.Ladders);Frames(L.VillageUpperLadders);Frames(L.Containers);Frames(L.SecondaryStructures);Frames(L.Bases);Frames(L.VillageBlocks);

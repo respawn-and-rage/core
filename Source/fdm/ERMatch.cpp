@@ -251,6 +251,7 @@ void AERGameMode::BeginPlay()
     if (GetWorld()->GetMapName().Contains(TEXT("L_FireTraining")) && FParse::Param(FCommandLine::Get(),TEXT("ERFireTrainingProbe"))) GetWorld()->SpawnActor<AERFireTrainingProbe>();
     if (GetWorld()->GetMapName().Contains(TEXT("L_Rooms")) && FParse::Param(FCommandLine::Get(),TEXT("ERRoomsProbe"))) GetWorld()->SpawnActor<AERRoomsProbe>();
     if (GetWorld()->GetMapName().Contains(TEXT("L_Village")) && FParse::Param(FCommandLine::Get(),TEXT("ERVillageProbe"))) GetWorld()->SpawnActor<AERVillageProbe>();
+    if (GetWorld()->GetMapName().Contains(TEXT("L_Town")) && FParse::Param(FCommandLine::Get(),TEXT("ERTownProbe"))) GetWorld()->SpawnActor<AERMapTemplateProbe>();
     if (GetNetMode() == NM_Standalone && GetWorld()->GetMapName().Contains(TEXT("L_DestructionLab")) && FParse::Param(FCommandLine::Get(), TEXT("ERCellLabProbe"))) GetWorld()->SpawnActor<AERCellLabProbe>();
     if (GetNetMode() == NM_Standalone && GetWorld()->GetMapName().Contains(TEXT("L_ProceduralLab")) && FParse::Param(FCommandLine::Get(), TEXT("ERProceduralProbe"))) GetWorld()->SpawnActor<AERProceduralProbe>();
     if (GetNetMode() == NM_Standalone && GetWorld()->GetMapName().Contains(TEXT("L_ProceduralLab")) && FParse::Param(FCommandLine::Get(), TEXT("ERBlockStressProbe"))) GetWorld()->SpawnActor<AERBlockStressProbe>();

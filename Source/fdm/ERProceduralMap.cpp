@@ -127,6 +127,7 @@ bool ERProcedural::BuildGeometry(const FERProceduralConfig& C,const FERBlockRoom
         if(!BuildGeometry(Paired,B,Next,Cells) || !FoldLayoutToMirror(Next,Cells))return false;
         Out=MoveTemp(Next);return true;
     }
+    if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::UrbanTown) return BuildUrbanTown(C,B,Out,Cells);
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::Village) return BuildVillage(C,B,Out,Cells);
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::Rooms) return BuildRooms(C,B,Out,Cells);
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::FireTraining)
@@ -216,6 +217,20 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
                     if(Actual<=0 || FMath::Abs(Actual-Target)<=Target*.05)break;
                     Recipe->Rooms.NominalRoomSize=FMath::GridSnap(
                         Recipe->Rooms.NominalRoomSize*float(FMath::Sqrt(Target/Actual)),50.f);
+                    if(!BuildGeometry(Sized,B,Next,Cells)){Next={};break;}
+                }
+            }
+            if(Recipe->Archetype==EERMapArchetype::UrbanTown)
+            {
+                // Fit NET ground area after sampling closed lots and boundary
+                // recesses. Physical door, street and cell widths stay fixed.
+                for(int32 Fit=0;Fit<12;++Fit)
+                {
+                    const double Actual=PlayableAreaM2(Next),Target=TargetAreaM2(C.ExpectedTeamSize);
+                    if(Actual<=0 || FMath::Abs(Actual-Target)<=Target*.05)break;
+                    const double Growth=FMath::Sqrt(Target/Actual);
+                    Recipe->SizingArena.X=FMath::GridSnap(Recipe->SizingArena.X*Growth,50.);
+                    Recipe->SizingArena.Y=FMath::GridSnap(Recipe->SizingArena.Y*Growth,50.);
                     if(!BuildGeometry(Sized,B,Next,Cells)){Next={};break;}
                 }
             }
@@ -504,7 +519,9 @@ SIZE_T AERProceduralMap::GetLayoutBytes() const
     Bytes+=Layout.RoomNodes.GetAllocatedSize()+Layout.RoomLinks.GetAllocatedSize()+Layout.RoomShell.GetAllocatedSize()+Layout.RoomLightPoints.GetAllocatedSize();
     for(const auto& Node:Layout.RoomNodes)Bytes+=Node.Polygon.GetAllocatedSize();
     Bytes+=Layout.Bases.GetAllocatedSize()+Layout.ModuleKinds.GetAllocatedSize()+Layout.RoomAccessRoutes.GetAllocatedSize();
-    Bytes+=Layout.TownBuildings.GetAllocatedSize()+Layout.TownCourts.GetAllocatedSize()+Layout.TownGates.GetAllocatedSize()+Layout.TownStreetNames.GetAllocatedSize()+Layout.UpperRoute.GetAllocatedSize()+Layout.LowerRoute.GetAllocatedSize();
+    for(const auto* Set:{&Layout.InaccessibleGroundPolygons,&Layout.TownFootprints})
+    {Bytes+=Set->GetAllocatedSize();for(const auto& Polygon:*Set)Bytes+=Polygon.GetAllocatedSize();}
+    Bytes+=Layout.InaccessibleGround.GetAllocatedSize()+Layout.TownBuildings.GetAllocatedSize()+Layout.TownCourts.GetAllocatedSize()+Layout.TownGates.GetAllocatedSize()+Layout.TownStreetNames.GetAllocatedSize()+Layout.UpperRoute.GetAllocatedSize()+Layout.LowerRoute.GetAllocatedSize();
     for(const auto& Gate:Layout.TownGates)Bytes+=Gate.Passage.GetAllocatedSize();
     for(const auto& Route:Layout.RoomAccessRoutes)Bytes+=Route.GetAllocatedSize();
     Bytes+=Layout.Houses.GetAllocatedSize()+Layout.TerrainPads.GetAllocatedSize()+Layout.Ladders.GetAllocatedSize()+Layout.DistrictTowers.GetAllocatedSize()+Layout.DistrictTowerHeights.GetAllocatedSize();
@@ -588,7 +605,7 @@ void AERProceduralMap::ConfigureTemplateFloors()
     for(const auto& Piece:Layout.FixedPieces)
     {
         if(Template->Archetype==EERMapArchetype::Village && Piece.VisualOnly && GetNetMode()==NM_DedicatedServer)continue;
-        if(Piece.Roof && !bCeilings && !FireTraining)continue;
+        if(Piece.Roof && !bCeilings && !FireTraining && Template->Archetype!=EERMapArchetype::UrbanTown)continue;
         if(Piece.CollisionOnly){(Piece.PawnBarrier ? FenceCollision:FixedCollision)->AddInstance(Piece.Transform);continue;}
         if(Piece.PawnBarrier)
         {
@@ -664,7 +681,7 @@ void AERProceduralMap::ConfigureTemplateFloors()
             Light->SetCastShadows(false);Light->SetLightColor(FLinearColor(1,.94,.85));
             Light->RegisterComponent();WarehouseLights.Add(Light);
         }
-    if(HasAuthority() && Layout.Routes.Num()>1 && (Template->Archetype==EERMapArchetype::CentralBuilding || Template->Archetype==EERMapArchetype::MiddleEasternAlleys || Template->Archetype==EERMapArchetype::FireTraining || Template->Archetype==EERMapArchetype::Village || ClosedRooms))
+    if(HasAuthority() && Layout.Routes.Num()>1 && (Template->Archetype==EERMapArchetype::CentralBuilding || Template->Archetype==EERMapArchetype::MiddleEasternAlleys || Template->Archetype==EERMapArchetype::FireTraining || Template->Archetype==EERMapArchetype::Village || Template->Archetype==EERMapArchetype::UrbanTown || ClosedRooms))
     {
         // Crossing rules have different route lengths. Never leave saved
         // placeholder points at the origin or feed bots obsolete waypoints.
@@ -720,6 +737,9 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
     MixVector(FVector(Layout.HillHeight,Layout.HillPlateau,Layout.HillFalloff));
     H=HashCombine(H,GetTypeHash(Layout.CentralShape));H=HashCombine(H,GetTypeHash(uint8(Layout.CrossingRule)));
     for(const auto& Foot:Layout.CentralFootprints){MixVector(Foot.Min);MixVector(Foot.Max);}
+    for(const auto& Foot:Layout.InaccessibleGround){MixVector(Foot.Min);MixVector(Foot.Max);}
+    for(const auto* Set:{&Layout.InaccessibleGroundPolygons,&Layout.TownFootprints})
+    {H=HashCombine(H,GetTypeHash(Set->Num()));for(const auto& Polygon:*Set){H=HashCombine(H,GetTypeHash(Polygon.Num()));for(const auto& Point:Polygon)MixVector(Point);}}
     for(const auto& Entrance:Layout.CentralEntrances){MixVector(Entrance.GetLocation());MixVector(Entrance.GetRotation().GetForwardVector());}
     for(const auto& Cover:Layout.CoverSites)if(Cover.FiringStair!=INDEX_NONE){H=HashCombine(H,GetTypeHash(Cover.FiringStair));MixVector(Cover.FiringPosition);}
     MixVector(Layout.ArenaSize);H=HashCombine(H,GetTypeHash(bCeilings));H=HashCombine(H,GetTypeHash(uint8(LayoutConfig.TemplateAsset->Symmetry)));

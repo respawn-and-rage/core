@@ -20,7 +20,7 @@ TArray<FString> Templates()
     FString Filter;
     if(FParse::Value(FCommandLine::Get(),TEXT("ERMapPlanTemplates="),Filter,false))
     {TArray<FString> Ids;Filter.ParseIntoArray(Ids,TEXT(","));return Ids;}
-    return {TEXT("CentralBuilding"),TEXT("MiddleEasternAlleys"),TEXT("FireTraining"),TEXT("Rooms"),TEXT("Village")};
+    return {TEXT("CentralBuilding"),TEXT("MiddleEasternAlleys"),TEXT("FireTraining"),TEXT("Rooms"),TEXT("Village"),TEXT("Town")};
 }
 double RoomFloorAreaM2(const FERProceduralLayout& L)
 {
@@ -168,9 +168,16 @@ TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralCon
         Floor({E.Start+Across,E.End+Across,E.End-Across,E.Start-Across});
     }
     for(const auto& B:L.CentralFootprints)Floor({{B.Min.X,B.Min.Y,B.Min.Z},{B.Max.X,B.Min.Y,B.Min.Z},{B.Max.X,B.Max.Y,B.Min.Z},{B.Min.X,B.Max.Y,B.Min.Z}});
-    for(const auto& B:L.TownBuildings)Floor({{B.Min.X,B.Min.Y,B.Min.Z},{B.Max.X,B.Min.Y,B.Min.Z},{B.Max.X,B.Max.Y,B.Min.Z},{B.Min.X,B.Max.Y,B.Min.Z}});
+    if(L.TownFootprints.IsEmpty())for(const auto& B:L.TownBuildings)Floor({{B.Min.X,B.Min.Y,B.Min.Z},{B.Max.X,B.Min.Y,B.Min.Z},{B.Max.X,B.Max.Y,B.Min.Z},{B.Min.X,B.Max.Y,B.Min.Z}});
+    for(const auto& Polygon:L.TownFootprints)Floor(Polygon);
+    TArray<TSharedPtr<FJsonValue>> Excluded;
+    for(const auto& Polygon:L.InaccessibleGroundPolygons)Excluded.Add(Points(Polygon));
+    for(const auto& B:L.InaccessibleGround)Excluded.Add(Points({{B.Min.X,B.Min.Y,0},{B.Max.X,B.Min.Y,0},{B.Max.X,B.Max.Y,0},{B.Min.X,B.Max.Y,0}}));
+    O->SetArrayField(TEXT("inaccessible_ground"),Excluded);
+    O->SetNumberField(TEXT("gross_area_m2"),L.ArenaSize.X*L.ArenaSize.Y/10000.);
     auto Paths=[&](const TArray<TArray<FVector>>& Set,const TCHAR* Kind)
     {for(const auto& Path:Set)if(Path.Num()>1){auto R=MakeShared<FJsonObject>();R->SetStringField(TEXT("kind"),Kind);R->SetField(TEXT("points"),Points(Path));Routes.Add(MakeShared<FJsonValueObject>(R));}};
+    if(Id==TEXT("Town"))Paths(L.RoomAccessRoutes,TEXT("passage"));
     Paths(L.CrossingRoutes,TEXT("crossing"));Paths(L.DistrictRoutes,TEXT("crossing"));Paths(L.VillagePassages,TEXT("passage"));Paths(L.VillageSideBypasses,TEXT("flank"));
     Paths(L.RooftopRoutes,TEXT("upper"));Paths(L.StairRoutes,TEXT("stairs"));
     if(L.Rooms.Num()==4 && L.FeatureNames.Contains(TEXT("HallPassage")))Paths({L.RoomAccessRoutes.Last()},TEXT("connector"));

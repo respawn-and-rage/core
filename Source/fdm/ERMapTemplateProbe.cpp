@@ -29,6 +29,7 @@ void AERMapTemplateProbe::Tick(float Delta)
     Super::Tick(Delta);Elapsed+=Delta;
     TActorIterator<AERProceduralMap> It(GetWorld());auto* Map=It ? *It:nullptr;
     if(!Map || !Map->LayoutConfig.TemplateAsset){if(Elapsed>45)FPlatformMisc::RequestExitWithStatus(false,1);return;}
+    if(FParse::Param(FCommandLine::Get(),TEXT("ERTownProbe"))){TickTown(Map);return;}
     if(FParse::Param(FCommandLine::Get(),TEXT("ERParapetProbe"))){TickParapets(Delta,Map);return;}
     if(!HasAuthority())
     {

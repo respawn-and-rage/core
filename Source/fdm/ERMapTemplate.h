@@ -8,7 +8,19 @@ UENUM(BlueprintType)
 enum class EERTemplateSymmetry : uint8 { None, HalfTurn, Mirror };
 
 UENUM(BlueprintType)
-enum class EERMapArchetype : uint8 { LegacyAssembly, CentralBuilding, MiddleEasternAlleys, FireTraining, Rooms, Village };
+enum class EERMapArchetype : uint8 { LegacyAssembly, CentralBuilding, MiddleEasternAlleys, FireTraining, Rooms, Village, UrbanTown };
+
+// Urban loop and through-buildings; upper storeys are closed shelter volumes.
+USTRUCT(BlueprintType)
+struct FERUrbanTownRecipe
+{
+    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float StreetWidth=600;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float AlleyWidth=350;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float DoorWidth=200;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float StoreyHeight=340;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) int32 MaxStoreys=3;
+};
 
 // Shoots-inspired timber village; dimensions and decoration have separate RNGs.
 USTRUCT(BlueprintType)
@@ -337,6 +349,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<class UERMapThemeLibrary> ThemeLibrary;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FERRoomsRecipe Rooms;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FERVillageRecipe Village;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) FERUrbanTownRecipe UrbanTown;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FString TemplateId;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FString SourceReference;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) int32 Revision=1;

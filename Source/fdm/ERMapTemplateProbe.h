@@ -21,6 +21,10 @@ private:
     int32 ParapetLocalPhase=0;
     bool ParapetJump=false,ParapetTraversal=false,ParapetReported=false;
     void TickParapets(float Delta,class AERProceduralMap* Map);
+    void TickTown(class AERProceduralMap* Map);
+    float TownStage=0;
+    int32 TownPath=0,TownPoint=0,TownCapture=0;
+    bool TownWalking=false;
     void Check(bool Condition,const TCHAR* Label);
     void Publish(int32 Next,class AERProceduralMap* Map);
 };

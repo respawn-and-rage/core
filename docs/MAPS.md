@@ -10,6 +10,7 @@
 | `fire_training` | `L_FireTraining` | `DA_FireTraining` | yes |
 | `rooms` | `L_Rooms` | `DA_Rooms` | offline only |
 | `village` | `L_Village` | `DA_Village` | yes |
+| `town` | `L_Town` | `DA_Town` | yes |
 | `depot` | `L_Depot` | fixed reference | offline only |
 
 Recipes live in `Art/MapTemplates`. Reproduce a layout with
@@ -52,7 +53,8 @@ Recipes live in `Art/MapTemplates`. Reproduce a layout with
 `Map.ExpectedTeamSize` (1..16) budgets **750m² per expected player**:
 `target area = team size × 1500m²`, **±10% of area**, not per axis. Upper floors, roofs and
 lower passages do not count; Rooms counts primary room polygons and corridor floors, excluding galleries and upper crossings. Central Building counts
-the circular footprint (`PlayableAreaM2`), rather than its bounding square. No saturation at 8.
+the circular footprint (`PlayableAreaM2`), rather than its bounding square. Town subtracts
+the exact union of inaccessible central wings and polygonal perimeter recesses from its envelope. No saturation at 8.
 
 `ERMapSizing.cpp` configures transient recipe copies: structural counts, spacing and bounds.
 It never scales characters, portals, stairs, ladders, kit meshes, material thickness or cells.
@@ -83,6 +85,7 @@ geometry, physics, calibration or damage, and their identity enters the digest.
 | Fire Training | Warehouse | concrete courts and through-rooms inside a closed procedural hall | dry light concrete |
 | Rooms | Tunnels | cast concrete shell, dry floor, timber cover | dry light concrete |
 | Village | Jungle | timber, corrugated sheet, gray cladding | jungle ground |
+| [Town](maps/town.md) | Town | urban street loop, ground-floor through-shops, closed upper storeys | asphalt |
 
 Roles stay separate so structures read at distance: shell sheets, structural steel, galvanized
 ladders, decks and painted cargo. `DeckSteel` applies to thin Metal slabs only. Alley walls follow

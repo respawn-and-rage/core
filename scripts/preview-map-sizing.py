@@ -17,10 +17,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMES = {'CentralBuilding': 'Central Building', 'MiddleEasternAlleys': 'Vicoli',
-         'FireTraining': 'Fire Training', 'Rooms': 'Rooms', 'Village': 'Village'}
+         'FireTraining': 'Fire Training', 'Rooms': 'Rooms', 'Village': 'Village', 'Town': 'Town'}
 NOTES = {'CentralBuilding': 'Edificio centrale: 1 piano + tetto', 'MiddleEasternAlleys': '2 vie, 1 muro centrale, sottopasso',
          'FireTraining': '1 navata lunga e stretta, passerelle locali', 'Rooms': '6 stanze, gallerie e incrocio su 2 quote',
-         'Village': '1 blocco, 2 passaggi a gomito + fianchi'}
+         'Village': '1 blocco, 2 passaggi a gomito + fianchi', 'Town': 'Anello spezzato, corti rientranti e passaggi a L'}
 BACKGROUND = '#f7f6f1'
 PALETTE = ['#c1b5a3', '#aa8070', '#929b9d', '#ad9065', '#b9aa84', '#717c88', '#b6d8d7']
 FONT = '/System/Library/Fonts/Supplemental/Arial.ttf'
@@ -150,6 +150,8 @@ def card(d, plan, x, y, w, h, scale):
         poly=[p(v) for v in s]
         if min(v[2] for v in s)<1.9:
             d.line(poly+[poly[0]],'#697a83',max(1,scale*.15))
+    for footprint in plan.get('inaccessible_ground', []):
+        d.polygon([p(v) for v in footprint], '#171c20', '#171c20', .8)
     for route in plan['routes']:
         kind=route['kind']
         if kind=='stairs':
@@ -237,18 +239,18 @@ def render(plans, output):
         d.text(25,1065,'Proiezione del generatore reale · ingombri verticali, tetti omessi · griglia 5 m',17,color='#65727a')
         d.save(output/f'{plan["template"]}-seed{plan["seed"]}')
     first_seed=plans[0]['seed']; selected=[p for p in plans if p['seed']==first_seed]
-    d=Drawing(1860,1510); n=plans[0]['team_size']
+    d=Drawing(1860,1740); n=plans[0]['team_size']
     d.text(32,22,f'PIANTE {n} VS {n}',36,bold=True)
     d.text(32,69,'Stessa scala per tutti i template · dimensioni effettive del perimetro · griglia 5 m',21,color='#64717a')
     scale=min(min(440/p['dimensions_m'][0],390/p['dimensions_m'][1]) for p in selected)
     for i,plan in enumerate(selected):
         card(d,plan,(i%3)*620,122+(i//3)*655,620,635,scale)
-    d.text(1265,850,'COME LEGGERE LE PIANTE',21,bold=True)
-    for j,(label,color) in enumerate([('Blu / arancio: possibili punti di spawn','#496876'),('Verde: percorsi principali e passaggi','#6d9462'),('Tratteggio viola: sottopasso','#8a6aa0'),('Tratteggio azzurro: percorsi sui tetti','#4b8c8c'),('Contorni chiari: strutture sopraelevate','#8c9ca7')]):
-        d.text(1265,900+j*36,label,17,color=color)
-    d.text(1265,1110,'Piante tecniche, tetti omessi.',18)
-    d.text(1265,1142,'Le varianti restano da provare in partita.',18)
-    d.text(32,1462,f'Generatore Unreal · seed {first_seed} · scala squadra indipendente dal numero di giocatori ammessi',19,color='#64717a')
+    d.text(32,1450,'COME LEGGERE LE PIANTE',21,bold=True)
+    for j,(label,color) in enumerate([('Blu / arancio: possibili punti di spawn','#496876'),('Verde: percorsi principali e passaggi','#6d9462'),('Tratteggio viola: sottopasso','#8a6aa0'),('Tratteggio azzurro: percorsi sui tetti','#4b8c8c'),('Contorni chiari: strutture sopraelevate','#8c9ca7'),('Nero: aree inaccessibili escluse dai m²','#171c20')]):
+        d.text(32+(j%2)*930,1490+(j//2)*36,label,17,color=color)
+    d.text(32,1620,'Piante tecniche, tetti omessi.',18)
+    d.text(32,1652,'Le varianti restano da provare in partita.',18)
+    d.text(32,1700,f'Generatore Unreal · seed {first_seed} · scala squadra indipendente dal numero di giocatori ammessi',19,color='#64717a')
     d.save(output/f'overview-{n}v{n}')
     for stem,title,identifiers in (
         ('central-fire','CENTRAL BUILDING / FIRE TRAINING',('CentralBuilding','FireTraining')),

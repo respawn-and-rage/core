@@ -17,7 +17,7 @@
 namespace
 {
 constexpr int32 MaxStressThreats=8;
-const TCHAR* const SelectionTemplates[]={TEXT("CentralBuilding"),TEXT("MiddleEasternAlleys"),TEXT("FireTraining"),TEXT("Rooms"),TEXT("Village")};
+const TCHAR* const SelectionTemplates[]={TEXT("CentralBuilding"),TEXT("MiddleEasternAlleys"),TEXT("FireTraining"),TEXT("Rooms"),TEXT("Village"),TEXT("Town")};
 UERMapTemplate* SelectionRecipe(const TCHAR* Id){return LoadObject<UERMapTemplate>(nullptr,*(FString(TEXT("/Game/EclipseRecoil/Art/MapTemplates/DA_"))+Id));}
 TArray<int32> SelectionList(const TCHAR* Flag,const TCHAR* Default)
 {

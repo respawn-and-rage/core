@@ -427,7 +427,7 @@ void AERBlockRoom::PublishCellGeneration()
     for (auto& S : AuthorityShards) if (S.IsValid()) S->Destroy();
     AuthorityShards.Empty();
     const uint32 Epoch = Network.Epoch + 1;
-    Network = {}; Network.Epoch = Epoch ? Epoch : 1; Network.Protocol = 40; Network.Cells = true; Network.CellSettings = CellSettings;
+    Network = {}; Network.Epoch = Epoch ? Epoch : 1; Network.Protocol = 43; Network.Cells = true; Network.CellSettings = CellSettings;
     Network.Rules=MaterialRules; Network.Blocks = Config; Network.BlockCount = int32(CellWorld.GetCellCount()); Network.LayoutDigest = GetLayoutDigest(); Network.Sequence = 1;
     if (auto* Map = Cast<AERProceduralMap>(this)) { Network.Procedural = true; Network.Layout = Map->LayoutConfig; Network.Ceilings = Map->bCeilings; }
     // Untouched chunks never travel: shards start empty and only carry modified masks.
@@ -473,7 +473,7 @@ bool AERBlockRoom::OnRepCellDescriptor()
     // alley architecture. Multiple storeys can exceed the ordinary 8M limit;
     // the regenerated cell world still validates occupied/storage budgets.
     const bool SkinnedVillage=Template && Template->Archetype==EERMapArchetype::Village && (Template->Village.BridgeStructure || Template->Village.StorageStructure);
-    if (Network.Protocol != 40 || !Network.Cells || Network.BlockCount <= 0 || Network.BlockCount > (Architecture || SkinnedVillage ? 96000000:8000000) || Network.Procedural != (Map != nullptr))
+    if (Network.Protocol != 43 || !Network.Cells || Network.BlockCount <= 0 || Network.BlockCount > (Architecture || SkinnedVillage ? 96000000:8000000) || Network.Procedural != (Map != nullptr))
     { bNetworkError = true; UE_LOG(LogTemp, Error, TEXT("ER_BLOCK_NET_INCOMPATIBLE descriptor")); return false; }
     MaterialRules=Network.Rules; Config = Network.Blocks; CellSettings = Network.CellSettings;
     if (Map) { Map->LayoutConfig = Network.Layout; Map->bCeilings = Network.Ceilings; }

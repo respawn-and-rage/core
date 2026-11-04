@@ -86,6 +86,10 @@ struct FERProceduralLayout
     TArray<TArray<FVector>> RoomAccessRoutes;
     TArray<TArray<FVector>> SpawnExitRoutes; // Optional screened-base doglegs, alpha then omega.
     TArray<FBox> TownBuildings,TownCourts;
+    // Initial inaccessible footprints, including closed lots and perimeter
+    // recesses. Their clipped XY union is excluded from primary playable area.
+    TArray<FBox> InaccessibleGround;
+    TArray<TArray<FVector>> InaccessibleGroundPolygons,TownFootprints;
     TArray<FName> TownStreetNames;
     TArray<FERLayoutTownGate> TownGates;
     TArray<FVector> UpperRoute,LowerRoute;
@@ -203,6 +207,7 @@ namespace ERProcedural
     bool BuildCentralBuilding(const class UERMapTemplate& Template,int32 Seed,TArray<struct FERMapTemplatePiece>& Pieces,FERProceduralLayout& Layout,TArray<FVector>& Patrol,int32 CrossingOverride=0);
     bool BuildRooms(const FERProceduralConfig& Config,const FERBlockRoomConfig& Blocks,FERProceduralLayout& Out,const FERCellSettings& Cells);
     bool BuildVillage(const FERProceduralConfig& Config,const FERBlockRoomConfig& Blocks,FERProceduralLayout& Out,const FERCellSettings& Cells);
+    bool BuildUrbanTown(const FERProceduralConfig& Config,const FERBlockRoomConfig& Blocks,FERProceduralLayout& Out,const FERCellSettings& Cells);
     float RoomsFloorHeight(const FERProceduralLayout& Layout,FVector2D Position);
     void BuildRoomsShell(class AERProceduralMap* Map,const FERProceduralLayout& Layout,TArray<TObjectPtr<class UDynamicMeshComponent>>& Components);
     // Attempts 0..FireTrainingAttempts-1 sample the seed; the last is the verified reference layout.

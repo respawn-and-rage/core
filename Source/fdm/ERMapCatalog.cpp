@@ -12,7 +12,8 @@ TConstArrayView<FERMapCatalogEntry> All()
         {TEXT("middle_eastern_alleys"),TEXT("Alleys"),TEXT("/Game/EclipseRecoil/Maps/L_MiddleEasternAlleys"),true,true},
         {TEXT("fire_training"),TEXT("Fire Training"),TEXT("/Game/EclipseRecoil/Maps/L_FireTraining"),true,true},
         {TEXT("rooms"),TEXT("Rooms"),TEXT("/Game/EclipseRecoil/Maps/L_Rooms"),true,false},
-        {TEXT("village"),TEXT("Village"),TEXT("/Game/EclipseRecoil/Maps/L_Village"),true,true}};
+        {TEXT("village"),TEXT("Village"),TEXT("/Game/EclipseRecoil/Maps/L_Village"),true,true},
+        {TEXT("town"),TEXT("Town"),TEXT("/Game/EclipseRecoil/Maps/L_Town"),true,true}};
     return Entries;
 }
 const FERMapCatalogEntry& At(int32 Index){const auto Entries=All();return Entries[FMath::Clamp(Index,0,Entries.Num()-1)];}

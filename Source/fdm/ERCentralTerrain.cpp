@@ -29,6 +29,52 @@ double PlayableAreaM2(const FERProceduralLayout& L)
         }
         return Area/10000.;
     }
+    if(!L.InaccessibleGround.IsEmpty() || !L.InaccessibleGroundPolygons.IsEmpty())
+    {
+        // Exact XY union of rectangles and polygonal exclusions, clipped to
+        // the envelope. Edge crossings split the sweep into linear strips.
+        const FVector Half=L.ArenaSize*.5;
+        TArray<TArray<FVector>> Polygons=L.InaccessibleGroundPolygons;
+        for(const auto& B:L.InaccessibleGround)
+            Polygons.Add({{B.Min.X,B.Min.Y,0},{B.Max.X,B.Min.Y,0},{B.Max.X,B.Max.Y,0},{B.Min.X,B.Max.Y,0}});
+        TArray<double> Cuts{-Half.X,Half.X};
+        struct FEdge {FVector2D A,B;};TArray<FEdge> Edges;
+        for(const auto& Polygon:Polygons)for(int32 I=0;I<Polygon.Num();++I)
+        {
+            Cuts.AddUnique(FMath::Clamp(Polygon[I].X,-Half.X,Half.X));
+            Edges.Add({FVector2D(Polygon[I]),FVector2D(Polygon[(I+1)%Polygon.Num()])});
+        }
+        for(int32 I=0;I<Edges.Num();++I)for(int32 J=I+1;J<Edges.Num();++J)
+        {
+            const auto& A=Edges[I];const auto& B=Edges[J];
+            const FVector2D D=A.B-A.A,E=B.B-B.A;
+            if((D.X==0 || D.Y==0) && (E.X==0 || E.Y==0))continue;
+            const double Cross=FVector2D::CrossProduct(D,E);if(FMath::Abs(Cross)<1.e-8)continue;
+            const double T=FVector2D::CrossProduct(B.A-A.A,E)/Cross,U=FVector2D::CrossProduct(B.A-A.A,D)/Cross;
+            if(T>0 && T<1 && U>0 && U<1)Cuts.AddUnique(FMath::Clamp(A.A.X+T*D.X,-Half.X,Half.X));
+        }
+        Cuts.Sort();double Excluded=0;
+        for(int32 I=1;I<Cuts.Num();++I)
+        {
+            const double X=(Cuts[I-1]+Cuts[I])*.5;TArray<FVector2D> Intervals;
+            for(const auto& Polygon:Polygons)
+            {
+                TArray<double> Hits;
+                for(int32 J=0;J<Polygon.Num();++J)
+                {
+                    const auto& A=Polygon[J];const auto& B=Polygon[(J+1)%Polygon.Num()];
+                    if((A.X<X && B.X>X) || (B.X<X && A.X>X))Hits.Add(FMath::Lerp(A.Y,B.Y,(X-A.X)/(B.X-A.X)));
+                }
+                Hits.Sort();for(int32 J=1;J<Hits.Num();J+=2)
+                    Intervals.Add({FMath::Clamp(Hits[J-1],-Half.Y,Half.Y),FMath::Clamp(Hits[J],-Half.Y,Half.Y)});
+            }
+            Intervals.Sort([](const FVector2D& A,const FVector2D& B){return A.X<B.X;});
+            double Span=0,End=-Half.Y;
+            for(const auto& V:Intervals){Span+=FMath::Max(0.,V.Y-FMath::Max(End,V.X));End=FMath::Max(End,V.Y);}
+            Excluded+=(Cuts[I]-Cuts[I-1])*Span;
+        }
+        return FMath::Max(0.,L.ArenaSize.X*L.ArenaSize.Y-Excluded)/10000.;
+    }
     return L.CircularArena ? PI*FMath::Square(L.ArenaSize.X*.5)/10000.:L.ArenaSize.X*L.ArenaSize.Y/10000.;
 }
 namespace
