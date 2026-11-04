@@ -139,6 +139,16 @@ public:
     UFUNCTION(Server,Reliable) void ServerAudioProbeReady(class AERAudioProbe* Probe, uint32 Token);
     UFUNCTION(Server,Reliable) void ServerBlockProbeReport(class AERBlockNetworkProbe* Probe,int32 Stage,uint32 Epoch,uint32 Sequence,uint32 Digest,bool Passed);
     UFUNCTION(Server,Reliable) void ServerBlockMapReady(class AERBlockRoom* Room,uint32 Epoch);
+    FString ScreenshotStatus, ScreenshotDirectory;
+    double ScreenshotNoticeUntil = 0;
+    UFUNCTION(Exec) void CapturePlayerScreenshots();
+    void TickPlayerScreenshots();
+    void FinishPlayerScreenshots();
+    UPROPERTY(Transient) TObjectPtr<class ASceneCapture2D> ScreenshotCamera;
+    FDelegateHandle ScreenshotProcessedHandle;
+    TArray<FTransform> ScreenshotViews;
+    int32 ScreenshotIndex = 0, SavedScreenshotCount = 0;
+    uint64 ScreenshotReadFrame = 0;
     virtual void SetupInputComponent() override;
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;

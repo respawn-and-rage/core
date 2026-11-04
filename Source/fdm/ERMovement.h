@@ -68,6 +68,7 @@ public:
     bool IsTraversing() const { return IsMantling() || IsOnLadder(); }
     virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
     bool CanClimbLadder() const;
+    bool IsWeaponAtLadder() const;
     class AERLadder* FindLadder(bool Entry=false) const;
     float LadderSpeed() const;
     void PhysLadder(float DeltaTime,int32 Iterations);

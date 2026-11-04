@@ -1134,7 +1134,7 @@ bool AERCharacter::CanHoldWeaponOnLadder() const
 bool AERCharacter::IsWeaponStowed() const
 {
     const auto* M=Cast<UERMovement>(GetCharacterMovement());
-    return Weapon && M && (M->IsOnLadder() || (M->IsMantling() && M->CustomMovementMode==3)) && !CanHoldWeaponOnLadder();
+    return Weapon && M && (M->IsOnLadder() || M->IsWeaponAtLadder() || (M->IsMantling() && M->CustomMovementMode==3)) && !CanHoldWeaponOnLadder();
 }
 void AERCharacter::ServerSelectWeapon_Implementation(int32 Slot)
 {

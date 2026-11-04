@@ -349,7 +349,7 @@ bool UERMovement::MoveUpdatedComponentImpl(const FVector& Delta, const FQuat& Ne
     bool Blocked=false;
     const auto* Player = Cast<AERCharacter>(CharacterOwner);
     const auto* Data = Player && Player->Weapon ? Player->Weapon->Data.Get() : nullptr;
-    if (Data && Data->Mesh && Data->bWorldReferencePose && !Player->IsWeaponStowed() && !Player->Health->bDead)
+    if (Data && Data->Mesh && Data->bWorldReferencePose && !Player->IsWeaponStowed() && !IsWeaponAtLadder() && !Player->Health->bDead)
     {
         const FVector Forward = Rotation.GetForwardVector();
         const auto Bounds = Data->Mesh->GetBounds();
@@ -488,6 +488,38 @@ bool UERMovement::CanClimbLadder() const
     const auto* C=Cast<AERCharacter>(CharacterOwner);
     return C && !C->Health->bDead && Locomotion.HalfHeight>=92 && !bProneWanted && !bWantsToCrouch &&
         !IsChangingPosture();
+}
+bool UERMovement::IsWeaponAtLadder() const
+{
+    const auto* Player=Cast<AERCharacter>(CharacterOwner);
+    const auto* Data=Player && Player->Weapon ? Player->Weapon->Data.Get():nullptr;
+    if(!Data || !Data->Mesh || !CanClimbLadder() || !UpdatedComponent ||
+        GetWorld()->GetTimeSeconds()<RetryAfter ||
+        (!IsMovingOnGround() && Acceleration.IsNearlyZero()))return false;
+    const auto Bounds=Data->Mesh->GetBounds();
+    const double Reach=52.0+FMath::Max(0.0,Bounds.Origin.X+Bounds.BoxExtent.X-Data->WorldStockContact.X)*Data->WorldWeaponScale;
+    const float Half=Player->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+    const FVector Position=UpdatedComponent->GetComponentLocation();
+    for(TActorIterator<AERLadder> It(GetWorld());It;++It)
+    {
+        if(It->IsActorBeingDestroyed())continue;
+        const FTransform& Frame=It->GetActorTransform();
+        const FVector Local=Frame.InverseTransformPosition(Position);
+        const float Feet=Local.Z-Half;
+        if(Local.X<30 || Local.X>Reach+20 || FMath::Abs(Local.Y)>50 ||
+            Feet< -35 || Feet>It->Height+8 || !It->HasRung(Feet))continue;
+        if(FVector::DotProduct(Player->GetActorForwardVector(),-It->GetActorForwardVector())<.7f)continue;
+        // The ladder cells belong to the map, not to the ladder actor.
+        // Reject a separate wall between the weapon and the rung plane.
+        FHitResult Cover;
+        FCollisionQueryParams Query(SCENE_QUERY_STAT(ERLadderWeaponContact),false,Player);
+        const float RungZ=FMath::Clamp(FMath::RoundToFloat((Feet+60)/25)*25,25.f,It->Height-5);
+        const FVector Target=Frame.TransformPosition(FVector(0,0,RungZ));
+        if(GetWorld()->LineTraceSingleByChannel(Cover,Position,Target,ECC_Visibility,Query) &&
+            Frame.InverseTransformPosition(Cover.ImpactPoint).X>20)continue;
+        return true;
+    }
+    return false;
 }
 float UERMovement::LadderSpeed() const
 {

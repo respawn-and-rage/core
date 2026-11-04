@@ -1,4 +1,9 @@
 #include "ERPlayerController.h"
+#include "Components/SceneCaptureComponent2D.h"
+#include "Engine/SceneCapture2D.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "HAL/FileManager.h"
+#include "ImageUtils.h"
 #include "ERLoadout.h"
 #include "ERClaymore.h"
 #include "ERAudioProbe.h"
@@ -415,6 +420,7 @@ void AERPlayerController::ClientGameplayMessage_Implementation(const FString& Ev
 void AERPlayerController::PlayerTick(float DeltaTime)
 {
     Super::PlayerTick(DeltaTime);
+    TickPlayerScreenshots();
     UpdateWindowInput();
     UpdateBlockMapLoading();
     if (IsLocalController() && bShowingLobby && !IsMenuLevel()) { MenuPage = 0; ShowMenu(false); }
@@ -449,6 +455,9 @@ void AERPlayerController::PlayerTick(float DeltaTime)
 }
 void AERPlayerController::EndPlay(const EEndPlayReason::Type Reason)
 {
+    FScreenshotRequest::OnScreenshotRequestProcessed().Remove(ScreenshotProcessedHandle);
+    ScreenshotProcessedHandle.Reset();
+    if (ScreenshotCamera) { ScreenshotCamera->Destroy(); ScreenshotCamera = nullptr; }
     if (MenuMusicComponent)
     {
         MenuMusicComponent->Stop();
@@ -464,9 +473,140 @@ void AERPlayerController::EndPlay(const EEndPlayReason::Type Reason)
     if (IsLocalController() && GetLocalPlayer()) if (auto* Subsystem = GetLocalPlayer()->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>()) if (GameplayMapping) Subsystem->RemoveMappingContext(GameplayMapping);
     MenuWidget.Reset(); Super::EndPlay(Reason);
 }
+void AERPlayerController::CapturePlayerScreenshots()
+{
+    AERCharacter* Subject = Cast<AERCharacter>(GetPawn());
+    if (!IsLocalController() || !Subject || bMenuOpen || !GEngine || !GEngine->GameViewport ||
+        ScreenshotCamera || ScreenshotProcessedHandle.IsValid() || FScreenshotRequest::IsScreenshotRequested()) return;
+    FViewport* GameViewport = GEngine->GameViewport->Viewport;
+    if (!GameViewport) return;
+    const FIntPoint Size = GameViewport->GetSizeXY();
+    if (Size.X <= 0 || Size.Y <= 0) return;
+
+    ScreenshotDirectory = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+        FPaths::ScreenShotDir(), FDateTime::Now().ToString(TEXT("%Y%m%d-%H%M%S-")) + FGuid::NewGuid().ToString()));
+    SavedScreenshotCount = 0;
+    ScreenshotIndex = 0;
+    ScreenshotNoticeUntil = 0; // Keep the save notification out of screen.png.
+    if (!IFileManager::Get().MakeDirectory(*ScreenshotDirectory, true))
+    {
+        FinishPlayerScreenshots();
+        return;
+    }
+
+    ScreenshotCamera = GetWorld()->SpawnActor<ASceneCapture2D>();
+    if (ScreenshotCamera)
+    {
+        USceneCaptureComponent2D* Capture = ScreenshotCamera->GetCaptureComponent2D();
+        Capture->bCaptureEveryFrame = true;
+        Capture->bCaptureOnMovement = false;
+        Capture->bAlwaysPersistRenderingState = true;
+        Capture->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
+        Capture->FOVAngle = 60.f;
+        // These work on deferred captures rendered alongside the main view family.
+        // CaptureScene() alone has no main view and forces 100% screen percentage.
+        Capture->bMainViewResolution = true;
+        Capture->bIgnoreScreenPercentage = false;
+        Capture->bInheritMainViewCameraPostProcessSettings = true;
+        Capture->ShowFlags = GEngine->GameViewport->EngineShowFlags;
+        UTextureRenderTarget2D* Target = NewObject<UTextureRenderTarget2D>(ScreenshotCamera);
+        // FinalColorLDR already contains the display gamma from the tonemapper.
+        // An sRGB render-target view would encode it a second time on GPU writes.
+        // Keep the storage linear and let the tonemapper apply display gamma once.
+        Target->TargetGamma = GEngine->GetDisplayGamma();
+        Target->InitCustomFormat(Size.X, Size.Y, PF_B8G8R8A8, true);
+        Capture->TextureTarget = Target;
+
+        FVector Center, Extent;
+        Subject->GetActorBounds(true, Center, Extent);
+        const double Radius = FMath::Max(Extent.Size(), 100.0);
+        const double Aspect = static_cast<double>(Size.X) / Size.Y;
+        const double Distance = Radius * 1.25 / FMath::Sin(FMath::Atan(FMath::Tan(PI / 6.0) / FMath::Max(1.0, Aspect)));
+        const FVector Forward = FRotator(0, Subject->GetActorRotation().Yaw, 0).Vector();
+        const FVector Right = FVector::CrossProduct(FVector::UpVector, Forward);
+        double GroundZ = Subject->GetActorLocation().Z - Subject->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+        FHitResult GroundHit;
+        FCollisionQueryParams GroundQuery(SCENE_QUERY_STAT(ScreenshotGround), false, Subject);
+        const FVector GroundStart(Subject->GetActorLocation().X, Subject->GetActorLocation().Y, GroundZ + 5.0);
+        if (GetWorld()->LineTraceSingleByChannel(GroundHit, GroundStart, GroundStart - FVector(0, 0, 10000), ECC_Visibility, GroundQuery))
+            GroundZ = GroundHit.ImpactPoint.Z;
+        ScreenshotViews.Reset();
+        // The two front-quarter views are 120 degrees apart (+/-60 from front).
+        const double SideWeight = FMath::Sqrt(3.0) * .5;
+        const FVector Directions[] = {Forward, Forward * .5 + Right * SideWeight,
+            Forward * .5 - Right * SideWeight, -Forward};
+        for (const FVector& Direction : Directions)
+        {
+            FVector CameraPosition = Center + Direction * Distance;
+            CameraPosition.Z = GroundZ + 300.0;
+            ScreenshotViews.Emplace((Center - CameraPosition).Rotation(), CameraPosition);
+        }
+        // Looking straight down, camera-right is -Forward: the player faces left.
+        const FVector TopPosition(Center.X, Center.Y, GroundZ + 1000.0);
+        ScreenshotViews.Emplace(FRotator(-90, Subject->GetActorRotation().Yaw + 90, 0), TopPosition);
+        ScreenshotCamera->SetActorTransform(ScreenshotViews[0]);
+        Capture->bCameraCutThisFrame = true;
+        ScreenshotReadFrame = GFrameCounter + 4; // Render and warm up temporal effects before readback.
+    }
+
+    const FString ScreenFile = FPaths::Combine(ScreenshotDirectory, TEXT("screen.png"));
+    ScreenshotProcessedHandle = FScreenshotRequest::OnScreenshotRequestProcessed().AddWeakLambda(this, [this]()
+    {
+        FScreenshotRequest::OnScreenshotRequestProcessed().Remove(ScreenshotProcessedHandle);
+        ScreenshotProcessedHandle.Reset();
+        FinishPlayerScreenshots();
+    });
+    // Let Unreal/Slate read the completed frame, including HUD, rather than reading
+    // the swapchain during input (which can return a black backbuffer on Metal).
+    FScreenshotRequest::RequestScreenshot(ScreenFile, true, false, false, FIntRect(), true);
+}
+
+void AERPlayerController::TickPlayerScreenshots()
+{
+    if (!ScreenshotCamera || GFrameCounter < ScreenshotReadFrame) return;
+    USceneCaptureComponent2D* Capture = ScreenshotCamera->GetCaptureComponent2D();
+    UTextureRenderTarget2D* Target = Capture->TextureTarget;
+    TArray<FColor> Pixels;
+    FReadSurfaceDataFlags ReadFlags(RCM_UNorm);
+    ReadFlags.SetLinearToGamma(false); // Preserve the already display-encoded LDR bytes.
+    if (Target && Target->GameThread_GetRenderTargetResource()->ReadPixels(Pixels, ReadFlags) &&
+        Pixels.Num() == static_cast<int64>(Target->SizeX) * Target->SizeY)
+    {
+        for (FColor& Pixel : Pixels) Pixel.A = 255;
+        TArray64<uint8> Png;
+        FImageUtils::PNGCompressImageArray(Target->SizeX, Target->SizeY, Pixels, Png);
+        const TCHAR* Labels[] = {TEXT("front"), TEXT("right"), TEXT("left"), TEXT("back"), TEXT("top")};
+        if (!Png.IsEmpty() && FFileHelper::SaveArrayToFile(Png,
+            *FPaths::Combine(ScreenshotDirectory, FString(Labels[ScreenshotIndex]) + TEXT(".png")))) ++SavedScreenshotCount;
+    }
+    if (++ScreenshotIndex < ScreenshotViews.Num())
+    {
+        ScreenshotCamera->SetActorTransform(ScreenshotViews[ScreenshotIndex]);
+        Capture->bCameraCutThisFrame = true;
+        ScreenshotReadFrame = GFrameCounter + 4;
+    }
+    else
+    {
+        ScreenshotCamera->Destroy();
+        ScreenshotCamera = nullptr;
+        FinishPlayerScreenshots();
+    }
+}
+
+void AERPlayerController::FinishPlayerScreenshots()
+{
+    if (ScreenshotCamera || ScreenshotProcessedHandle.IsValid()) return;
+    // Screenshot tracing can finish writing screen.png after the processed delegate.
+    const int32 ScreenSaved = IFileManager::Get().FileSize(*FPaths::Combine(ScreenshotDirectory, TEXT("screen.png"))) > 0 ? 1 : 0;
+    ScreenshotStatus = FString::Printf(TEXT("Screenshots saved: %d/6"), SavedScreenshotCount + ScreenSaved);
+    ScreenshotNoticeUntil = FPlatformTime::Seconds() + 15.0;
+    UE_LOG(LogTemp, Display, TEXT("%s\n%s"), *ScreenshotStatus, *ScreenshotDirectory);
+}
+
 void AERPlayerController::SetupInputComponent()
 {
     Super::SetupInputComponent();
+    InputComponent->BindKey(EKeys::P, IE_Pressed, this, &AERPlayerController::CapturePlayerScreenshots);
     InputComponent->BindKey(EKeys::E, IE_Pressed, this, &AERPlayerController::SprintPressed);
     InputComponent->BindKey(EKeys::E, IE_Released, this, &AERPlayerController::SprintReleased);
     InputComponent->BindKey(EKeys::W, IE_Pressed, this, &AERPlayerController::ForwardPressed);
@@ -1248,6 +1388,15 @@ void AERHUD::DrawHUD()
             Line(PC->GameplayToast.Title,FLinearColor(1.f,.76f,.38f),.82f,Y);
             Line(PC->GameplayToast.Body,FLinearColor(.82f,.85f,.9f),.72f,Y + 24.f * HUDScale);
         }
+    }
+    if (PC->ScreenshotNoticeUntil > FPlatformTime::Seconds())
+    {
+        DrawHUDText(PC->ScreenshotStatus, EdgeMargin.X, Layout.Position(0,270).Y, FLinearColor(1.f,.76f,.38f), .8f);
+        // Wrap the absolute path instead of truncating the directory players need.
+        const int32 CharactersPerLine = FMath::Max(20, FMath::FloorToInt32((W - 2.f * EdgeMargin.X) / (12.f * HUDScale)));
+        for (int32 Offset = 0; Offset < PC->ScreenshotDirectory.Len(); Offset += CharactersPerLine)
+            DrawHUDText(PC->ScreenshotDirectory.Mid(Offset, CharactersPerLine), EdgeMargin.X,
+                Layout.Position(0,296).Y + (Offset / CharactersPerLine) * 22.f * HUDScale, FLinearColor::White, .65f);
     }
     TickHUDLayoutGallery();
 }

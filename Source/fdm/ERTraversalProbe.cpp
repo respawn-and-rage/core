@@ -47,7 +47,7 @@ void AERTraversalProbe::Next()
     ++Phase;Time=PeakSpeed=0;SawLadder=SawFall=Sent=false;EquipmentChecks=0;ForceNetUpdate();
     if(Phase<=6)
     {
-        Place(Client,{55,0,4095});
+        Place(Client,{Phase==1 ? 150.f:220.f,0,4095});
         if(Phase==1 || Phase==3)
             for(int32 I=0;I<Client->Inventory.Num();++I)if(Client->Inventory[I]->Data && !Client->Inventory[I]->Data->bOneHanded && Client->Inventory[I]->Data->Payload==EERPayload::Bullet){Client->ServerSelectWeapon(I);break;}
         if(Phase==2 || Phase==4)
@@ -95,7 +95,12 @@ void AERTraversalProbe::Tick(float Delta)
                        (Step==3 && !D->bOneHanded && D->Payload==EERPayload::LaunchedHE))
                     {C->ServerSelectWeapon(I);break;}
                 }
-            if(Previous<4.f && Time>=4.f){Input(PC,EKeys::SpaceBar,IE_Pressed);Input(PC,EKeys::SpaceBar,IE_Released);}
+            if(Previous<4.f && Time>=4.f)
+            {
+                Input(PC,EKeys::SpaceBar,IE_Pressed);Input(PC,EKeys::SpaceBar,IE_Released);
+                Input(PC,EKeys::S,IE_Pressed);
+            }
+            if(Previous<4.8f && Time>=4.8f)Input(PC,EKeys::S,IE_Released);
             if(Time>3.7f && !Sent)
             {
                 const bool Okay=M->IsOnLadder() && C->Weapon && C->Weapon->Data->Payload==EERPayload::LaunchedHE && C->IsWeaponStowed();
@@ -196,7 +201,7 @@ void AERTraversalProbe::Tick(float Delta)
                 if(Grenade)Grenade->Destroy();
             }
         }
-        if(Time>5){Check(SawLadder && !M->IsOnLadder() && !Client->IsWeaponStowed() && Client->Weapon && Client->Weapon->Data->Payload==EERPayload::LaunchedHE,TEXT("detach restores latest selection"));Next();}
+        if(Time>5){Check(SawLadder && !M->IsOnLadder() && !Client->IsWeaponStowed() && Client->Weapon && Client->Weapon->Data->Payload==EERPayload::LaunchedHE,TEXT("detach and retreat restore latest selection"));Next();}
     }
     else if((Phase==2 && Time>7) || (Phase==3 && Time>5.5f))
     {

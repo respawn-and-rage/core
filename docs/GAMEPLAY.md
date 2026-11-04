@@ -58,7 +58,9 @@ owner and authority paths. Weapon presentation checks are in [WEAPONS](WEAPONS.m
 
 Ladders use custom movement mode 2 (1 is mantle, 3 is the ladder-to-roof transition).
 W/S climbs, Space detaches. Pistols, knives and hand grenades stay usable; other
-weapons stow automatically and return on exit. Rungs must physically survive.
+weapons stow when their forward reach meets a nearby usable ladder, allowing
+the approach before attachment, and return once clear of the ladder. Walls in front of
+the ladder prevent this approach stow. Rungs must physically survive.
 
 Traversal uses `UERMovement` and saved moves. `IA_Look` scalar is 0.18. Camera bob is
 cosmetic. FPS arms, weapon and muzzle flash render as FirstPerson primitives.
@@ -67,7 +69,19 @@ cosmetic. FPS arms, weapon and muzzle flash render as FirstPerson primitives.
 
 WASD, mouse, left click fire, right click scope, Space jump/climb/respawn, Shift walk,
 double-tap W or hold E sprint, Ctrl/C crouch and prone, R reload, 1–8 / F / G / H or
-wheel select (the wheel has a 250ms quiet period), Tab scoreboard, Esc menu.
+wheel select (the wheel has a 250ms quiet period), Tab scoreboard, Esc menu, P screenshots.
+P saves the current viewport (including HUD) plus front, right, left, back and top
+views of the possessed character as PNGs at the viewport resolution. The screen is
+captured after rendering through Unreal/Slate. External views render over successive
+frames with the main view's resolution scaling and post-processing. LDR capture
+targets use linear storage with explicit display gamma to avoid a second sRGB
+encoding when writing the PNG. External views use the character facing at P,
+without moving the gameplay camera. Front, back and front-quarter cameras are 3m
+above the ground; right/left sit at +/-60 degrees from the front (120 degrees apart).
+Top is 10m above the ground, aimed vertically at the character center, with the
+character facing from right to left in the image. Nearby geometry can obscure the
+views. Each set has a unique folder under `Saved/Screenshots`;
+a local on-screen message shows its absolute path and reports incomplete saves.
 Menus, HUD and labels are English; the language is forced at GameInstance init.
 
 ## Server settings
