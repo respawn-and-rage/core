@@ -11,11 +11,11 @@ aprons are reserved before lot partitioning. The 3v3 profile extends house lots 
 uses smaller market courts, staggered central approaches and a paired 3m cross alley with
 seeded elbows instead of the open central square. Unequal lot divisions vary house frontages.
 Market courts stay open at ground level.
-Short elevated decks span actual gaps between nearby roofs; some use destructible timber. Teams use sand terraces up to +1.8m. Gameplay profiles reserve opaque masonry spawn
+Short elevated decks span the gap between roof edges; exterior stair landings meet the roof slab at its edge. Flat covers use square paving with visible joints. Some elevated decks use destructible timber. Teams use sand terraces up to +1.8m. Gameplay profiles reserve opaque masonry spawn
 screens inside the base courts, with the starts behind them and lateral dogleg exits.
 
-- `Town.ProceduralHouses`: native masonry, alternating Stone and weaker pale Brick pairs, 160×240cm doors, flat 15cm slabs, windows, flat
-  roofs flush or with 25cm-high, 40cm-wide rims and 180cm gaps. Exterior switchback stairs. One hollow
+- `Town.ProceduralHouses`: native masonry, alternating Stone and weaker rough Brick pairs, 160×240cm doors, flat 15cm slabs, windows, flat
+  roofs flush or with 25cm-high, 40cm-wide rims and 180cm gaps. Exterior switchback stairs have solid rear landings to the lot edge so drops land on the stair route. One hollow
   skin per house; floor and roof skins are separate bounded panels, not merged into wall panels.
   Keep parent structure tags and support contacts.
 - Lower passage at -3.6m with paired ramps and two breachable brick road sections, over real

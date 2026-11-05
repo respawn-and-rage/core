@@ -47,7 +47,9 @@ struct FSpawnSpace
     bool Floor(FVector P) const
     {
         const FVector2D XY(P);
-        if(Layout.CircularArena && XY.Size()>Layout.ArenaSize.X*.5-100)return false;
+        if(Layout.CircularArena &&
+            FMath::Square(XY.X/(Layout.ArenaSize.X*.5-100))+
+            FMath::Square(XY.Y/(Layout.ArenaSize.Y*.5-100))>1)return false;
         if(FMath::Abs(P.X)>Layout.ArenaSize.X*.5-80 || FMath::Abs(P.Y)>Layout.ArenaSize.Y*.5-80)return false;
         if(Layout.GradedTerrain)
         {

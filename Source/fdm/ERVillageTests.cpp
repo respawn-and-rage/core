@@ -136,7 +136,9 @@ bool FERVillagePhysicsTest::RunTest(const FString& Parameters)
         int32 Skins=0;
         for(const auto& P:Map->GetCellWorld().GetPanels())if(!P.Skin.IsEmpty())
         {
-            ++Skins;TestTrue(TEXT("imported timber retains UV surface and bounded triangles"),P.Surface && P.InteriorSurface && (L.ThemeName!=TEXT("Jungle") || P.Surface!=P.InteriorSurface) && P.Skin.Num()<=30000);
+            ++Skins;TestTrue(TEXT("imported timber retains surfaces and bounded triangles"),P.Surface && P.InteriorSurface && P.Skin.Num()<=30000);
+            if(Asset->ThemeLibrary && Asset->ThemeLibrary->SharedSurfaces)
+                TestTrue(TEXT("both imported skin faces use the shared catalog"),Asset->ThemeLibrary->SharedSurfaces->Contains(P.Surface) && Asset->ThemeLibrary->SharedSurfaces->Contains(P.InteriorSurface));
         }
         TestEqual(TEXT("two lookout skins and two side shack skins"),Skins,4);
         for(const auto& Cover:L.CoverSites)
@@ -203,6 +205,7 @@ bool FERVillagePhysicsTest::RunTest(const FString& Parameters)
         }
         TestTrue(TEXT("palisade and panorama meshes bound"),Asset->Village.PalisadePoleMesh && Asset->Village.SkyDomeMesh);
         TestTrue(TEXT("decorative houses removed"),Asset->Village.ExteriorHouses.IsEmpty());
+        TestTrue(TEXT("exterior trees removed"),Asset->Village.ExteriorTrees.IsEmpty());
         for(const auto& Passage:L.VillagePassages)for(int32 I=1;I<Passage.Num();++I)
             TestFalse(TEXT("only designated dogleg corridor remains traversable"),World->SweepSingleByChannel(Hit,Passage[I-1],Passage[I],FQuat::Identity,ECC_Pawn,Capsule,Q));
         for(const auto& D:L.VillageBlocks)

@@ -11,6 +11,7 @@
 #include "ERLobbyProbe.h"
 #include "ERCapacityProbe.h"
 #include "ERMapCatalog.h"
+#include "EROutdoorBackdrop.h"
 #include "ERRecon.h"
 #include "ERReconProbe.h"
 #include "ERCharacter.h"
@@ -71,10 +72,26 @@ void AERPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AERPlayerState, PrimaryWeapon);
     DOREPLIFETIME(AERPlayerState, AlphaSkin); DOREPLIFETIME(AERPlayerState, OmegaSkin); DOREPLIFETIME(AERPlayerState, ActiveSkin);
 }
+void AERGameState::BeginPlay()
+{
+    Super::BeginPlay();
+    if(HasAuthority() && UGameplayStatics::GetCurrentLevelName(this)==TEXT("L_Depot"))
+    {
+        DepotSkySeed=FPlatformTime::Cycles()|1u;
+        OnRep_DepotSkySeed();
+    }
+}
+
+void AERGameState::OnRep_DepotSkySeed()
+{
+    if(DepotSkySeed!=0)EROutdoorBackdrop::Apply(*this,DepotSkySeed,FLinearColor(.20f,.19f,.16f));
+}
+
 void AERGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(AERGameState, ServerRules);
+    DOREPLIFETIME(AERGameState, DepotSkySeed);
     DOREPLIFETIME(AERGameState, LoadoutCatalog);
     DOREPLIFETIME(AERGameState, ServerMaxPlayers);
     DOREPLIFETIME(AERGameState, bOnline);

@@ -88,7 +88,7 @@ private:
     bool TickDiscovery(float DeltaTime);
     void CloseDiscoverySocket();
     float MouseSensitivity = .5f;
-    float MouseAcceleration = .5f;
+    float MouseAcceleration = 0.f;
     float SoundVolume = 1.f;
     float MusicVolume = 1.f;
     FDelegateHandle NetworkFailureHandle, TravelFailureHandle;

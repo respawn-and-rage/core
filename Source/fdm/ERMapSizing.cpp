@@ -39,9 +39,19 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
         }
         else Envelope(1.f,3000,3400);
         T.CentralBuilding.ArenaMin=T.CentralBuilding.ArenaMax=T.SizingArena;
-        T.CentralBuilding.BuildingWidth=T.CentralBuilding.CircularTerrain ? FVector2D(1600,FMath::GridSnap(FMath::Min(4800.f,float(T.SizingArena.X)*.46f),100.f)):FVector2D(1800,Grid(1800,2400));
-        T.CentralBuilding.BuildingDepth=T.CentralBuilding.CircularTerrain ? FVector2D(2000,FMath::GridSnap(FMath::Min(6000.f,float(T.SizingArena.Y)*.56f),100.f)):FVector2D(2200,Grid(2200,3000));
-        T.CentralBuilding.MinFloors=1;T.CentralBuilding.MaxFloors=TeamSize<=2 ? 1:TeamSize<=4 ? 2:3;
+        if(T.CentralBuilding.CircularTerrain)
+        {
+            T.CentralBuilding.BuildingWidth={1400,1800};
+            T.CentralBuilding.BuildingDepth={2000,2400};
+            T.CentralBuilding.MinFloors=T.CentralBuilding.MaxFloors=TeamSize==1 ? 2 : 3;
+        }
+        else
+        {
+            T.CentralBuilding.BuildingWidth={1800,Grid(1800,2400)};
+            T.CentralBuilding.BuildingDepth={2200,Grid(2200,3000)};
+            T.CentralBuilding.MinFloors=1;
+            T.CentralBuilding.MaxFloors=TeamSize<=2 ? 1 : TeamSize<=4 ? 2 : 3;
+        }
         break;
     case EERMapArchetype::MiddleEasternAlleys:
         Envelope(TeamSize==1 ? 1.f:1.25f,3200,3200);

@@ -12,6 +12,9 @@
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "HAL/PlatformTime.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundAttenuation.h"
+#include "Sound/SoundBase.h"
 #include "Misc/Crc.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
@@ -36,6 +39,9 @@ void AERBlockRoom::ClearCells()
 void AERBlockRoom::BuildCellComponents()
 {
     const auto& Chunks = CellWorld.GetChunks();
+    const auto* Map=Cast<AERProceduralMap>(this);
+    const bool FireCargo=Map && Map->LayoutConfig.TemplateAsset &&
+        Map->LayoutConfig.TemplateAsset->Archetype==EERMapArchetype::FireTraining;
     CellMeshes.Reserve(Chunks.Num()); ChunkQuads.Init(0, Chunks.Num()); ChunkBoxes.Init(0, Chunks.Num());
     for (int32 Index = 0; Index < Chunks.Num(); ++Index)
     {
@@ -56,6 +62,14 @@ void AERBlockRoom::BuildCellComponents()
         Mesh->SetCollisionProfileName(TEXT("BlockAll"));
         Mesh->SetCanEverAffectNavigation(false);
         if (auto* Surface = Panel.Surface ? Panel.Surface : MaterialCatalog->Find(Panel.Material)->Surface.Get()) Mesh->SetMaterial(0, Surface);
+        if(FireCargo && Panel.Material==EERBlockMaterial::Metal && Panel.Strength>1)
+        {
+            // All five panels of a container share its construction id.
+            const uint32 Paint=(uint32(Map->LayoutConfig.Seed)+uint32(Panel.Id/8))%3;
+            Mesh->SetCustomPrimitiveDataFloat(0, float(Panel.Size.X));
+            Mesh->SetCustomPrimitiveDataFloat(1, float(Panel.Size.Z));
+            Mesh->SetCustomPrimitiveDataFloat(2, float(Paint));
+        }
         Mesh->RegisterComponent();
         CellMeshes.Add(Mesh); CellComponentChunks.Add(Mesh, Index);
         RebuildCellChunk(Index);
@@ -208,6 +222,7 @@ FERBlockBatchResult AERBlockRoom::ApplyCellBatch(const TMap<FERCellId, float>& D
     LastGroupsRebuilt = Result.GroupsRebuilt;
     if (Batch.Damaged > 0) LastHit = DescribeCell(Batch.Last);
     PublishCellChanges(Batch.ChangedChunks);
+    EmitGlassBreaks(Batch.BrokenGlassPanes);
     LastUpdateMs = float((FPlatformTime::Seconds() - Start) * 1000); UpdateProfile.TotalMs = LastUpdateMs;
     if (Batch.Destroyed > 0) { ++DamageRevision; RequestSupportCheck(); }
     return Result;
@@ -410,6 +425,32 @@ bool AERBlockRoom::ValidateCells() const
     return Ordinary==CellComponentChunks.Num() && CheckedSkins.Num()==SkinMeshes.Num();
 }
 
+void AERBlockRoom::EmitGlassBreaks(const TArray<FERCellId>& Panes)
+{
+    if (Panes.IsEmpty()) return;
+
+    TArray<FVector_NetQuantize> Positions;
+    Positions.Reserve(Panes.Num());
+    for (const FERCellId& Pane : Panes)
+        Positions.Add(GetActorTransform().TransformPosition(CellWorld.GetCellCenter(Pane)));
+
+    if (GetNetMode() == NM_Standalone) MulticastGlassBreak_Implementation(Network.Epoch, Positions);
+    else MulticastGlassBreak(Network.Epoch, Positions);
+}
+
+void AERBlockRoom::MulticastGlassBreak_Implementation(uint32 Epoch, const TArray<FVector_NetQuantize>& Positions)
+{
+    if (GetNetMode() == NM_DedicatedServer || Epoch != Network.Epoch || !IsMapReady() ||
+        GlassBreakSounds.IsEmpty() || !GlassBreakAttenuation) return;
+
+    static FRandomStream GlassAudioRandom(static_cast<int32>(GetTypeHash(FGuid::NewGuid())));
+    for (const FVector_NetQuantize& Position : Positions)
+    {
+        const int32 Index = GlassAudioRandom.RandRange(0, GlassBreakSounds.Num() - 1);
+        UGameplayStatics::PlaySoundAtLocation(this, GlassBreakSounds[Index], Position, 1.f, 1.f, 0.f, GlassBreakAttenuation);
+    }
+}
+
 void AERBlockRoom::SpawnCellImpact(EERBlockMaterial Material, const FVector& Position, const FVector& Normal)
 {
     if (HasAuthority() && GetNetMode() != NM_Standalone && !bInCosmeticMulticast)
@@ -427,7 +468,7 @@ void AERBlockRoom::PublishCellGeneration()
     for (auto& S : AuthorityShards) if (S.IsValid()) S->Destroy();
     AuthorityShards.Empty();
     const uint32 Epoch = Network.Epoch + 1;
-    Network = {}; Network.Epoch = Epoch ? Epoch : 1; Network.Protocol = 43; Network.Cells = true; Network.CellSettings = CellSettings;
+    Network = {}; Network.Epoch = Epoch ? Epoch : 1; Network.Protocol = 50; Network.Cells = true; Network.CellSettings = CellSettings;
     Network.Rules=MaterialRules; Network.Blocks = Config; Network.BlockCount = int32(CellWorld.GetCellCount()); Network.LayoutDigest = GetLayoutDigest(); Network.Sequence = 1;
     if (auto* Map = Cast<AERProceduralMap>(this)) { Network.Procedural = true; Network.Layout = Map->LayoutConfig; Network.Ceilings = Map->bCeilings; }
     // Untouched chunks never travel: shards start empty and only carry modified masks.
@@ -473,7 +514,7 @@ bool AERBlockRoom::OnRepCellDescriptor()
     // alley architecture. Multiple storeys can exceed the ordinary 8M limit;
     // the regenerated cell world still validates occupied/storage budgets.
     const bool SkinnedVillage=Template && Template->Archetype==EERMapArchetype::Village && (Template->Village.BridgeStructure || Template->Village.StorageStructure);
-    if (Network.Protocol != 43 || !Network.Cells || Network.BlockCount <= 0 || Network.BlockCount > (Architecture || SkinnedVillage ? 96000000:8000000) || Network.Procedural != (Map != nullptr))
+    if (Network.Protocol != 50 || !Network.Cells || Network.BlockCount <= 0 || Network.BlockCount > (Architecture || SkinnedVillage ? 96000000:8000000) || Network.Procedural != (Map != nullptr))
     { bNetworkError = true; UE_LOG(LogTemp, Error, TEXT("ER_BLOCK_NET_INCOMPATIBLE descriptor")); return false; }
     MaterialRules=Network.Rules; Config = Network.Blocks; CellSettings = Network.CellSettings;
     if (Map) { Map->LayoutConfig = Network.Layout; Map->bCeilings = Network.Ceilings; }

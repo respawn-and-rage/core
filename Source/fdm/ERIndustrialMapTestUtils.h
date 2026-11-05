@@ -64,7 +64,17 @@ inline bool FactoryPaletteMatches(AERProceduralMap& Map)
 inline const FERLayoutFixedPiece* PerimeterFence(const FERProceduralLayout& L)
 {
     return L.FixedPieces.FindByPredicate([&](const auto& P)
-    {return P.PawnBarrier && (L.CircularArena || (P.Transform.GetLocation().Y<-L.ArenaSize.Y*.5+10 && P.Transform.GetLocation().Z<ERIndustrialFence::PlinthHeightCm+ERIndustrialFence::ModuleHeightCm));});
+    {
+        if(!P.PawnBarrier)return false;
+        const FVector Center=P.Transform.GetLocation();
+        // The circular divider also uses fence modules. Only the outer ring
+        // sits on the perimeter plinth checked by the client probe.
+        if(L.CircularArena)return
+            FMath::Square(Center.X/(L.ArenaSize.X*.5-25))+
+            FMath::Square(Center.Y/(L.ArenaSize.Y*.5-25))>=1;
+        return Center.Y<-L.ArenaSize.Y*.5+10 &&
+            Center.Z<ERIndustrialFence::PlinthHeightCm+ERIndustrialFence::ModuleHeightCm;
+    });
 }
 inline bool PerimeterMatches(AERProceduralMap& Map,const FCollisionQueryParams& Q)
 {

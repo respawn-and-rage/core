@@ -119,7 +119,7 @@ void UERGameInstance::Init()
     GConfig->GetFloat(TEXT("EclipseRecoil.Input"), TEXT("MouseSensitivity"), MouseSensitivity, GGameUserSettingsIni);
     MouseSensitivity = FMath::IsFinite(MouseSensitivity) ? FMath::Clamp(MouseSensitivity, 0.f, 1.f) : .5f;
     GConfig->GetFloat(TEXT("EclipseRecoil.Input"), TEXT("MouseAcceleration"), MouseAcceleration, GGameUserSettingsIni);
-    MouseAcceleration = FMath::IsFinite(MouseAcceleration) ? FMath::Clamp(MouseAcceleration, 0.f, 1.f) : .5f;
+    MouseAcceleration = FMath::IsFinite(MouseAcceleration) ? FMath::Clamp(MouseAcceleration, 0.f, 1.f) : 0.f;
     GConfig->GetFloat(TEXT("EclipseRecoil.Audio"), TEXT("SoundVolume"), SoundVolume, GGameUserSettingsIni);
     SetSoundVolume(SoundVolume);
     GConfig->GetFloat(TEXT("EclipseRecoil.Audio"), TEXT("MusicVolume"), MusicVolume, GGameUserSettingsIni);
@@ -727,7 +727,7 @@ void AERPlayerController::Look(const FInputActionValue& Value)
     const UERGameInstance* GI = GetGameInstance<UERGameInstance>();
     const FVector2D Input = Value.Get<FVector2D>();
     if (!FMath::IsFinite(Input.X) || !FMath::IsFinite(Input.Y)) return;
-    const float Gain = ERMouseResponse::Gain(Input, FApp::GetDeltaTime(), GI ? GI->GetMouseAcceleration() : .5f);
+    const float Gain = GI ? ERMouseResponse::Gain(Input, FApp::GetDeltaTime(), GI->GetMouseAcceleration()) : 1.f;
     const auto* C = Cast<AERCharacter>(GetPawn());
     const float ZoomGain = C && C->Weapon && !C->IsWeaponStowed() ? (C->Weapon->Data && C->Weapon->Data->ScopeMode==1 ? FMath::Lerp(90.f,C->Weapon->Tuned()->ZoomFOV,C->GetIronAimBlend()) : C->Weapon->GetScopeFOV())/90.f : 1.f;
     const FVector2D Axis = Input * Gain * (GI ? GI->GetMouseLookMultiplier() : 0.16f / 0.18f) * ZoomGain;

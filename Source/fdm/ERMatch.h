@@ -46,10 +46,13 @@ public:
     // Aim punch needs the newest clock sample after loading hitches; keep the
     // engine's averaged clock unchanged for all existing gameplay systems.
     double GetAimPunchServerTimeSeconds() const;
+    virtual void BeginPlay() override;
 protected:
     virtual void OnRep_ReplicatedWorldTimeSecondsDouble() override;
 private:
     double AimClockReceiptTime = -1;
+    UPROPERTY(ReplicatedUsing=OnRep_DepotSkySeed) uint32 DepotSkySeed=0;
+    UFUNCTION() void OnRep_DepotSkySeed();
 public:
     UPROPERTY(ReplicatedUsing=OnRep_ServerRules) FERServerRules ServerRules;
     UFUNCTION() void OnRep_ServerRules();

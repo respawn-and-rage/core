@@ -202,6 +202,7 @@ FERCellBatchResult FERCellWorld::DetachCells(const TArray<FERCellId>& Ids)
         const int32 Index = CellIndex(C, Id.X - C.X0, Id.Y, Id.Z - C.Z0);
         ClearBit(C.Alive, Index); --C.AliveCount; ++C.Revision; ++RemovedCount; ++DetachedCount; ++Result.Destroyed; Result.Last = Id;
         if (const int32 D = FindDamaged(C, Index); D != INDEX_NONE) C.Damaged.RemoveAt(D);
+        if (Panels[Id.Panel].bPane && Panels[Id.Panel].Material == EERBlockMaterial::Glass) Result.BrokenGlassPanes.Add(Id);
         Changed.Add(ChunkIndex); MarkDirty(Id.Panel, Id.X, Id.Z, Dirty);
     }
     Result.DirtyChunks = Dirty.Array(); Result.DirtyChunks.Sort();
@@ -241,6 +242,7 @@ FERCellBatchResult FERCellWorld::ApplyDamage(const TMap<FERCellId, float>& Damag
         {
             ClearBit(C.Alive, Index); --C.AliveCount; ++C.Revision; ++RemovedCount; ++Result.Destroyed;
             if (D != INDEX_NONE) C.Damaged.RemoveAt(D);
+            if (Panels[Id.Panel].bPane && Panels[Id.Panel].Material == EERBlockMaterial::Glass) Result.BrokenGlassPanes.Add(Id);
             Changed.Add(ChunkIndex); MarkDirty(Id.Panel, Id.X, Id.Z, Dirty);
         }
         else if (D != INDEX_NONE) C.Damaged[D].Health = float(Next);

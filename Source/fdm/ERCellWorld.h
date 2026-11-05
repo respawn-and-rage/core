@@ -78,6 +78,7 @@ struct FERCellBatchResult
     int32 Damaged = 0, Destroyed = 0;
     TArray<int32> DirtyChunks;   // geometry to rebuild, including face neighbours
     TArray<int32> ChangedChunks; // alive masks that changed
+    TArray<FERCellId> BrokenGlassPanes;
     FERCellId Last;
 };
 

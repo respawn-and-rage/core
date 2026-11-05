@@ -323,9 +323,16 @@ bool FERCellCombatTest::RunTest(const FString& Parameters)
         FERCellWorld::AddConstruction(0, EERBlockMaterial::Glass, FTransform::Identity, FVector(100, 20, 100), FERCellSettings(), D);
         FERCellWorld::AddConstruction(1, EERBlockMaterial::Drywall, FTransform(FVector(0, 100, 0)), FVector(100, 20, 100), FERCellSettings(), D);
         TestTrue(TEXT("pane world"), G.Build(D, FERCellSettings(), Room->MaterialCatalog, Error));
-        TMap<FERCellId, float> Hit; Hit.Add({0, 0, 0, 0}, 8); Hit.Add({1, 3, 0, 3}, 20);
+        const FERCellId Pane{0, 0, 0, 0};
+        TMap<FERCellId, float> Hit;
+        Hit.Add(Pane, 1);
+        TestTrue(TEXT("nonlethal glass damage does not report a break"), G.ApplyDamage(Hit).BrokenGlassPanes.IsEmpty());
+        Hit.Add(Pane, 8);
+        Hit.Add({1, 3, 0, 3}, 20);
         const auto R = G.ApplyDamage(Hit);
         TestEqual(TEXT("pane and one drywall cell removed"), R.Destroyed, 2);
+        TestTrue(TEXT("only the destroyed glass pane is reported"), R.BrokenGlassPanes == TArray<FERCellId>{Pane});
+        TestTrue(TEXT("repeated damage does not report the same pane"), G.ApplyDamage(Hit).BrokenGlassPanes.IsEmpty());
         TestEqual(TEXT("the whole pane is gone with one cell"), G.GetRemovedCount(), int64(2));
         TestTrue(TEXT("drywall neighbour remains"), G.IsAlive({1, 4, 0, 3}));
     }
@@ -341,7 +348,7 @@ bool FERCellNetTransactionTest::RunTest(const FString& Parameters)
     auto* Client = World->SpawnActor<AERBlockRoom>(); Client->SetRole(ROLE_SimulatedProxy); Client->bNetworkBegunPlay = true;
     const int32 Shards = FMath::DivideAndRoundUp(Server->GetCellWorld().GetChunks().Num(), AERCellNetShard::Capacity);
     auto& N = Client->Network;
-    N.Epoch = 1; N.Protocol = 43; N.Cells = true; N.CellSettings = Server->CellSettings; N.Blocks = Server->Config;
+    N.Epoch = 1; N.Protocol = 50; N.Cells = true; N.CellSettings = Server->CellSettings; N.Blocks = Server->Config;
     N.BlockCount = int32(Server->GetCellWorld().GetCellCount()); N.LayoutDigest = Server->GetLayoutDigest(); N.Sequence = 1; N.PageVersions.Init(1, Shards);
     Client->OnRep_Network();
     TestTrue(TEXT("client built cells from the descriptor"), Client->GetCellWorld().GetCellCount() > 0 && !Client->bNetworkError);
@@ -407,7 +414,7 @@ bool FERCellNetTransactionTest::RunTest(const FString& Parameters)
     AddExpectedError(TEXT("ER_BLOCK_NET_INCOMPATIBLE descriptor"), EAutomationExpectedErrorFlags::Contains, 1);
     Client->OnRep_Network();
     TestTrue(TEXT("protocol mismatch fails closed"), Client->bNetworkError);
-    N.Epoch=4;N.Protocol=43;N.BlockCount=8000001;
+    N.Epoch=4;N.Protocol=50;N.BlockCount=8000001;
     AddExpectedError(TEXT("ER_BLOCK_NET_INCOMPATIBLE descriptor"),EAutomationExpectedErrorFlags::Contains,1);
     Client->OnRep_Network();
     TestTrue(TEXT("ordinary rooms retain the 8M descriptor limit"),Client->bNetworkError);

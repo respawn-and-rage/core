@@ -57,6 +57,7 @@ at acquisition. Keep per-asset provenance in each private repository and in-game
 | --- | --- | --- |
 | Paragon characters | Epic, Fab | Private; derivatives included. Fab forbids standalone redistribution. |
 | Fitted FPS rig | Derived from Mercenary (Waveforce Studio) | Private; keeps provenance. |
+| Twinmotion Materials Pack | Owner's Fab library | Private owned derivatives; source package provenance in `SourceAssets/SharedMaterials/catalog.json`. |
 | Factory Environment | Owner's FactoryEnvironmentCollect | Private; terms not inspected. |
 | Interactive Smoke, Low Poly Weapons | Fab | Private; fixture and legacy sources. |
 | Content Examples effects, UE templates | Epic | Private; retain Epic notices. |
@@ -73,8 +74,10 @@ at acquisition. Keep per-asset provenance in each private repository and in-game
   autosaves and Git/LFS.
 - `scripts/audit-assets.py` reads package dependencies without changes. An Asset Registry
   candidate is not proof that something is disposable.
+- Production maps use the owned shared Twinmotion derivatives. The raw Fab import
+  is optional and can be retired with `scripts/retire_twinmotion_pack.py` in Unreal.
 - Delete assets only through Unreal, after an outside-reference check and a verified rollback
   outside the project. Never prune maps, weapons or LFS implicitly. Keep unrelated work.
-- Removed families stay removed: Mercenary, Phase, Murdock, retired levels, `ParagonStaging`, the Fire Training warehouse kit and wet concrete.
+- Removed families stay removed: Mercenary, Phase, Murdock, retired levels, `ParagonStaging`, Village exterior trees, the Fire Training warehouse kit and wet concrete.
   Do not regenerate deleted sources during routine setup; old scripts in `scripts/legacy` need
   archived inputs.

@@ -306,7 +306,7 @@ bool BuildRooms(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERProc
             const FVector XY(SX*V.Size.X*.22f,SY*V.Size.Y*.22f,0);
             L.RoomLightPoints.Add(V.Center+XY+FVector(0,0,V.Upper ? 250:H-60));
             if(V.Upper)L.RoomLightPoints.Add(V.Center+XY+FVector(0,0,620));
-            if(R.LampSurface)Box(V.Center+XY+FVector(0,0,V.Height-12),{90,18,8},R.LampSurface,FRotator::ZeroRotator,true);
+            if(R.LampSurface)Box(V.Center+XY+FVector(0,0,V.Height-5),{60,60,4},R.LampSurface,FRotator::ZeroRotator,true);
         }
         for(int32 I=0;I<V.Polygon.Num();++I)
         {
@@ -403,13 +403,14 @@ bool BuildRooms(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERProc
             const FVector Inward=-Side*((A.X+D.X)*.5f)+FVector(0,0,H*.5f-(A.Y+D.Y)*.5f);
             const bool Roof=I>=3 && I<=5;
             Face(E.Start+P,E.End+P,E.End+Q,E.Start+Q,I==0 ? Theme.Floor.Get():Roof ? Theme.Ceiling.Get():Theme.Wall.Get(),Inward,Roof);
+            L.RoomShell.Last().CorridorFloor=I==0;
         }
         const int32 Lamps=FMath::Max(1,FMath::CeilToInt(FVector::Dist2D(E.Start,E.End)/600));
         for(int32 I=0;I<Lamps;++I)
         {
             const FVector P=FMath::Lerp(E.Start,E.End,(I+.5f)/Lamps);
             L.RoomLightPoints.Add(P+FVector(0,0,H-65));
-            if(R.LampSurface)Box(P+FVector(0,0,H-12),{80,18,8},R.LampSurface,Dir.Rotation(),true);
+            if(R.LampSurface)Box(P+FVector(0,0,H-5),{60,60,4},R.LampSurface,Dir.Rotation(),true);
         }
     }
     int32 CoverId=0;
@@ -595,20 +596,43 @@ bool BuildRooms(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERProc
 void BuildRoomsShell(AERProceduralMap* Map,const FERProceduralLayout& L,TArray<TObjectPtr<UDynamicMeshComponent>>& Components)
 {
     using namespace UE::Geometry;
-    struct FGroup { UMaterialInterface* Surface; bool Roof; FDynamicMesh3 Mesh; };
+    // Keep the original collision prisms. Separate their visible walkable faces
+    // at floor joins, giving solid landings priority over the corridor and room shell.
+    class FFloorJoinRenderOffset final : public IRenderMeshPostProcessor
+    {
+    public:
+        TMap<int32, double> Offsets;
+        void ProcessMesh(const FDynamicMesh3& Mesh, FDynamicMesh3& OutRenderMesh) override
+        {
+            OutRenderMesh=Mesh;
+            for(const auto& Offset:Offsets)
+            {
+                FVector Position=OutRenderMesh.GetVertex(Offset.Key);
+                Position.Z+=Offset.Value;
+                OutRenderMesh.SetVertex(Offset.Key,Position);
+            }
+        }
+    };
+    struct FGroup
+    {
+        UMaterialInterface* Surface;
+        bool Roof;
+        FDynamicMesh3 Mesh;
+        TMap<int32,double> RenderOffsets;
+    };
     TArray<FGroup> Groups;
     for(const auto& F:L.RoomShell)
     {
         int32 G=Groups.IndexOfByPredicate([&](const FGroup& V){return V.Surface==F.Surface && V.Roof==F.Roof;});
-        if(G==INDEX_NONE){G=Groups.Add({F.Surface,F.Roof,FDynamicMesh3()});Groups[G].Mesh.EnableAttributes();}
+        if(G==INDEX_NONE){G=Groups.Add({F.Surface,F.Roof,FDynamicMesh3(),{}});Groups[G].Mesh.EnableAttributes();}
         auto& Mesh=Groups[G].Mesh;auto* Normals=Mesh.Attributes()->PrimaryNormals();auto* UVs=Mesh.Attributes()->PrimaryUV();
         TArray<FVector> Front{F.A,F.B,F.C};if(!F.D.Equals(F.C,.001) && !F.D.Equals(F.A,.001))Front.Add(F.D);
         const FVector N=FVector::CrossProduct(Front[1]-Front[0],Front[2]-Front[0]).GetSafeNormal();
         TArray<FVector> Back;for(const auto P:Front)Back.Add(P-N*20);
-        auto Polygon=[&](const TArray<FVector>& Points,FVector Normal)
+        auto Polygon=[&](const TArray<FVector>& Points,FVector Normal,double RenderOffset=0)
         {
             TArray<int32> V,NE,UV;const FVector U=(Points[1]-Points[0]).GetSafeNormal(),D=FVector::CrossProduct(Normal,U);
-            for(const auto P:Points){V.Add(Mesh.AppendVertex(P));NE.Add(Normals->AppendElement(FVector3f(Normal)));UV.Add(UVs->AppendElement(FVector2f(FVector::DotProduct(P,U),FVector::DotProduct(P,D))/100));}
+            for(const auto P:Points){V.Add(Mesh.AppendVertex(P));if(RenderOffset!=0)Groups[G].RenderOffsets.Add(V.Last(),RenderOffset);NE.Add(Normals->AppendElement(FVector3f(Normal)));UV.Add(UVs->AppendElement(FVector2f(FVector::DotProduct(P,U),FVector::DotProduct(P,D))/100));}
             for(int32 I=1;I<Points.Num()-1;++I)
             {
                 // Unreal's visible winding is edge2 x edge1.
@@ -616,7 +640,7 @@ void BuildRoomsShell(AERProceduralMap* Map,const FERProceduralLayout& L,TArray<T
                 if(Tri>=0){Normals->SetTriangle(Tri,FIndex3i(NE[0],NE[I+1],NE[I]));UVs->SetTriangle(Tri,FIndex3i(UV[0],UV[I+1],UV[I]));}
             }
         };
-        Polygon(Front,N);Algo::Reverse(Back);Polygon(Back,-N);Algo::Reverse(Back);
+        Polygon(Front,N,N.Z>.9 ? (F.CorridorFloor ? -.2 : -.4) : 0);Algo::Reverse(Back);Polygon(Back,-N);Algo::Reverse(Back);
         for(int32 I=0;I<Front.Num();++I)
         {
             const int32 J=(I+1)%Front.Num();const TArray<FVector> Side{Front[J],Front[I],Back[I],Back[J]};
@@ -631,6 +655,12 @@ void BuildRoomsShell(AERProceduralMap* Map,const FERProceduralLayout& L,TArray<T
         Part->SetDeferredCollisionUpdatesEnabled(true,false);Part->SetComplexAsSimpleCollisionEnabled(true,false);
         Part->SetCollisionProfileName(TEXT("BlockAll"));Part->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
         Part->SetMaterial(0,G.Surface);if(G.Roof)Part->ComponentTags.Add(TEXT("ERTemplateRoof"));
+        if(!G.RenderOffsets.IsEmpty())
+        {
+            auto Processor=MakeUnique<FFloorJoinRenderOffset>();
+            Processor->Offsets=MoveTemp(G.RenderOffsets);
+            Part->SetRenderMeshPostProcessor(MoveTemp(Processor));
+        }
         Part->RegisterComponent();Part->SetMesh(MoveTemp(G.Mesh));Part->UpdateCollision(false);Components.Add(Part);
     }
 }

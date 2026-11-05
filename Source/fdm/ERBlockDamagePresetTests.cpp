@@ -1,4 +1,5 @@
 #include "ERBlockCombat.h"
+#include "ERMapTheme.h"
 #include "Misc/AutomationTest.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -13,8 +14,9 @@ bool FERBlockDamagePresetTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("native preset valid"), Native->IsValidCatalog());
     const auto* Saved = LoadObject<UERBlockMaterialCatalog>(nullptr, TEXT("/Game/EclipseRecoil/Art/Destruction/DA_ER_BlockMaterials.DA_ER_BlockMaterials"));
     TestNotNull(TEXT("saved project catalog"), Saved);
-    const TCHAR* Surfaces[] = {TEXT("M_ER_PBR_Plaster001"),TEXT("M_ER_PBR_red_brick_03"),TEXT("M_ER_PBR_concrete_wall_006"),TEXT("M_ER_PBR_wood_planks"),
-        TEXT("M_ER_PBR_stone_wall_02"),TEXT("M_ER_PBR_rusty_metal_04"),TEXT("M_ER_Glass")};
+    const auto* Shared=LoadObject<UERMapSurfaceLibrary>(nullptr,TEXT("/Game/EclipseRecoil/Art/SharedMaterials/DA_SharedMapSurfaces"));
+    const TCHAR* Surfaces[] = {TEXT("MI_PlasterCoating02"),TEXT("MI_BrickClean05"),TEXT("MI_BareConcrete03"),TEXT("MI_OldPlanks"),
+        TEXT("MI_StoneWall01"),TEXT("MI_CortenSteel01"),TEXT("MI_Glass_Clear")};
     const TCHAR* Decals[] = {TEXT("M_ER_BlockImpact_Drywall"),TEXT("M_ER_BlockImpact_Brick"),TEXT("M_ER_BlockImpact_Concrete")};
     for (int32 I = 0; I < 7; ++I)
         for (const auto* Catalog : {Native, Saved})
@@ -24,7 +26,7 @@ bool FERBlockDamagePresetTest::RunTest(const FString& Parameters)
             if (!TestNotNull(TEXT("profile for every ID"), P)) continue;
             TestTrue(FString::Printf(TEXT("preset values for ID %d"), I), P->MaxHealth == HP[I] && P->BulletDamageScale == Bullet[I] && P->ExplosionDamageScale == Blast[I]);
             if (Catalog != Saved) continue;
-            TestTrue(FString::Printf(TEXT("surface kept for ID %d"), I), P->Surface && P->Surface->GetName() == Surfaces[I]);
+            TestTrue(FString::Printf(TEXT("shared fallback surface for ID %d"), I), Shared && Shared->Contains(P->Surface) && P->Surface->GetName() == Surfaces[I]);
             if (I < 3) TestTrue(FString::Printf(TEXT("decal kept for ID %d"), I), P->ImpactDecal && P->ImpactDecal->GetName() == Decals[I]);
         }
 

@@ -92,6 +92,12 @@ https://ambientcg.com
 https://creativecommons.org/publicdomain/zero/1.0/
 
 AUDIO & MUSIC
+Glass Break — unfa. CC0 1.0. Trimmed the first 330 ms and converted to mono.
+https://freesound.org/people/unfa/sounds/221528/
+https://creativecommons.org/publicdomain/zero/1.0/
+glass shatter.wav — datasoundsample. Creative Commons Attribution 4.0. Converted to mono.
+https://freesound.org/people/datasoundsample/sounds/41348/
+https://creativecommons.org/licenses/by/4.0/
 RR-Menu-Loop — supplied by the project owner for the game menu.
 Sonniss GDC 2024 audio bundle — grenade1.wav and smoke_1.wav, supplied by the project owner.
 Adapted mono conversion, timing and smoke fade.

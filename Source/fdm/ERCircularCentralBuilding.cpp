@@ -16,9 +16,11 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
     L.CircularArena=true;L.GradedTerrain=true;L.LayoutSymmetry=EERTemplateSymmetry::Mirror;
     const float Diameter=T.SizingTeamSize>0 ? T.SizingArena.X:7600;
     if(!FMath::IsFinite(Diameter) || Diameter<3500 || Diameter>18000)return false;
-    const float Radius=Diameter*.5f,Stride=320;
-    L.ArenaSize={Diameter,Diameter,2000};
     L.CrossingRule=CrossingOverride ? EERCrossingRule(CrossingOverride):EERCrossingRule(1+HashCombineFast(uint32(Choice),0x43524f53u)%3);
+    const float Radius=Diameter*.5f,Stride=320;
+    const bool Oval=L.CrossingRule==EERCrossingRule::ClimbableWall;
+    const float RadiusX=Radius*(Oval ? .9f:1.f),RadiusY=Radius*(Oval ? (1.f/.9f):1.f);
+    L.ArenaSize={2*RadiusX,2*RadiusY,2000};
     L.CentralShape=HashCombineFast(uint32(Choice),0x53484150u)%4;
     L.CentralHill=(HashCombineFast(uint32(Choice),0x48494c4cu)&1)!=0;
     const float W=Pick(V.BuildingWidth.X,V.BuildingWidth.Y),D=Pick(V.BuildingDepth.X,V.BuildingDepth.Y);
@@ -29,31 +31,35 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
     // H profile: retain a centered neck, rather than moving one team's wing.
     const float MinI=L.CentralShape==1 ? -Neck*.5f:InnerMin,MaxI=L.CentralShape==1 ? Neck*.5f:InnerMax;
     const float CommonMin=FMath::Max(MinI,OuterMin),CommonMax=FMath::Min(MaxI,OuterMax),HallX=(CommonMin+CommonMax)*.5f;
-    const float SideRoom=FMath::Max(0.f,float(FMath::Sqrt(FMath::Max(0.f,FMath::Square(Radius-140)-FMath::Square(D*.5f+260)))-W*.5f-260));
-    const float BuildingX=L.CentralHill ? 0:-FMath::Min3(Radius*.32f,1500.f,SideRoom);
+    const float SideY=(D*.5f+260)/(RadiusY-140);
+    const float SideRoom=FMath::Max(0.f,(RadiusX-140)*FMath::Sqrt(FMath::Max(0.f,1-FMath::Square(SideY)))-W*.5f-260);
+    const float BuildingX=L.CentralHill ? 0:-FMath::Min3(RadiusX*.32f,1500.f,SideRoom);
     L.BuildingFloors=Geometry.RandRange(V.MinFloors,V.MaxFloors);
     L.CentralBuildingSize={W,D,L.BuildingFloors*Stride};
     L.HillHeight=FMath::Min(320.f,Radius*.065f);L.HillFalloff=FMath::Max(650.f,Radius*.38f);L.HillPlateau=Radius*.10f;
-    const float HillX=FMath::Min(Radius-250,FMath::Max(Radius*.48f,BuildingX+W*.5f+180+L.HillPlateau+200));
+    const float HillX=FMath::Min(RadiusX-250,FMath::Max(RadiusX*.48f,BuildingX+W*.5f+180+L.HillPlateau+200));
     L.HillCenter={L.CentralHill ? 0:HillX,0,0};
-    const float Base=L.CentralHill ? L.HillHeight:0;
+    constexpr float FloorThickness=5;
+    const float Grade=L.CentralHill ? L.HillHeight:0;
+    const float Base=Grade+FloorThickness;
     L.CentralBuildingCenter={BuildingX,0,Base};
-    L.TerrainPads.Add(FBox(FVector(BuildingX-W*.5f,-D*.5f,Base),FVector(BuildingX+W*.5f,D*.5f,Base)));
+    L.TerrainPads.Add(FBox(FVector(BuildingX-W*.5f,-D*.5f,Grade),FVector(BuildingX+W*.5f,D*.5f,Grade)));
     auto Surface=[&](const TArray<TObjectPtr<UMaterialInterface>>& Palette,uint32 Salt)->UMaterialInterface*
     {return Palette.IsEmpty() ? nullptr:Palette[HashCombineFast(uint32(Seed),Salt)%Palette.Num()].Get();};
     L.GroundSurface=Surface(V.GroundSurfaces,0x47524f55u);
-    const auto MainMaterial=Geometry.RandRange(0,1)!=0 ? EERBlockMaterial::Brick:EERBlockMaterial::Concrete;
+    constexpr auto MainMaterial=EERBlockMaterial::Concrete;
+    const auto ScreenMaterial=Geometry.RandRange(0,1)!=0 ? EERBlockMaterial::Brick : EERBlockMaterial::Concrete;
     auto Box=[&](FVector Center,FVector Size,EERBlockMaterial Material,bool Fixed=false,bool Pair=true,bool Deck=false)->FERMapTemplatePiece&
     {
         auto& P=Pieces.AddDefaulted_GetRef();P.Center=Center;P.Size=Size;P.Material=Material;P.Destructible=!Fixed;P.Mirrored=Pair;P.WalkableSurface=Deck;
         auto* Finish=Material==EERBlockMaterial::Metal ? (Deck && V.DeckSurface ? V.DeckSurface.Get():V.SteelSurface.Get()):
             Material==EERBlockMaterial::Brick ? Surface(V.BrickSurfaces,0x42524943u):Material==EERBlockMaterial::Wood ? Surface(V.WoodSurfaces,0x574f4f44u):Surface(V.ConcreteSurfaces,0x434f4e43u);
-        if(Fixed)P.FixedSurface=Finish;else P.CellSurface=Finish;return P;
+        if(Fixed)P.FixedSurface=Finish;else if(Material!=EERBlockMaterial::Glass)P.CellSurface=Finish;return P;
     };
     auto BuildingBox=[&](FVector P,FVector Size,EERBlockMaterial Material,bool Fixed=false,bool Pair=true,bool Deck=false)->FERMapTemplatePiece&
     {
         auto& Piece=Box(P+L.CentralBuildingCenter,Size,Material,Fixed,Pair,Deck);
-        const float Bottom=P.Z-Size.Z*.5f;Piece.Anchored=Bottom>0 && FMath::IsNearlyZero(FMath::Fmod(Bottom,Stride),.01f);return Piece;
+        const float Bottom=P.Z-Size.Z*.5f;Piece.Anchored=Bottom>=0 && FMath::IsNearlyZero(FMath::Fmod(Bottom,Stride),.01f);return Piece;
     };
     auto Mate=[](FVector P){return FVector(P.X,-P.Y,P.Z);};
     auto GroundPath=[&](FVector2D A,FVector2D B)
@@ -65,8 +71,17 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
     {for(const auto& Point:Leg)if(Path.IsEmpty() || !Path.Last().Equals(Point,.01))Path.Add(Point);};
     const float DoorY=-D*.5f+180,StairX=CommonMin+150,StairStart=-D*.5f+400,StairEnd=StairStart+480;
     const FBox2D Hole({StairX-110,StairStart-20},{StairX+110,StairEnd});
-    const FBox2D WallWell({HallX-110,-250},{HallX+110,0});
+    constexpr int32 WallStairSteps=17;
+    // Above the maximum climb plus the default jump apex from level ground.
+    constexpr float WallHeight=WallStairSteps*20.f;
+    constexpr float WallStairStart=-20.f-WallStairSteps*30.f;
     const TArray<FBox2D> Footprints{FBox2D({OuterMin,-D*.5f},{OuterMax,-Band}),FBox2D({MinI,-Band},{MaxI,0})};
+    for(const auto& Rect:Footprints)
+    {
+        const FVector2D Center=Rect.GetCenter(),Size=Rect.GetSize();
+        BuildingBox({Center.X,Center.Y,-FloorThickness*.5f},{Size.X,Size.Y,FloorThickness},
+            EERBlockMaterial::Concrete,true,true,true);
+    }
     for(const auto& Rect:Footprints)for(int32 Copy=0;Copy<2;++Copy)
     {
         const FBox Bounds(FVector(Rect.Min,0)+L.CentralBuildingCenter,FVector(Rect.Max,L.BuildingFloors*Stride)+L.CentralBuildingCenter);
@@ -79,40 +94,76 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
     TArray<uint8> Occupied;Occupied.Init(0,NX*2);
     for(int32 J=0;J<2;++J)for(int32 I=0;I<NX;++I)
         Occupied[J*NX+I]=(X[I]+X[I+1])*.5f>Footprints[J].Min.X-.01 && (X[I]+X[I+1])*.5f<Footprints[J].Max.X+.01 ? 1:0;
-    auto Wall=[&](bool AlongX,float At,float Lo,float Hi,float FloorZ,bool Door)
+    // The upper facade sits behind the edge of the ground-floor slab.
+    constexpr float TerraceDepth=240;
+    int32 TerraceBay=INDEX_NONE;
+    for(int32 I=0;I<NX;++I)
+        if(Occupied[I] && (TerraceBay==INDEX_NONE || X[I+1]-X[I]>X[TerraceBay+1]-X[TerraceBay]))TerraceBay=I;
+    auto Wall=[&](bool AlongX,float At,float Lo,float Hi,float FloorZ,bool Door,bool Front=false)
     {
         if(Hi-Lo<1)return;
-        auto Part=[&](float A,float B,float Bottom,float Top)
+        auto Part=[&](float A,float B,float Bottom,float Top,EERBlockMaterial Material=EERBlockMaterial::Concrete)
         {
             if(B-A<1 || Top-Bottom<1)return;
-            BuildingBox(AlongX ? FVector((A+B)*.5f,At,FloorZ+(Bottom+Top)*.5f):FVector(At,(A+B)*.5f,FloorZ+(Bottom+Top)*.5f),AlongX ? FVector(B-A,20,Top-Bottom):FVector(20,B-A,Top-Bottom),MainMaterial);
+            BuildingBox(AlongX ? FVector((A+B)*.5f,At,FloorZ+(Bottom+Top)*.5f):FVector(At,(A+B)*.5f,FloorZ+(Bottom+Top)*.5f),AlongX ? FVector(B-A,20,Top-Bottom):FVector(20,B-A,Top-Bottom),Material);
         };
-        const bool Window=!Door && Hi-Lo>=500;
+        const bool Window=!Door && Hi-Lo>=450;
         if(Door || Window)
         {
-            const float Center=Door ? DoorY:(Lo+Hi)*.5f,Half=Door ? 120:90,Sill=Door ? 0:90;
-            Part(Lo,Center-Half,0,300);Part(Center+Half,Hi,0,300);Part(Center-Half,Center+Half,0,Sill);Part(Center-Half,Center+Half,240,300);
+            const float Center=Door && !AlongX ? DoorY:(Lo+Hi)*.5f;
+            const float Half=Door ? 120 : Front ? FMath::Min(300.f,(Hi-Lo)*.37f) : FMath::Min(160.f,(Hi-Lo)*.32f);
+            const float Sill=Door ? 0 : Front ? 30 : 85;
+            const float Head=Door ? 240 : Front ? 270 : 245;
+            Part(Lo,Center-Half,0,300);
+            Part(Center+Half,Hi,0,300);
+            Part(Center-Half,Center+Half,0,Sill);
+            Part(Center-Half,Center+Half,Head,300);
+            if(Window)
+            {
+                const int32 Panes=Front ? FMath::CeilToInt32(2*Half/200) : 1;
+                const float Left=Center-Half,Pitch=2*Half/Panes;
+                for(int32 Pane=0;Pane<Panes;++Pane)
+                {
+                    const float A=Left+Pane*Pitch,B=Left+(Pane+1)*Pitch;
+                    Part(A+(Pane>0 ? 5 : 0),B-(Pane+1<Panes ? 5 : 0),Sill,Head,EERBlockMaterial::Glass);
+                    if(Pane+1<Panes)Part(B-5,B+5,Sill,Head);
+                }
+            }
         }
         else Part(Lo,Hi,0,300);
-        if(FMath::IsNearlyEqual(FloorZ,(L.BuildingFloors-1)*Stride))
+        if(L.BuildingFloors==1)
             BuildingBox(AlongX ? FVector((Lo+Hi)*.5f,At,L.BuildingFloors*Stride+50):FVector(At,(Lo+Hi)*.5f,L.BuildingFloors*Stride+50),AlongX ? FVector(Hi-Lo,20,100):FVector(20,Hi-Lo,100),MainMaterial);
     };
     for(int32 Floor=0;Floor<L.BuildingFloors;++Floor)
     {
         const float Z=Floor*Stride;
+        const bool StairAbove=Floor+1<L.BuildingFloors || L.BuildingFloors==1;
+        const float FrontY=Y[0]+(Floor>0 ? TerraceDepth : 0.f);
         for(int32 J=0;J<2;++J)for(int32 I=0;I<NX;++I)if(Occupied[J*NX+I])
         {
             const bool Bottom=J==0 || !Occupied[(J-1)*NX+I],Top=J==0 && !Occupied[(J+1)*NX+I];
-            if(Bottom)Wall(true,Y[J]+10,X[I],X[I+1],Z,false);
+            if(Bottom)
+            {
+                const bool TerraceDoor=Floor==1 && J==0 && I==TerraceBay;
+                const float Edge=J==0 ? FrontY : Y[J];
+                Wall(true,Edge+10,X[I],X[I+1],Z,TerraceDoor,J==0);
+                if(TerraceDoor)
+                {
+                    const float DoorX=BuildingX+(X[I]+X[I+1])*.5f;
+                    TArray<FVector> Terrace{{DoorX,Edge-130,Base+Z+100},{DoorX,Edge+65,Base+Z+100}};
+                    L.RoomAccessRoutes.Add(Terrace);for(auto& Point:Terrace)Point=Mate(Point);L.RoomAccessRoutes.Add(Terrace);
+                }
+            }
             if(Top)Wall(true,Y[J+1]-10,X[I],X[I+1],Z,false);
-            const float Lo=Y[J]+(Bottom ? 20:0),Hi=Y[J+1]-(Top ? 20:0);
-            if(I==0 || !Occupied[J*NX+I-1])Wall(false,X[I]+10,Lo,Hi,Z,J==0 && FMath::IsNearlyEqual(X[I],OuterMin));
+            const float Lo=(J==0 ? FrontY : Y[J])+(Bottom ? 20:0),Hi=Y[J+1]-(Top ? 20:0);
+            if(I==0 || !Occupied[J*NX+I-1])Wall(false,X[I]+10,Lo,Hi,Z,Floor==0 && J==0 && FMath::IsNearlyEqual(X[I],OuterMin));
             if(I==NX-1 || !Occupied[J*NX+I+1])Wall(false,X[I+1]-10,Lo,Hi,Z,false);
         }
         // A room wing beside the circulation spine, with a real side doorway.
-        if(CommonMax-HallX>=650)
+        if(OuterMax-HallX>=540)
         {
-            const float At=HallX+320,Gap=DoorY+300,Lo=-D*.5f+20,Hi=-Band;
+            const float At=HallX+320,Gap=DoorY+300,Lo=FrontY+20;
+            const float Hi=At>MaxI ? -Band-20 : -Band;
             if(Gap+110<Hi && Gap-110>Lo)
             {
                 BuildingBox({At,(Lo+Gap-110)*.5f,Z+150},{15,Gap-110-Lo,300},MainMaterial);
@@ -124,67 +175,84 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
         // Deck rectangles partition the union and subtract the actual stairwell.
         for(const auto& Rect:Footprints)
         {
-            TArray<double> CX{Rect.Min.X,Rect.Max.X},CY{Rect.Min.Y,Rect.Max.Y};
-            for(double Cut:{Hole.Min.X,Hole.Max.X})if(Cut>Rect.Min.X && Cut<Rect.Max.X)CX.AddUnique(Cut);
-            for(double Cut:{Hole.Min.Y,Hole.Max.Y})if(Cut>Rect.Min.Y && Cut<Rect.Max.Y)CY.AddUnique(Cut);
-            const bool WallHeadroom=Floor==0 && L.CrossingRule==EERCrossingRule::ClimbableWall;
-            if(WallHeadroom)
+            const double DeckFront=FMath::Max(Rect.Min.Y,double(FrontY));
+            TArray<double> CX{Rect.Min.X,Rect.Max.X},CY{DeckFront,Rect.Max.Y};
+            if(StairAbove)
             {
-                for(double Cut:{WallWell.Min.X,WallWell.Max.X})if(Cut>Rect.Min.X && Cut<Rect.Max.X)CX.AddUnique(Cut);
-                for(double Cut:{WallWell.Min.Y,WallWell.Max.Y})if(Cut>Rect.Min.Y && Cut<Rect.Max.Y)CY.AddUnique(Cut);
+                for(double Cut:{Hole.Min.X,Hole.Max.X})if(Cut>Rect.Min.X && Cut<Rect.Max.X)CX.AddUnique(Cut);
+                for(double Cut:{Hole.Min.Y,Hole.Max.Y})if(Cut>DeckFront && Cut<Rect.Max.Y)CY.AddUnique(Cut);
             }
             CX.Sort();CY.Sort();
             for(int32 IX=1;IX<CX.Num();++IX)for(int32 IY=1;IY<CY.Num();++IY)
             {
                 const FVector2D Mid((CX[IX-1]+CX[IX])*.5,(CY[IY-1]+CY[IY])*.5);
-                if(Hole.IsInside(Mid) || (WallHeadroom && WallWell.IsInside(Mid)))continue;
+                if(StairAbove && Hole.IsInside(Mid))continue;
                 BuildingBox({Mid.X,Mid.Y,Z+Stride-10},{CX[IX]-CX[IX-1],CY[IY]-CY[IY-1],20},EERBlockMaterial::Metal,true,true,true);
             }
         }
-        TArray<FVector> Stair{{BuildingX+StairX,StairStart-100,Base+Z+100}};
-        for(int32 Step=0;Step<16;++Step)
+        if(StairAbove)
         {
-            const float At=StairStart+(Step+.5f)*30,Top=(Step+1)*20;
-            BuildingBox({StairX,At,Z+Top-10},{180,30,20},EERBlockMaterial::Metal,true,true,true);
-            Stair.Add({BuildingX+StairX,At,Base+Z+Top+120});
+            TArray<FVector> Stair{{BuildingX+StairX,StairStart-100,Base+Z+100}};
+            for(int32 Step=0;Step<16;++Step)
+            {
+                const float At=StairStart+(Step+.5f)*30,Top=(Step+1)*20;
+                BuildingBox({StairX,At,Z+Top-10},{180,30,20},EERBlockMaterial::Metal,true,true,true);
+                Stair.Add({BuildingX+StairX,At,Base+Z+Top+120});
+            }
+            Stair.Add({BuildingX+StairX,StairEnd+100,Base+Z+Stride+100});
+            L.StairRoutes.Add(Stair);for(auto& P:Stair)P=Mate(P);L.StairRoutes.Add(Stair);
         }
-        Stair.Add({BuildingX+StairX,StairEnd+100,Base+Z+Stride+100});
-        L.StairRoutes.Add(Stair);for(auto& P:Stair)P=Mate(P);L.StairRoutes.Add(Stair);
-        TArray<FVector> Entry{{BuildingX+OuterMin-100,DoorY,Base+Z+100},{BuildingX+OuterMin+160,DoorY,Base+Z+100}};
-        L.RoomAccessRoutes.Add(Entry);for(auto& P:Entry)P=Mate(P);L.RoomAccessRoutes.Add(Entry);
-        if(Floor>0)
+        if(Floor==0)
         {
-            BuildingBox({OuterMin-90,DoorY,Z-10},{180,400,20},EERBlockMaterial::Metal,true,true,true);
-            BuildingBox({OuterMin-170,DoorY,Z+50},{20,400,100},MainMaterial);
-            for(float Sign:{-1.f,1.f})BuildingBox({OuterMin-80,DoorY+Sign*190,Z+50},{160,20,100},MainMaterial);
+            TArray<FVector> Entry{{BuildingX+OuterMin-100,DoorY,Base+100},{BuildingX+OuterMin+160,DoorY,Base+100}};
+            L.RoomAccessRoutes.Add(Entry);for(auto& Point:Entry)Point=Mate(Point);L.RoomAccessRoutes.Add(Entry);
         }
+    }
+    if(L.BuildingFloors>1)
+    {
+        BuildingBox({(OuterMin+OuterMax)*.5f,Y[0]+10,Stride+50},{OuterMax-OuterMin,20,100},MainMaterial);
+        for(float SideX:{OuterMin+10,OuterMax-10})
+            BuildingBox({SideX,Y[0]+(TerraceDepth+20)*.5f,Stride+50},{20,TerraceDepth-20,100},MainMaterial);
+        L.FeatureNames.Add(TEXT("VillaTerraces"));
     }
     L.CentralEntrances.Emplace(FRotator(0,180,0),FVector(BuildingX+OuterMin,DoorY,Base));
     L.CentralEntrances.Emplace(FRotator(0,180,0),FVector(BuildingX+OuterMin,-DoorY,Base));
     // Enterable secondary buildings flank the lateral hill, with level pads.
-    float FlankX=L.CentralHill ? BuildingX+W*.5f+350:Radius*.48f;
+    float FlankX=L.CentralHill ? BuildingX+W*.5f+350:RadiusX*.48f;
     if(!L.CentralHill)
     {
-        const int32 Pairs=T.SizingTeamSize<3 ? 1:1+int32((uint32(Choice)>>2)&1);
-        const float HouseX=Radius*(T.SizingTeamSize==1 ? .60f:.55f);
+        const int32 Pairs=T.SizingTeamSize<3 ? 1:1+int32(HashCombineFast(uint32(Choice),0x484f5553u)&1u);
+        const float HouseX=RadiusX*(T.SizingTeamSize==1 ? .60f:.55f);
         for(int32 I=0;I<Pairs;++I)
         {
             const float HW=T.SizingTeamSize==1 ? 500:Pick(600,1000),HD=T.SizingTeamSize==1 ? 500:Pick(600,800);
-            const float HouseY=-Radius*(I ? .17f:T.SizingTeamSize==1 ? .35f:.48f);
+            const float HouseY=-RadiusY*(I ? .17f:T.SizingTeamSize==1 ? .35f:.48f);
             const FVector2D Center(HouseX,HouseY);const float H=CentralGroundHeight(L,Center);
-            if(FVector2D(HouseX+HW*.5f,HouseY-HD*.5f).Size()>Radius-100)return false;
+            const EERBlockMaterial HouseMaterial=((I+int32(HashCombineFast(uint32(Choice),0x4d41544cu)&1u))&1)!=0 ? EERBlockMaterial::Brick:EERBlockMaterial::Concrete;
+            const int32 HouseProfile=int32(HashCombineFast(uint32(Choice),uint32(I)+0x53484144u)%3u);
+            if(FMath::Square((HouseX+HW*.5f)/(RadiusX-100))+FMath::Square((HouseY-HD*.5f)/(RadiusY-100))>1)return false;
             for(int32 Copy=0;Copy<2;++Copy)
             {
                 const FVector C=Copy ? Mate(FVector(Center,H)):FVector(Center,H);
                 L.TerrainPads.Add(FBox(C-FVector(HW*.5f+180,HD*.5f+180,0),C+FVector(HW*.5f+180,HD*.5f+180,0)));
-                L.SecondaryStructures.Add({FTransform(C),{HW,HD,320},1,EERBlockMaterial::Brick,false,false});
+                L.SecondaryStructures.Add({FTransform(C),{HW,HD,320},1,HouseMaterial,false,false});
                 L.TownBuildings.Add(FBox(C-FVector(HW*.5f,HD*.5f,0),C+FVector(HW*.5f,HD*.5f,320)));
             }
-            Box({HouseX+HW*.5f-10,HouseY,H+150},{20,HD-40,300},EERBlockMaterial::Brick);
-            for(float Sign:{-1.f,1.f})Box({HouseX,HouseY+Sign*(HD*.5f-10),H+150},{HW,20,300},EERBlockMaterial::Brick);
-            for(float Sign:{-1.f,1.f})Box({HouseX-HW*.5f+10,HouseY+Sign*(HD+140)*.25f,H+150},{20,(HD-220)*.5f,300},EERBlockMaterial::Brick);
-            Box({HouseX-HW*.5f+10,HouseY,H+270},{20,180,60},EERBlockMaterial::Brick);
-            Box({HouseX,HouseY,H+310},{HW,HD,20},EERBlockMaterial::Brick,false,true,true);
+            Box({HouseX+HW*.5f-10,HouseY,H+150},{20,HD-40,300},HouseMaterial);
+            for(float Sign:{-1.f,1.f})Box({HouseX,HouseY+Sign*(HD*.5f-10),H+150},{HW,20,300},HouseMaterial);
+            for(float Sign:{-1.f,1.f})Box({HouseX-HW*.5f+10,HouseY+Sign*(HD+140)*.25f,H+150},{20,(HD-220)*.5f,300},HouseMaterial);
+            Box({HouseX-HW*.5f+10,HouseY,H+270},{20,180,60},HouseMaterial);
+            Box({HouseX,HouseY,H+310},{HW,HD,20},HouseMaterial,false,true,true);
+            if(HouseProfile==1)
+            {
+                for(float Sign:{-1.f,1.f})Box({HouseX,HouseY+Sign*(HD*.5f-15),H+350},{HW,30,60},HouseMaterial);
+                for(float Sign:{-1.f,1.f})Box({HouseX+Sign*(HW*.5f-15),HouseY,H+350},{30,HD-60,60},HouseMaterial);
+            }
+            else if(HouseProfile==2)
+            {
+                Box({HouseX-HW*.5f-100,HouseY,H+285},{180,290,20},EERBlockMaterial::Metal,true);
+                Box({HouseX-HW*.5f-180,HouseY,H+137.5f},{20,20,275},EERBlockMaterial::Metal,true);
+            }
             TArray<FVector> Entry{{HouseX-HW*.5f-100,HouseY,H+100},{HouseX,HouseY,H+100}};L.RoomAccessRoutes.Add(Entry);for(auto& P:Entry)P=Mate(P);L.RoomAccessRoutes.Add(Entry);
             FlankX=FMath::Min(FlankX,(BuildingX+FMath::Max(MaxI,OuterMax)+HouseX-HW*.5f)*.5f);
         }
@@ -215,23 +283,55 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
         L.SecondaryStructures.Add({FTransform(FVector(FlankX,0,FlankGround)),{2*AnnexHalfWidth,2*AnnexHalfDepth,320},1,EERBlockMaterial::Brick,false,false});
         L.FeatureNames.Add(TEXT("RailingCrossingAnnex"));
     }
+    // Recessed courtyard basins: 20cm at either entrance, 80cm in the centre.
+    // The terrain is carved below the solid floor; the water has no collision.
+    const FVector2D PoolCenter(BuildingX-W*.5f-520,-550);
+    const bool Pools=L.CentralHill && Radius>=2900 &&
+        (HashCombineFast(uint32(Choice),0x504f4f4cu)&4)!=0;
+    if(Pools)
+    {
+        for(float Side:{-1.f,1.f})
+        {
+            const FVector Center(PoolCenter.X,Side*PoolCenter.Y,Grade);
+            const FVector WaterCenter=Center;
+            const FVector WaterHalf(160,300,0);
+            L.PoolWater.Emplace(WaterCenter-WaterHalf,WaterCenter+WaterHalf);
+        }
+        Box(FVector(PoolCenter,Grade-90),{360,640,20},EERBlockMaterial::Concrete,true,true,true);
+        for(float Side:{-1.f,1.f})
+        {
+            Box(FVector(PoolCenter+FVector2D(Side*170,0),Grade-30),{20,640,100},EERBlockMaterial::Concrete,true);
+            Box(FVector(PoolCenter+FVector2D(0,Side*310),Grade-30),{320,20,100},EERBlockMaterial::Concrete,true);
+            Box(FVector(PoolCenter+FVector2D(0,Side*225),Grade-50),{320,150,60},EERBlockMaterial::Concrete,true,true,true);
+        }
+        L.FeatureNames.Add(TEXT("VillaPools"));
+    }
     // Small, varied cover groups; sample the north half and mirror every member.
     // Rear entries stay outside all return walls, even in the pocket profile.
-    for(int32 BandIndex=0;BandIndex<2;++BandIndex)for(float Sign:{-1.f,1.f})
+    const int32 CoverBands=2+int32(Radius>=4200 && (HashCombineFast(uint32(Choice),0x45585452u)&1u)!=0);
+    for(int32 BandIndex=0;BandIndex<CoverBands;++BandIndex)for(float Sign:{-1.f,1.f})
     {
-        const FVector2D P(Sign*Radius*(.55f+BandIndex*.20f)+Geometry.RandRange(-4,4)*10.f,-Radius*(.55f-BandIndex*.35f)+Geometry.RandRange(-4,4)*10.f);
+        const float XFraction=BandIndex==2 ? .25f:.55f+BandIndex*.20f;
+        const float YFraction=BandIndex==2 ? .75f:.55f-BandIndex*.35f;
+        const FVector2D P(Sign*RadiusX*XFraction+Geometry.RandRange(-4,4)*10.f,-RadiusY*YFraction+Geometry.RandRange(-4,4)*10.f);
         const float OutsideX=FMath::Abs(P.X-BuildingX)-W*.5f,OutsideY=FMath::Abs(P.Y)-D*.5f;
-        if((OutsideX<450 && OutsideY<450) || P.Size()>Radius-500 || FMath::Abs(P.X-FlankX)<600)continue;
+        const float PadHalf=450+Radius*.025f;
+        // Keep the pad's terrain blend clear of the straight flank approach.
+        const float EdgeMargin=FMath::Min(500.f,RadiusX*.2f);
+        if((OutsideX<450 && OutsideY<450) ||
+           FMath::Square(P.X/(RadiusX-EdgeMargin))+FMath::Square(P.Y/(RadiusY-EdgeMargin))>1 ||
+           FMath::Abs(P.X-FlankX)<PadHalf+235)continue;
+        if(Pools && FMath::Abs(P.X-PoolCenter.X)<850 && FMath::Abs(P.Y-PoolCenter.Y)<1000)continue;
         bool Clear=true;for(const auto& S:L.SecondaryStructures)Clear&=FMath::Abs(P.X-S.Frame.GetLocation().X)>S.Size.X*.5+650 || FMath::Abs(P.Y-S.Frame.GetLocation().Y)>S.Size.Y*.5+650;
         if(!Clear)continue;
         const float H=CentralGroundHeight(L,P);
-        const float PadHalf=450+Radius*.025f;
         for(float PairSign:{-1.f,1.f})L.TerrainPads.Add(FBox(FVector(P.X,PairSign*P.Y,H)-FVector(PadHalf,PadHalf,0),FVector(P.X,PairSign*P.Y,H)+FVector(PadHalf,PadHalf,0)));
         const int32 Kind=int32(HashCombineFast(uint32(Choice),uint32(BandIndex*2+(Sign>0 ? 1:0))+0x434f5645u)%5);
         const float Yaw=Geometry.RandRange(0,1)!=0 ? 90.f:0.f;
         const FTransform Group(FRotator(0,Yaw,0),FVector(P,H));
         const float Height=Geometry.RandRange(0,1)!=0 ? 150.f:180.f;
-        const EERBlockMaterial Material=Kind==4 ? EERBlockMaterial::Wood:Geometry.RandRange(0,1)!=0 ? EERBlockMaterial::Brick:EERBlockMaterial::Concrete;
+        const int32 PaletteIndex=(BandIndex*2+(Sign>0 ? 1:0)+int32(HashCombineFast(uint32(Choice),0x50414c54u)%3u))%3;
+        const EERBlockMaterial Material=PaletteIndex==0 ? EERBlockMaterial::Brick:PaletteIndex==1 ? EERBlockMaterial::Concrete:EERBlockMaterial::Wood;
         auto Member=[&](FVector Center,FVector Size)
         {auto& Piece=Box(Group.TransformPosition(Center),Size,Material);Piece.RotationYaw=Yaw;};
         const float Width=Geometry.RandRange(0,3)*60.f+240;
@@ -276,7 +376,7 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
     if(L.CrossingRule!=EERCrossingRule::OpenYard)
     {
         const bool Railing=L.CrossingRule==EERCrossingRule::FencedCrossings;
-        TArray<float> Cuts{-Radius+30,BuildingX+MinI,BuildingX+MinI+20,BuildingX+MaxI-20,BuildingX+MaxI,Radius-30};
+        TArray<float> Cuts{-RadiusX+30,BuildingX+MinI,BuildingX+MinI+20,BuildingX+MaxI-20,BuildingX+MaxI,RadiusX-30};
         if(Railing){Cuts.Add(FlankX-AnnexHalfWidth);Cuts.Add(FlankX+AnnexHalfWidth);}
         Cuts.Sort();
         for(int32 I=1;I<Cuts.Num();++I)
@@ -290,25 +390,36 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
             {
                 const float Lo=FMath::Lerp(A,B,float(J)/Count),Hi=FMath::Lerp(A,B,float(J+1)/Count),CX=(Lo+Hi)*.5f;
                 const float H=FMath::Max3(CentralGroundHeight(L,{Lo,0}),CentralGroundHeight(L,{Hi,0}),CentralGroundHeight(L,{CX,0}));
+                const bool InsideVilla=CX>BuildingX+MinI && CX<BuildingX+MaxI;
+                const float DividerBase=InsideVilla ? Base : 0;
+                const float DividerTop=InsideVilla ? Base+Stride-20 : H+WallHeight;
                 if(Railing)
-                    Box({CX,0,H+ERIndustrialFence::ModuleHeightCm*.5f},{Hi-Lo,12,ERIndustrialFence::ModuleHeightCm},EERBlockMaterial::Metal,true,false).PawnBarrier=true;
+                {
+                    const float Foundation=InsideVilla ? Base:H;
+                    Box({CX,0,Foundation+ERIndustrialFence::PlinthHeightCm*.5f},{Hi-Lo,12,ERIndustrialFence::PlinthHeightCm},EERBlockMaterial::Concrete,true,false);
+                    Box({CX,0,Foundation+ERIndustrialFence::PlinthHeightCm+ERIndustrialFence::ModuleHeightCm*.5f},{Hi-Lo,12,ERIndustrialFence::ModuleHeightCm},EERBlockMaterial::Metal,true,false).PawnBarrier=true;
+                }
                 else
-                    Box({CX,0,(H+120)*.5f},{Hi-Lo,40,H+120},EERBlockMaterial::Brick,false,false);
+                    Box({CX,0,(DividerBase+DividerTop)*.5f},{Hi-Lo,40,DividerTop-DividerBase},EERBlockMaterial::Brick,false,false).Anchored=InsideVilla;
             }
         }
     }
     // One permanent perimeter follows the terrain and ends at its visible top.
-    constexpr int32 BoundarySides=128;const float BoundaryRadius=Radius-20;
+    constexpr int32 BoundarySides=128;const float BoundaryRadiusX=RadiusX-20,BoundaryRadiusY=RadiusY-20;
     for(int32 I=0;I<BoundarySides/2;++I)
     {
-        const double A=-PI+(I+.5)*2*PI/BoundarySides;const float Length=2*BoundaryRadius*FMath::Tan(PI/BoundarySides)-.5f;
-        const FVector2D P(FMath::Cos(A)*BoundaryRadius,FMath::Sin(A)*BoundaryRadius);const float H=CentralGroundHeight(L,P);
-        auto& Plinth=Box(FVector(P,H+50),{Length,12,100},EERBlockMaterial::Concrete,true);Plinth.RotationYaw=FMath::RadiansToDegrees(A)+90;
-        auto& Fence=Box(FVector(P,H+100+ERIndustrialFence::ModuleHeightCm*.5f),{Length,12,ERIndustrialFence::ModuleHeightCm},EERBlockMaterial::Metal,true);Fence.RotationYaw=FMath::RadiansToDegrees(A)+90;Fence.PawnBarrier=true;
+        const double A=-PI+I*2*PI/BoundarySides,B=A+2*PI/BoundarySides;
+        const FVector2D Start(FMath::Cos(A)*BoundaryRadiusX,FMath::Sin(A)*BoundaryRadiusY);
+        const FVector2D End(FMath::Cos(B)*BoundaryRadiusX,FMath::Sin(B)*BoundaryRadiusY);
+        const FVector2D P=(Start+End)*.5;const float H=CentralGroundHeight(L,P);
+        const float Length=FVector2D::Distance(Start,End)-.5f;
+        const float Yaw=FMath::RadiansToDegrees(FMath::Atan2(End.Y-Start.Y,End.X-Start.X));
+        auto& Plinth=Box(FVector(P,H+50),{Length,12,100},EERBlockMaterial::Concrete,true);Plinth.RotationYaw=Yaw;
+        auto& Fence=Box(FVector(P,H+100+ERIndustrialFence::ModuleHeightCm*.5f),{Length,12,ERIndustrialFence::ModuleHeightCm},EERBlockMaterial::Metal,true);Fence.RotationYaw=Yaw;Fence.PawnBarrier=true;
     }
-    const float ScreenY=FMath::Min(-Radius+700,-D*.5f-180),ScreenHalf=500,ScreenGround=CentralGroundHeight(L,{0,ScreenY});
-    Box({0,ScreenY,ScreenGround+150},{1000,20,300},MainMaterial);L.FeatureNames.Add(TEXT("ScreenedSpawns"));
-    const float SpawnY=-Radius+250;
+    const float ScreenY=FMath::Min(-RadiusY+700,-D*.5f-180),ScreenHalf=500,ScreenGround=CentralGroundHeight(L,{0,ScreenY});
+    Box({0,ScreenY,ScreenGround+150},{1000,20,300},ScreenMaterial);L.FeatureNames.Add(TEXT("ScreenedSpawns"));
+    const float SpawnY=-RadiusY+250;
     for(int32 I=0;I<10;++I)
     {
         const FVector2D P((I%5-2)*150,SpawnY+(I/5)*160);L.AlphaSpawns.Emplace(FRotator(0,90,0),FVector(P,CentralGroundHeight(L,P)+100));
@@ -323,17 +434,6 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
     Append(North,GroundPath(Approach.Last(),{BuildingX+HallX,-300}));
     if(L.CrossingRule==EERCrossingRule::ClimbableWall)
     {
-        L.FeatureNames.Add(TEXT("WallCrossingStairs"));
-        TArray<FVector> Over{{BuildingX+HallX,-300,Base+100}};
-        for(int32 I=0;I<6;++I)
-        {
-            const float YStep=-200+(I+.5f)*30,Top=Base+(I+1)*20;
-            Box({BuildingX+HallX,YStep,Top*.5f},{180,30,Top},EERBlockMaterial::Concrete,true,true,true);
-            Over.Add({BuildingX+HallX,YStep,Top+120});
-        }
-        Over.Add({BuildingX+HallX,-10,Base+240});Over.Add({BuildingX+HallX,10,Base+240});
-        const auto Up=Over;for(int32 I=Up.Num()-3;I>=0;--I)Over.Add(Mate(Up[I]));
-        L.StairRoutes.Add(Over);L.ClimbPoints={{BuildingX+HallX,-200,Base+100},{BuildingX+HallX,200,Base+100}};
         L.CrossingRoutes.Add(North);auto South=North;for(auto& P:South)P=Mate(P);L.CrossingRoutes.Add(South);
         Patrol=North;
     }
@@ -351,18 +451,18 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
     // Follow the flank to the stairs or through the annex.
     TArray<FVector> Flank;
     Append(Flank,GroundPath({-ScreenHalf-150,ScreenY+100},{FlankX,-D*.5f-180}));
-    Append(Flank,GroundPath({FlankX,-D*.5f-180},{FlankX,WallDivision ? -300.f:0.f}));
+    Append(Flank,GroundPath({FlankX,-D*.5f-180},{FlankX,WallDivision ? WallStairStart-100:0.f}));
     if(WallDivision)
     {
-        TArray<FVector> Flight{{FlankX,-300,FlankGround+100}};
-        for(int32 Step=0;Step<6;++Step)
+        TArray<FVector> Flight{{FlankX,WallStairStart-100,FlankGround+100}};
+        for(int32 Step=0;Step<WallStairSteps;++Step)
         {
-            const float TreadY=-200+(Step+.5f)*30,Top=FlankGround+(Step+1)*20;
+            const float TreadY=WallStairStart+(Step+.5f)*30,Top=FlankGround+(Step+1)*20;
             Box({FlankX,TreadY,Top*.5f},{180,30,Top},EERBlockMaterial::Concrete,true,true,true);
             Flight.Add({FlankX,TreadY,Top+120});
         }
         const int32 LastTread=Flight.Num()-1;
-        Flight.Add({FlankX,-10,FlankGround+240});Flight.Add({FlankX,10,FlankGround+240});
+        Flight.Add({FlankX,-10,FlankGround+WallHeight+120});Flight.Add({FlankX,10,FlankGround+WallHeight+120});
         for(int32 I=LastTread;I>=0;--I){const auto Point=Mate(Flight[I]);Flight.Add(Point);}
         L.StairRoutes.Add(MoveTemp(Flight));
         L.FeatureNames.Add(TEXT("ExteriorWallCrossingStairs"));

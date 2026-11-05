@@ -75,7 +75,7 @@ double PlayableAreaM2(const FERProceduralLayout& L)
         }
         return FMath::Max(0.,L.ArenaSize.X*L.ArenaSize.Y-Excluded)/10000.;
     }
-    return L.CircularArena ? PI*FMath::Square(L.ArenaSize.X*.5)/10000.:L.ArenaSize.X*L.ArenaSize.Y/10000.;
+    return L.CircularArena ? PI*L.ArenaSize.X*L.ArenaSize.Y/40000.:L.ArenaSize.X*L.ArenaSize.Y/10000.;
 }
 namespace
 {
@@ -83,6 +83,14 @@ constexpr int32 Sectors=256;
 float Smooth(float T){T=FMath::Clamp(T,0.f,1.f);return T*T*(3-2*T);}
 float Field(const FERProceduralLayout& L,FVector2D P)
 {
+    for(const auto& Water:L.PoolWater)
+    {
+        const FVector Center=Water.GetCenter();
+        // Keep terrain below the solid pool floor, including triangle edges.
+        if(FMath::Abs(P.X-Center.X)<Water.GetExtent().X+45 &&
+           FMath::Abs(P.Y-Center.Y)<Water.GetExtent().Y+45)
+            return float(Center.Z-100);
+    }
     const FVector2D Building(L.CentralBuildingCenter);
     const FVector2D Half(L.CentralBuildingSize.X*.5+180,L.CentralBuildingSize.Y*.5+180);
     const FVector2D Outside(FMath::Max(0.,FMath::Abs(P.X-Building.X)-Half.X),FMath::Max(0.,FMath::Abs(P.Y)-Half.Y));
@@ -108,9 +116,10 @@ float Field(const FERProceduralLayout& L,FVector2D P)
 }
 FVector2D Vertex(const FERProceduralLayout& L,int32 Ring,int32 Sector)
 {
-    const int32 Rings=FMath::CeilToInt32(L.ArenaSize.X*.5/75);
-    const double Angle=2*PI*Sector/Sectors,R=L.ArenaSize.X*.5*Ring/Rings;
-    return FVector2D(FMath::Cos(Angle)*R,FMath::Sin(Angle)*R);
+    const int32 Rings=FMath::CeilToInt32(FMath::Max(L.ArenaSize.X,L.ArenaSize.Y)*.5/75);
+    const double Angle=2*PI*Sector/Sectors;
+    return FVector2D(FMath::Cos(Angle)*L.ArenaSize.X*.5*Ring/Rings,
+                     FMath::Sin(Angle)*L.ArenaSize.Y*.5*Ring/Rings);
 }
 float TriangleHeight(const FERProceduralLayout& L,FVector2D P,FVector2D A,FVector2D B,FVector2D C)
 {
@@ -122,12 +131,15 @@ float TriangleHeight(const FERProceduralLayout& L,FVector2D P,FVector2D A,FVecto
 float CentralGroundHeight(const FERProceduralLayout& L,FVector2D P)
 {
     if(P.IsNearlyZero())return Field(L,P);
-    double Angle=FMath::Atan2(P.Y,P.X);if(Angle<0)Angle+=2*PI;
+    const double YScale=L.ArenaSize.X/L.ArenaSize.Y;
+    const FVector2D NormalizedP(P.X,P.Y*YScale);
+    double Angle=FMath::Atan2(NormalizedP.Y,NormalizedP.X);if(Angle<0)Angle+=2*PI;
     const int32 Sector=FMath::Min(Sectors-1,FMath::FloorToInt32(Angle*Sectors/(2*PI)));
-    const int32 Rings=FMath::CeilToInt32(L.ArenaSize.X*.5/75);
+    const int32 Rings=FMath::CeilToInt32(FMath::Max(L.ArenaSize.X,L.ArenaSize.Y)*.5/75);
     const FVector2D A=Vertex(L,Rings,Sector),B=Vertex(L,Rings,Sector+1);
-    const FVector2D Normal=(A+B).GetSafeNormal();
-    const double Fraction=FVector2D::DotProduct(P,Normal)/FVector2D::DotProduct(A,Normal)*Rings;
+    const FVector2D NormalizedA(A.X,A.Y*YScale),NormalizedB(B.X,B.Y*YScale);
+    const FVector2D Normal=(NormalizedA+NormalizedB).GetSafeNormal();
+    const double Fraction=FVector2D::DotProduct(NormalizedP,Normal)/FVector2D::DotProduct(NormalizedA,Normal)*Rings;
     const int32 Ring=FMath::Clamp(FMath::FloorToInt32(Fraction),0,Rings-1);
     const auto C=Vertex(L,Ring,Sector),D=Vertex(L,Ring,Sector+1),E=Vertex(L,Ring+1,Sector),F=Vertex(L,Ring+1,Sector+1);
     if(Ring==0)return TriangleHeight(L,P,C,E,F);
@@ -151,7 +163,7 @@ void BuildCentralTerrain(UDynamicMeshComponent* Component,const FERProceduralLay
         Terrain.AppendVertex(FVector(P,Field(L,P)));Normals->AppendElement(FVector3f(FVector(-DX,-DY,1).GetSafeNormal()));UVs->AppendElement(FVector2f(P/250));
     };
     Add(FVector2D::ZeroVector);
-    const int32 Rings=FMath::CeilToInt32(L.ArenaSize.X*.5/75);
+    const int32 Rings=FMath::CeilToInt32(FMath::Max(L.ArenaSize.X,L.ArenaSize.Y)*.5/75);
     for(int32 Ring=1;Ring<=Rings;++Ring)for(int32 Sector=0;Sector<Sectors;++Sector)Add(Vertex(L,Ring,Sector));
     auto Index=[](int32 Ring,int32 Sector){return Ring==0 ? 0:1+(Ring-1)*Sectors+Sector%Sectors;};
     auto Triangle=[&](int32 A,int32 B,int32 C)

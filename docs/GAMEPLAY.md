@@ -67,6 +67,9 @@ cosmetic. FPS arms, weapon and muzzle flash render as FirstPerson primitives.
 
 ## Controls
 
+Mouse smoothing is disabled in the project input settings. Mouse acceleration defaults
+to zero and can be adjusted in the menu. Saved mouse preferences are preserved.
+
 WASD, mouse, left click fire, right click scope, Space jump/climb/respawn, Shift walk,
 double-tap W or hold E sprint, Ctrl/C crouch and prone, R reload, 1–8 / F / G / H or
 wheel select (the wheel has a 250ms quiet period), Tab scoreboard, Esc menu, P screenshots.

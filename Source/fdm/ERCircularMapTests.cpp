@@ -11,10 +11,24 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
 {
     auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.circular");T->Archetype=EERMapArchetype::CentralBuilding;
     FERProceduralConfig C;C.TemplateAsset=T;FERBlockRoomConfig B;TSet<bool> Modes;TSet<int32> Shapes,Rules;TSet<FIntPoint> Dimensions;TSet<FName> CoverKinds;TSet<FIntVector> CoverDimensions;int32 FiringSites=0,GroundOnlySites=0;
+    int32 PoolLayouts=0;
     for(int32 TeamSize:{1,2,3,4,8,16})for(int32 Seed=0;Seed<516;++Seed)
     {
         C.ExpectedTeamSize=TeamSize;C.Seed=Seed;FERProceduralLayout L;
         if(!ERProcedural::Build(C,B,L)){AddError(FString::Printf(TEXT("circular layout failed size=%d seed=%d"),TeamSize,Seed));return false;}
+        if(L.CentralBuildingSize.X>1800 || L.CentralBuildingSize.Y>2400 ||
+            L.BuildingFloors!=(TeamSize==1 ? 2 : 3))
+        {AddError(TEXT("villa exceeds its footprint or storey budget"));return false;}
+        if(!L.FeatureNames.Contains(FName(TEXT("VillaTerraces"))))
+        {AddError(TEXT("upper storey is missing its terraces"));return false;}
+        if(!L.PoolWater.IsEmpty())
+        {
+            ++PoolLayouts;
+            if(L.PoolWater.Num()!=2 ||
+                !L.PoolWater[0].GetCenter().Equals(L.PoolWater[1].GetCenter()*FVector(1,-1,1),.001) ||
+                !L.PoolWater[0].GetSize().Equals(L.PoolWater[1].GetSize(),.001))
+            {AddError(TEXT("courtyard pools must be paired"));return false;}
+        }
         for(const auto& Name:L.FeatureNames)if(Name.ToString().StartsWith(TEXT("Cover.")) && Name!=FName(TEXT("Cover.FiringSteps")))CoverKinds.Add(Name);
         for(const auto& Site:L.CoverSites)CoverDimensions.Add(FIntVector(FMath::RoundToInt32(Site.Size.X),FMath::RoundToInt32(Site.Size.Y),FMath::RoundToInt32(Site.Size.Z)));
         for(const auto& Site:L.CoverSites)
@@ -29,15 +43,20 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
         if(!L.CentralHill && L.SecondaryStructures.Num()<2){AddError(TEXT("lateral hill missing secondary buildings"));return false;}
         if(L.CentralEntrances.Num()!=2 || FVector::DotProduct(L.CentralEntrances[0].GetRotation().GetForwardVector(),L.CentralEntrances[1].GetRotation().GetForwardVector())<.99){AddError(TEXT("main entries must share side-facing direction"));return false;}
         if(!L.CircularArena || L.LayoutSymmetry!=EERTemplateSymmetry::Mirror || L.AlphaSpawns.Num()!=10 || L.OmegaSpawns.Num()!=10)return false;
+        if(L.CrossingRule==EERCrossingRule::ClimbableWall ? L.ArenaSize.Y<L.ArenaSize.X*1.2f :
+            !FMath::IsNearlyEqual(L.ArenaSize.X,L.ArenaSize.Y,.01f))return false;
         if(FMath::Abs(ERProcedural::PlayableAreaM2(L)-TeamSize*1500)>TeamSize*150+.01)return false;
         for(int32 I=0;I<10;++I)
         {
             const auto A=L.AlphaSpawns[I].GetLocation(),O=L.OmegaSpawns[I].GetLocation();
-            if(!O.Equals({A.X,-A.Y,A.Z},.001) || FVector2D(A).Size()>L.ArenaSize.X*.5-100)return false;
+            if(!O.Equals({A.X,-A.Y,A.Z},.001) ||
+                FMath::Square(A.X/(L.ArenaSize.X*.5-100))+
+                FMath::Square(A.Y/(L.ArenaSize.Y*.5-100))>1)return false;
         }
         for(const auto& Route:L.CrossingRoutes)for(const auto P:Route)
             if(FMath::Abs(P.Z-ERProcedural::CentralGroundHeight(L,FVector2D(P))-100)>.001)return false;
     }
+    TestTrue(TEXT("some layouts have courtyard pools"),PoolLayouts>0);
     TestTrue(TEXT("some cover has firing steps"),FiringSites>0);
     TestTrue(TEXT("some cover stays at ground level"),GroundOnlySites>0);
     TestEqual(TEXT("five cover profiles sampled"),CoverKinds.Num(),5);
@@ -56,6 +75,27 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
         if(!TestTrue(TEXT("physical circular map generated"),Map->Regenerate()))continue;
         const auto& L=Map->GetLayout();TestTrue(TEXT("valid cell world"),Map->ValidateCells());
         Map->RequestSupportCheck();ERIndustrialTest::Settle(*Map);TestEqual(TEXT("intact building remains supported"),Map->GetCellWorld().GetDetachedCount(),int64(0));
+        for(const auto& Entrance:L.CentralEntrances)
+        {
+            const FVector FloorPoint=Entrance.GetLocation()+FVector(100,0,0);
+            TestTrue(TEXT("villa ground floor supports a pawn"),World->LineTraceSingleByChannel(
+                Hit,FloorPoint+FVector(0,0,100),FloorPoint-FVector(0,0,20),ECC_WorldStatic,Q));
+            TestTrue(TEXT("villa floor is above terrain at the threshold"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,FloorPoint.Z,.1));
+        }
+        const auto& Panels=Map->GetCellWorld().GetPanels();
+        const auto* Pane=Panels.FindByPredicate([](const auto& Panel)
+        {
+            return Panel.Material==EERBlockMaterial::Glass && Panel.Size.Z>=230;
+        });
+        if(TestNotNull(TEXT("panoramic opening has a glass pane"),Pane))
+        {
+            const FVector Center=Pane->Transform.TransformPosition(Pane->Size*.5);
+            const FVector Across=Pane->Transform.GetUnitAxis(EAxis::Y)*30;
+            FERCellId GlassCell;
+            TestTrue(TEXT("intact glazing intercepts projectiles"),
+                World->LineTraceSingleByChannel(Hit,Center-Across,Center+Across,ECC_GameTraceChannel1,Q) &&
+                Map->ResolveCell(Hit,GlassCell) && Panels.IsValidIndex(GlassCell.Panel) && &Panels[GlassCell.Panel]==Pane);
+        }
         for(const auto* Starts:{&L.AlphaSpawns,&L.OmegaSpawns})for(const auto& S:*Starts)
         {
             TestFalse(TEXT("spawn capsule clear"),World->OverlapBlockingTestByChannel(S.GetLocation(),FQuat::Identity,ECC_Pawn,Capsule,Q));
@@ -76,7 +116,30 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
             }
         }
         for(const auto& Path:L.CrossingRoutes)for(int32 I=1;I<Path.Num();++I)
-            if(World->SweepSingleByChannel(Hit,Path[I-1],Path[I],FQuat::Identity,ECC_Pawn,Capsule,Q)){AddError(FString::Printf(TEXT("circular crossing obstructed at %s"),*Path[I].ToString()));break;}
+            if(World->SweepSingleByChannel(Hit,Path[I-1],Path[I],FQuat::Identity,ECC_Pawn,Capsule,Q)){AddError(FString::Printf(TEXT("circular crossing obstructed seed=%d at %s by %s"),Seed,*Path[I].ToString(),*GetNameSafe(Hit.GetComponent())));break;}
+        for(const auto& Path:L.RoomAccessRoutes)
+        {
+            // Test the upper storey on its level deck. Ground routes follow
+            // the terrain and are swept separately at their sampled heights.
+            if(Path[0].Z<L.CentralBuildingCenter.Z+400)continue;
+            if(World->SweepSingleByChannel(Hit,Path[0],Path.Last(),FQuat::Identity,ECC_Pawn,Capsule,Q))
+                AddError(FString::Printf(TEXT("villa upper door obstructed seed=%d from=%s to=%s hit=%s"),
+                    Seed,*Path[0].ToString(),*Path.Last().ToString(),*GetNameSafe(Hit.GetComponent())));
+        }
+        for(const auto& Bounds:L.PoolWater)
+        {
+            const FVector Surface=Bounds.GetCenter();
+            TestTrue(TEXT("pool has a solid floor"),World->LineTraceSingleByChannel(
+                Hit,Surface+FVector(0,0,50),Surface-FVector(0,0,120),ECC_WorldStatic,Q));
+            TestTrue(TEXT("deep pool floor is 80cm below water"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-80,.1));
+            for(float End:{-225.f,225.f})
+            {
+                const FVector Shallow=Surface+FVector(0,End,0);
+                TestTrue(TEXT("shallow pool floor supports a pawn"),World->LineTraceSingleByChannel(
+                    Hit,Shallow+FVector(0,0,50),Shallow-FVector(0,0,120),ECC_WorldStatic,Q));
+                TestTrue(TEXT("shallow pool floor is 20cm below water"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-20,.1));
+            }
+        }
         UDynamicMeshComponent* TerrainComponent=nullptr;
         TArray<UDynamicMeshComponent*> TerrainCandidates;Map->GetComponents(TerrainCandidates);
         for(auto* Candidate:TerrainCandidates)if(Candidate->GetFName()==FName(TEXT("AlleyTerrain")))TerrainComponent=Candidate;

@@ -124,7 +124,7 @@ void AERRoomsProbe::Tick(float Delta)
     }
     if(Phase>=4 && Phase<=6)
     {
-        // Three seeds, four views each. Hide only roof groups for the plan.
+        // Three seeds, six views each. Flat plans use a ceiling view instead of stairs.
         static const int32 Seeds[]={42,73,13};static const TCHAR* Names[]={TEXT("Plan"),TEXT("Base"),TEXT("Corridor"),TEXT("Upper"),TEXT("RoomPanels"),TEXT("Slalom")};
         constexpr int32 PerSeed=UE_ARRAY_COUNT(Names);
         if(Shot>=PerSeed*UE_ARRAY_COUNT(Seeds)){UE_LOG(LogTemp,Display,TEXT("ER_ROOMS_COMPLETE result=%s"),Failed ? TEXT("FAIL"):TEXT("PASS"));FPlatformMisc::RequestExitWithStatus(false,Failed ? 1:0);Phase=99;return;}
@@ -136,9 +136,19 @@ void AERRoomsProbe::Tick(float Delta)
             if(Kind==0){Eye={0,0,7000};Target=FVector::ZeroVector;}
             else if(Kind==1){Eye=L.AlphaSpawns[0].GetLocation()+FVector(0,0,70);Target=L.RoomNodes[0].Center+FVector(-700,0,160);}
             else if(Kind==2){const auto& E=L.RoomLinks[0];const FVector D=(E.End-E.Start).GetSafeNormal2D();Eye=E.Start+D*60+FVector(0,0,170);Target=E.End+FVector(0,0,160);}
-            else if(Kind==3){const auto& R=L.StairRoutes[0];Eye=R.Last()+FVector(0,0,60);Target=L.RoomNodes[2].Center+FVector(0,0,140);}
+            else if(Kind==3)
+            {
+                const auto* Stairs=L.StairRoutes.FindByPredicate([](const auto& Route){return !Route.IsEmpty();});
+                if(Stairs){Eye=Stairs->Last()+FVector(0,0,60);Target=L.RoomNodes[2].Center+FVector(0,0,140);}
+                else{const auto& V=L.RoomNodes[0];Eye=V.Center+FVector(0,0,170);Target=V.Center+FVector(150,150,V.Height-5);}
+            }
             else if(Kind==4){const auto& V=L.RoomNodes[3];Eye=V.Center+FVector(0,0,170);Target=V.Center+FVector(V.Size.X*.35f,V.Size.Y*.3f,160);}
-            else{const auto* R=L.RoomAccessRoutes.FindByPredicate([](const auto& V){return V.Num()>=6;});Eye=(*R)[2]+FVector(0,0,70);Target=(*R)[4]+FVector(0,0,70);}
+            else
+            {
+                const auto* R=L.RoomAccessRoutes.FindByPredicate([](const auto& V){return V.Num()>=6;});
+                if(R){Eye=(*R)[2]+FVector(0,0,70);Target=(*R)[4]+FVector(0,0,70);}
+                else{Eye=L.RoomNodes[0].Center+FVector(0,0,170);Target=L.RoomNodes[1].Center+FVector(0,0,170);}
+            }
             auto* Camera=GetWorld()->SpawnActor<ACameraActor>(Eye,Kind==0 ? FRotator(-90,0,0):(Target-Eye).Rotation());
             Camera->GetCameraComponent()->SetFieldOfView(90);
             if(Kind==0){Camera->GetCameraComponent()->SetProjectionMode(ECameraProjectionMode::Orthographic);Camera->GetCameraComponent()->OrthoWidth=FMath::Max(L.ArenaSize.Y,L.ArenaSize.X*16.f/9)*1.08f;}

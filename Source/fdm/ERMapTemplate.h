@@ -158,6 +158,7 @@ USTRUCT(BlueprintType)
 struct FERFireTrainingRecipe
 {
     GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<class UStaticMesh> CeilingPanelMesh;
     // Square metres: length follows the sampled width within this floor range.
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FVector2D FloorArea=FVector2D(1300,7000);
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="6",ClampMax="36")) int32 MinBays=14;
@@ -347,6 +348,7 @@ public:
     UPROPERTY(Transient) FVector2D SizingArena=FVector2D::ZeroVector;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FERFireTrainingRecipe FireTraining;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<class UERMapThemeLibrary> ThemeLibrary;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) bool RequireSharedSurfaces=false;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FERRoomsRecipe Rooms;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FERVillageRecipe Village;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FERUrbanTownRecipe UrbanTown;

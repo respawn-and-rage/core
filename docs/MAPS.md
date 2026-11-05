@@ -48,6 +48,20 @@ Recipes live in `Art/MapTemplates`. Reproduce a layout with
 - Rounds advance the seed before respawn. Menu sessions use fresh seeds.
 - Cosmetic rolls use a separate stream and never consume geometry RNG.
 
+## Outdoor backdrop
+
+Central Building, Alleys, Village and Town pick one of the 15 Atmospheric Skybox
+panoramas from the replicated map seed using a separate cosmetic random stream.
+Depot rolls a cosmetic seed at level start. The authored directional and ambient
+lights retain their settings. Each panorama rotates toward the strongest directional light using an approximate sun azimuth; overcast images use their brightest opening. The backdrop uses
+one unlit 2048px texture and a flat ground plane below the playable terrain.
+Village and variants with a grass ground use a dedicated horizon finish with the shared grass texture. The sky is visible in real-time Skylight captures; the horizon is excluded. The existing ambient
+lighting stays in use. Fire Training and Rooms keep their indoor lighting.
+
+`setup_outdoor_backdrops.py` creates the private art derivatives in Unreal; `setup_outdoor_sky_capture.py` updates the sky material flag and `setup_outdoor_sky_yaw.py` adds the yaw parameter in existing installations. Verify
+with the Metal galleries for Central Building and Village, and compare the
+`ER_OUTDOOR_BACKDROP` log across seeds and peers.
+
 ## Team sizing
 
 `Map.ExpectedTeamSize` (1..16) budgets **750m² per expected player**:
@@ -73,29 +87,51 @@ see [PROCEDURAL_MAP_PLAYABILITY.md](PROCEDURAL_MAP_PLAYABILITY.md).
 
 ## Palettes
 
-Each template binds its own `DA_Theme_<Name>` (`ThemeLibrary`) with one palette that suits the
-place. **A finish always shows the physical material:** every `EERBlockMaterial` row has its own
+All production templates share `Art/SharedMaterials/DA_SharedMapSurfaces`: the 72 reviewed
+Twinmotion finishes in `scripts/shared_material_catalog.py`. Each template binds its own
+`DA_Theme_<Name>` (`ThemeLibrary`) with a selection suited to the place. **A finish always shows the physical material:** every
+`EERBlockMaterial` row has its own
 recognizable surface, so what a block looks like is how it behaves. Palettes never change
 geometry, physics, calibration or damage, and their identity enters the digest.
 
 | Template | Palette | Character | Ground |
 | --- | --- | --- | --- |
-| Central Building | Urban | outdoor brick and concrete building, steel deck interiors | asphalt, grass or snow, from the seed |
-| Alleys | Stone | sandstone houses and perimeter, some pale brick houses | three sands |
+| Central Building | Urban | light concrete villa with clear glazing and steel upper decks | asphalt, grass or snow, from the seed |
+| Alleys | Stone | stone houses and perimeter, some pale brick houses | desert sand |
 | Fire Training | Warehouse | concrete courts and through-rooms inside a closed procedural hall | dry light concrete |
 | Rooms | Tunnels | cast concrete shell, dry floor, timber cover | dry light concrete |
-| Village | Jungle | timber, corrugated sheet, gray cladding | jungle ground |
-| [Town](maps/town.md) | Town | urban street loop, ground-floor through-shops, closed upper storeys | asphalt |
+| Village | Jungle | timber and corrugated sheet cladding | jungle ground |
+| [Town](maps/town.md) | Town | urban street loop, ground-floor through-shops, closed upper storeys | asphalt or pavers |
 
 Roles stay separate so structures read at distance: shell sheets, structural steel, galvanized
-ladders, decks and painted cargo. `DeckSteel` applies to thin Metal slabs only. Alley walls follow
-the panel's material and their slabs use `Floor`. Tints of the Alley finishes live in
-`setup_map_palettes.py`. Alleys and Central Building keep shade readable with a warm sun, a less
-blue sky and a lower hemisphere in the ground's colour (`setup_map_daylight.py`); keep the tint
-mild, because a strong cast shifts team colours. `DA_MapThemes` is not bound to any template: it remains only as the input
-of older migrations.
+ladders, decks and painted cargo. `CargoSteel` replaces supplied container paint; the Jungle
+palette replaces imported building skins and cladding too. Alley house walls follow their
+physical material and slabs use `Floor`. `DeckSteel` uses matte 150 cm metal panels on thin Metal slabs.
+Fire Training cargo uses matte ribbed `AluminiumSiding02`. Other cargo uses `LightMetalFlakePaint`; `CortenSteel01` and `AluminiumSiding04` remain available
+in the shared catalog for oxidized and ribbed finishes.
+Village has no exterior trees. Rooms and Fire Training use an owned unlit white
+emissive finish on square 60cm ceiling panels. The outdoor backdrop, light panels
+and Central Building’s native pool water are exceptions to the shared finish catalog. Characters,
+weapons and combat effects are separate systems.
+
+Both recipes and theme libraries require the shared catalog. Missing catalog references,
+foreign palette finishes and legacy cargo preservation reject generation before publishing
+any layout. The shared catalog identity/revision enters the replicated layout digest.
+`setup_shared_material_library.py` owns the derivatives, bindings and seven debris/cell
+fallback surfaces. It verifies rollback and protected hashes and rejects dependency leaks
+back to the unversioned pack download. Supplied originals remain immutable. Rebuilding older
+palettes cannot silently introduce non-catalog finishes: the runtime rejects them.
+
+The shared triplanar functions use world position and unit object scale, retaining the
+source physical dimensions and tiling across generated cell meshes. Role assignments are
+per-template; weighted choices per building and roof construction variation are not enabled.
+`Walkway` is available in the catalog but is not assigned to solid walkable slabs.
+`DA_MapThemes` is not bound to any template and remains only as input to older migrations.
 
 ## Add a map
+
+Check drops from accessible roofs, stairs and landings. Any reachable landing must have a
+route back to the playable area, including the ground behind stairs and raised platforms.
 
 1. Recipe `DA_<Name>` and level `L_<Name>` through a `setup_<name>.py` that validates 516 seeds.
 2. Register in `ERMapCatalog.cpp`, and add it to `MapsToCook` in `Config/DefaultGame.ini`.
@@ -112,12 +148,19 @@ on it by URL restarts its rounds in place.
 
 ## Textures
 
-Production palettes: ten Sketchfab sources / twelve materials from the owner's RR collection
-(original ZIPs and credits in private `SourceAssets/SketchfabTextures`), seven CC0 sets in
-`SourceAssets/ProceduralTextures` from Poly Haven and ambientCG, plus Factory paint for
-containers. Use DX normals, linear masks, sRGB base colour. Check packed ARM channels and
-preserve 16-bit grayscale. Never execute supplied scripts. World-position tiling stays
-continuous; no runtime displacement. Removed sets must not be reacquired by pipeline reruns.
+On large walls and roofs, choose finishes whose joints or pattern remain visible at play distance.
+Check connections between generated elements from both sides and at grazing angles. Roof links
+and landings should meet the neighboring slab at its edge so their visible faces do not overlap.
+
+Production construction palettes use owned Twinmotion derivatives under
+`Art/SharedMaterials`; their textures and shader functions are in the private maps repository.
+The public manifest contains source package identifiers only. `setup_retire_material_sources.py`
+removes the raw Fab download, its vendor preview scene and unreferenced legacy finishes after
+outside-reference checks. Git/LFS payloads are verified before tracked files are removed;
+the raw pack can be acquired again from Fab. Old finishes still referenced by retained mesh
+slots or authoring inputs stay on disk. Sky and owned emissive panels remain separate.
+Use DX normals, linear masks and sRGB base colour; preserve packed channels and 16-bit data.
+Never execute supplied scripts or reacquire removed sets through pipeline reruns.
 
 ## Rebuilding
 

@@ -32,7 +32,7 @@ struct FERRoomsNode
 struct FERRoomsLink { int32 A=0,B=0; FVector Start,End; float Width=360,Height=340,Cut=55; };
 struct FERRoomsScreen { FTransform Frame; FVector Size; int32 Link=INDEX_NONE,Room=INDEX_NONE; };
 // Solid prism behind a visible quad. Front normal points into the room.
-struct FERRoomsFace { FVector A,B,C,D; class UMaterialInterface* Surface=nullptr; bool Roof=false; };
+struct FERRoomsFace { FVector A,B,C,D; class UMaterialInterface* Surface=nullptr; bool Roof=false; bool CorridorFloor=false; };
 struct FERLayoutCover
 {
     FTransform Frame;
@@ -97,6 +97,7 @@ struct FERProceduralLayout
     TArray<TArray<FVector>> RooftopRoutes,GroundRoutes;
     TArray<TArray<FVector>> RoofTransfers;
     TArray<FBox> TerrainPads;
+    TArray<FBox> PoolWater;
     bool GradedTerrain=false;
     EERTemplateSymmetry LayoutSymmetry=EERTemplateSymmetry::None;
     bool CircularArena=false;
@@ -251,6 +252,8 @@ private:
     UPROPERTY() TObjectPtr<class UInstancedStaticMeshComponent> Ceilings;
     UPROPERTY() TObjectPtr<class UInstancedStaticMeshComponent> Stairs;
     UPROPERTY() TArray<TObjectPtr<class UInstancedStaticMeshComponent>> FixedMeshes;
+    UPROPERTY() TObjectPtr<class UMaterialInterface> PoolWaterSurface;
+    UPROPERTY(Transient) TArray<TObjectPtr<class UStaticMeshComponent>> PoolSurfaces;
     UPROPERTY(Transient) TArray<TObjectPtr<class AERLadder>> LadderActors;
     UPROPERTY() TObjectPtr<class UInstancedStaticMeshComponent> FixedCollision;
     UPROPERTY() TObjectPtr<class UInstancedStaticMeshComponent> FenceCollision;

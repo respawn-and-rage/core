@@ -20,7 +20,7 @@ storeys from 2.4m, budget of 10 floors.
 - 3v3+ uses at least two blocks; paired 4.8×2.4m L shelters meet a ground-cover quota that upper
   floors cannot satisfy.
 - Perimeter: tapered 3.8–4.4m logs with real shot gaps, plus a hidden locomotion-only wall.
-- Backdrop: J&E Gray Park panorama (Greg Zaal, CC0), exterior trees, all skipped on dedicated.
+- Backdrop: J&E Gray Park panorama (Greg Zaal, CC0), skipped on dedicated. No exterior trees.
 
 ## Verify
 

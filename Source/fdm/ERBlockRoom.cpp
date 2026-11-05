@@ -27,6 +27,8 @@
 #include "PhysicsEngine/BodySetup.h"
 #include "ProfilingDebugging/ResourceSize.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Sound/SoundAttenuation.h"
+#include "Sound/SoundWave.h"
 
 AERBlockRoom::AERBlockRoom()
 {
@@ -41,6 +43,15 @@ AERBlockRoom::AERBlockRoom()
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube"));
     BlockMesh = Cube.Object;
     Floor->SetStaticMesh(Cube.Object);
+    static ConstructorHelpers::FObjectFinder<USoundWave> GlassBreakUnfa(
+        TEXT("/Game/EclipseRecoil/Audio/GlassBreak/S_ER_GlassBreak_221528"));
+    static ConstructorHelpers::FObjectFinder<USoundWave> GlassBreakDatasoundsample(
+        TEXT("/Game/EclipseRecoil/Audio/GlassBreak/S_ER_GlassBreak_41348"));
+    static ConstructorHelpers::FObjectFinder<USoundAttenuation> GlassAttenuation(
+        TEXT("/Game/EclipseRecoil/Audio/GlassBreak/SA_ER_GlassBreak"));
+    if (GlassBreakUnfa.Object) GlassBreakSounds.Add(GlassBreakUnfa.Object);
+    if (GlassBreakDatasoundsample.Object) GlassBreakSounds.Add(GlassBreakDatasoundsample.Object);
+    GlassBreakAttenuation = GlassAttenuation.Object;
 }
 bool AERBlockRoom::IsStandaloneLab() const
 {
@@ -390,6 +401,7 @@ void AERBlockRoom::StepSupport()
         FlushSkinMeshes();
         LastDetached=Batch.Destroyed;
         PublishCellChanges(Batch.ChangedChunks);
+        EmitGlassBreaks(Batch.BrokenGlassPanes);
         if (!Debris.IsEmpty()) { if (GetNetMode()==NM_Standalone) SpawnCellDebris(Debris); else MulticastCellDebris(Network.Epoch,Debris); }
     }
     if (DetachCursor>=PendingDetach.Num())

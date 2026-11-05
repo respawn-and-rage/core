@@ -1,4 +1,5 @@
 #include "ERProceduralMap.h"
+#include "EROutdoorBackdrop.h"
 #include "ERLadder.h"
 #include "ERMapTemplate.h"
 #include "ERMapTheme.h"
@@ -17,6 +18,8 @@
 #include "EngineUtils.h"
 #include "Misc/Paths.h"
 #include "UObject/StrongObjectPtr.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 namespace ERProcedural { bool BuildGeometry(const FERProceduralConfig&,const FERBlockRoomConfig&,FERProceduralLayout&,const FERCellSettings&); bool BuildTemplate(const FERProceduralConfig&,const FERBlockRoomConfig&,FERProceduralLayout&,const FERCellSettings&); }
 #include "Components/InstancedStaticMeshComponent.h"
@@ -262,17 +265,25 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
 
 bool ERProcedural::ApplyMapTheme(const FERProceduralConfig& C,FERProceduralLayout& L)
 {
+    if(C.TemplateAsset && C.TemplateAsset->RequireSharedSurfaces &&
+       (!C.TemplateAsset->ThemeLibrary || !C.TemplateAsset->ThemeLibrary->RequireSharedSurfaces))return false;
     if(!C.TemplateAsset || !C.TemplateAsset->ThemeLibrary)return true;
     const auto& Library=*C.TemplateAsset->ThemeLibrary;
+    const auto* Shared=Library.SharedSurfaces.Get();
+    if((Library.RequireSharedSurfaces && !Shared) || (Shared && !Shared->IsValidLibrary()))return false;
+    auto Allowed=[&](UMaterialInterface* Surface){return Surface && (!Shared || Shared->Contains(Surface));};
     if(Library.Revision<1 || Library.Themes.IsEmpty() || Library.Themes.Num()>8)return false;
     TSet<FName> Names;
     for(const auto& P:Library.Themes)
     {
         if(P.Name.IsNone() || Names.Contains(P.Name) || P.Materials.Num()!=7 || !P.Wall || !P.Floor || !P.Ceiling || P.Grounds.IsEmpty() || P.Grounds.Num()>32)return false;
-        for(const auto& M:P.Materials)if(!M)return false;
-        for(const auto& M:P.Grounds)if(!M)return false;
+        for(const auto& M:P.Materials)if(!Allowed(M.Get()))return false;
+        for(const auto& M:P.Grounds)if(!Allowed(M.Get()))return false;
+        for(auto* Surface:{P.Wall.Get(),P.Floor.Get(),P.Ceiling.Get()})if(!Allowed(Surface))return false;
+        if(Shared && (P.PreserveCargoPaint || !Allowed(P.CargoSteel.Get())))return false;
         const int32 SteelRoles=int32(P.ShellSteel!=nullptr)+int32(P.LadderSteel!=nullptr)+int32(P.DeckSteel!=nullptr);
         if(SteelRoles!=0 && SteelRoles!=3)return false;
+        if(SteelRoles)for(auto* Surface:{P.ShellSteel.Get(),P.LadderSteel.Get(),P.DeckSteel.Get()})if(!Allowed(Surface))return false;
         Names.Add(P.Name);
     }
     // Each template owns its library; the cosmetic stream stays separate from geometry RNG.
@@ -287,8 +298,9 @@ bool ERProcedural::ApplyMapTheme(const FERProceduralConfig& C,FERProceduralLayou
     {
         const bool Cargo=P.PreserveCargoPaint && Panel.Material==EERBlockMaterial::Metal && Panel.Strength>1 && Panel.Surface;
         // Jungle retains Village's original UV skins and gray cladding.
-        const bool VillageSkin=Village && P.Name==TEXT("Jungle") && Panel.Surface;
+        const bool VillageSkin=!Shared && Village && P.Name==TEXT("Jungle") && Panel.Surface;
         if(!Cargo && !VillageSkin)Panel.Surface=P.Materials[uint8(Panel.Material)];
+        if(Shared && Panel.Material==EERBlockMaterial::Metal && Panel.Strength>1)Panel.Surface=P.CargoSteel;
         // House walls show their physical material; slabs keep the screed finish.
         const FString Role=Panel.SkinName.ToString();
         if(Role.StartsWith(TEXT("AlleyModule_")) && (Role.EndsWith(TEXT("_Floor")) || Role.EndsWith(TEXT("_Roof"))))Panel.Surface=P.Floor;
@@ -309,13 +321,16 @@ bool ERProcedural::ApplyMapTheme(const FERProceduralConfig& C,FERProceduralLayou
     L.GroundSurface=P.Grounds[Cosmetic.RandRange(0,P.Grounds.Num()-1)];
     for(auto& Piece:L.FixedPieces)
     {
-        if(Village && Piece.VisualOnly)
+        const bool VillageScenery=Village && Piece.VisualOnly && Piece.Mesh &&
+            (Piece.Mesh==C.TemplateAsset->Village.SkyDomeMesh || C.TemplateAsset->Village.ExteriorTrees.Contains(Piece.Mesh));
+        if(Village && Piece.VisualOnly && (!Shared || !Piece.Mesh || VillageScenery))
         {
             if(!Piece.Mesh)Piece.Surface=L.GroundSurface; // match the playable floor
             continue; // foliage retains its own material slots
         }
         // Preserve emissive fixtures and their authored material slots.
-        if(Piece.CollisionOnly || (Piece.VisualOnly && !Piece.Mesh) || (Piece.Mesh && Piece.Mesh->GetName().Contains(TEXT("Lamp"))))continue;
+        const bool Emissive=Piece.Surface && Piece.Surface==C.TemplateAsset->Rooms.LampSurface;
+        if(Piece.CollisionOnly || (Shared ? Emissive : ((Piece.VisualOnly && !Piece.Mesh) || (Piece.Mesh && Piece.Mesh->GetName().Contains(TEXT("Lamp"))))))continue;
         Piece.Surface=Piece.Roof ? P.Ceiling.Get():P.Materials[uint8(Piece.Material)].Get();
         const FVector FixedSize=Piece.Transform.GetScale3D()*100;
         const bool ProceduralShell=C.TemplateAsset->Archetype==EERMapArchetype::FireTraining && !Piece.Mesh && !Piece.Roof && FixedSize.Z>=700 && (FixedSize.X>=L.WarehouseWidth-50 || FixedSize.Y>=L.WarehouseLength-1);
@@ -382,6 +397,9 @@ void ERProcedural::AddPieceCells(int32 Id, EERBlockMaterial Material, const FBox
 }
 AERProceduralMap::AERProceduralMap()
 {
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> Water(
+        TEXT("/Game/EclipseRecoil/Art/OutdoorBackdrop/M_PoolWater.M_PoolWater"));
+    PoolWaterSurface=Water.Object;
     auto Create=[&](const TCHAR* Name)
     {
         auto* Mesh=CreateDefaultSubobject<UInstancedStaticMeshComponent>(Name);
@@ -474,6 +492,11 @@ void AERProceduralMap::ConfigureFloors()
         Metal->Rename(*MakeUniqueObjectName(this,UDynamicMeshComponent::StaticClass(),TEXT("DeadFenceMetal")).ToString(),nullptr,REN_DontCreateRedirectors|REN_NonTransactional);
     }
     FenceMetal.Empty();
+    for(UStaticMeshComponent* PoolSurface:PoolSurfaces)
+    {
+        RemoveInstanceComponent(PoolSurface);PoolSurface->DestroyComponent();
+    }
+    PoolSurfaces.Reset();
     if(LayoutConfig.TemplateAsset) {ConfigureTemplateFloors(); return;}
     // A foundation touches the underside of the 20cm interior floor slabs.
     // Its exposed asphalt apron is one walkable step down after an outer breach.
@@ -524,7 +547,7 @@ SIZE_T AERProceduralMap::GetLayoutBytes() const
     Bytes+=Layout.InaccessibleGround.GetAllocatedSize()+Layout.TownBuildings.GetAllocatedSize()+Layout.TownCourts.GetAllocatedSize()+Layout.TownGates.GetAllocatedSize()+Layout.TownStreetNames.GetAllocatedSize()+Layout.UpperRoute.GetAllocatedSize()+Layout.LowerRoute.GetAllocatedSize();
     for(const auto& Gate:Layout.TownGates)Bytes+=Gate.Passage.GetAllocatedSize();
     for(const auto& Route:Layout.RoomAccessRoutes)Bytes+=Route.GetAllocatedSize();
-    Bytes+=Layout.Houses.GetAllocatedSize()+Layout.TerrainPads.GetAllocatedSize()+Layout.Ladders.GetAllocatedSize()+Layout.DistrictTowers.GetAllocatedSize()+Layout.DistrictTowerHeights.GetAllocatedSize();
+    Bytes+=Layout.Houses.GetAllocatedSize()+Layout.TerrainPads.GetAllocatedSize()+Layout.PoolWater.GetAllocatedSize()+Layout.Ladders.GetAllocatedSize()+Layout.DistrictTowers.GetAllocatedSize()+Layout.DistrictTowerHeights.GetAllocatedSize();
     for(const auto& House:Layout.Houses)
     {
         Bytes+=House.Entrances.GetAllocatedSize()+House.EntranceFaces.GetAllocatedSize()+House.RoofMouths.GetAllocatedSize();
@@ -544,6 +567,30 @@ SIZE_T AERProceduralMap::GetLayoutBytes() const
 void AERProceduralMap::ConfigureTemplateFloors()
 {
     const auto* Template=LayoutConfig.TemplateAsset.Get();const FVector Size=Layout.ArenaSize;
+    bool OutdoorSky=false;
+    switch(Template->Archetype)
+    {
+    case EERMapArchetype::CentralBuilding:
+    case EERMapArchetype::Village:
+    case EERMapArchetype::UrbanTown:
+    case EERMapArchetype::MiddleEasternAlleys:
+    {
+        const FString GroundName=GetNameSafe(Layout.GroundSurface);
+        FLinearColor Tint(.20f,.19f,.16f);
+        UMaterialInterface* HorizonSurface=nullptr;
+        if(GroundName.Contains(TEXT("Snow")))Tint=FLinearColor(.62f,.66f,.69f);
+        else if((Template->Archetype==EERMapArchetype::Village || GroundName.Contains(TEXT("Grass"))) &&
+            FApp::CanEverRender() && GetNetMode()!=NM_DedicatedServer)
+        {
+            Tint=FLinearColor(.17f,.21f,.11f);
+            HorizonSurface=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/EclipseRecoil/Art/OutdoorBackdrop/M_OutdoorGrass.M_OutdoorGrass"));
+        }
+        else if(Template->Archetype==EERMapArchetype::MiddleEasternAlleys)Tint=FLinearColor(.39f,.29f,.17f);
+        OutdoorSky=EROutdoorBackdrop::Apply(*this,uint32(LayoutConfig.Seed),Tint,HorizonSurface);
+        break;
+    }
+    default: break;
+    }
     const bool ClosedRooms=Template->Archetype==EERMapArchetype::Rooms;
     Floor->SetStaticMesh(Layout.GradedTerrain || ClosedRooms ? nullptr:BlockMesh.Get());Floor->SetRelativeLocation(FVector(0,0,-10));Floor->SetRelativeScale3D(FVector(Size.X+40,Size.Y+40,20)/100);
     Floor->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);Floor->SetVisibility(true);
@@ -604,6 +651,8 @@ void AERProceduralMap::ConfigureTemplateFloors()
     if(ClosedRooms)ERProcedural::BuildRoomsShell(this,Layout,RoomsShell);
     for(const auto& Piece:Layout.FixedPieces)
     {
+        if(OutdoorSky && Template->Archetype==EERMapArchetype::Village &&
+            Piece.VisualOnly && Piece.Mesh==Template->Village.SkyDomeMesh)continue;
         if(Template->Archetype==EERMapArchetype::Village && Piece.VisualOnly && GetNetMode()==NM_DedicatedServer)continue;
         if(Piece.Roof && !bCeilings && !FireTraining && Template->Archetype!=EERMapArchetype::UrbanTown)continue;
         if(Piece.CollisionOnly){(Piece.PawnBarrier ? FenceCollision:FixedCollision)->AddInstance(Piece.Transform);continue;}
@@ -655,13 +704,45 @@ void AERProceduralMap::ConfigureTemplateFloors()
         Group->AddInstance(T);
     }
     FlushMetal();
+    if(!Layout.PoolWater.IsEmpty() && PoolWaterSurface && GetNetMode()!=NM_DedicatedServer)
+    {
+        for(const auto& Bounds:Layout.PoolWater)
+        {
+            auto* Water=NewObject<UStaticMeshComponent>(this);
+            AddInstanceComponent(Water);Water->SetupAttachment(RootComponent);
+            Water->SetMobility(EComponentMobility::Movable);
+            Water->SetStaticMesh(BlockMesh);Water->SetMaterial(0,PoolWaterSurface);
+            Water->SetCollisionProfileName(TEXT("NoCollision"));
+            Water->ComponentTags.Add(TEXT("ERTemplateVisual"));
+            Water->SetCanEverAffectNavigation(false);Water->SetCastShadow(false);
+            Water->SetRelativeLocation(Bounds.GetCenter()-FVector(0,0,.5));
+            Water->SetRelativeScale3D(FVector(Bounds.GetSize().X,Bounds.GetSize().Y,1)/100);
+            Water->RegisterComponent();PoolSurfaces.Add(Water);
+        }
+    }
+    UInstancedStaticMeshComponent* CeilingPanels=nullptr;
+    if(FireTraining && GetNetMode()!=NM_DedicatedServer && Template->FireTraining.CeilingPanelMesh)
+    {
+        CeilingPanels=NewObject<UInstancedStaticMeshComponent>(this);AddInstanceComponent(CeilingPanels);
+        CeilingPanels->SetupAttachment(RootComponent);CeilingPanels->SetMobility(EComponentMobility::Movable);
+        CeilingPanels->SetStaticMesh(Template->FireTraining.CeilingPanelMesh);
+        CeilingPanels->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        CeilingPanels->SetCanEverAffectNavigation(false);CeilingPanels->SetCastShadow(false);
+        CeilingPanels->ComponentTags.Add(TEXT("ERTemplateRoof"));CeilingPanels->ComponentTags.Add(TEXT("ERTemplateVisual"));
+        CeilingPanels->RegisterComponent();FixedMeshes.Add(CeilingPanels);
+    }
     if(FireTraining && GetNetMode()!=NM_DedicatedServer)
         for(float X=-Layout.WarehouseWidth*.5f+600;X<Layout.WarehouseWidth*.5f;X+=1200)
             for(float Y=-Layout.WarehouseLength*.5f+600;Y<Layout.WarehouseLength*.5f;Y+=1200)
             {
+                if(CeilingPanels)CeilingPanels->AddInstance(FTransform(FQuat::Identity,FVector(X,Y,Layout.IndoorCeiling-5),FVector(.6,.6,.04)));
                 auto* Light=NewObject<UPointLightComponent>(this);AddInstanceComponent(Light);
                 Light->SetupAttachment(RootComponent);Light->SetMobility(EComponentMobility::Movable);
-                Light->SetRelativeLocation({X,Y,Layout.IndoorCeiling-30});Light->SetIntensity(600);Light->SetAttenuationRadius(2200);Light->SetCastShadows(false);
+                Light->SetRelativeLocation({X,Y,Layout.IndoorCeiling-65});
+                const float HeightRatio=Layout.IndoorCeiling/560.f;
+                Light->SetIntensityUnits(ELightUnits::Candelas);
+                Light->SetIntensity(6.f*FMath::Square(HeightRatio));
+                Light->SetAttenuationRadius(1200.f*HeightRatio);Light->SetCastShadows(false);
                 Light->SetSourceRadius(40);Light->SetSpecularScale(.35f);
                 Light->SetLightColor(FLinearColor::White);Light->RegisterComponent();WarehouseLights.Add(Light);
             }
@@ -678,7 +759,7 @@ void AERProceduralMap::ConfigureTemplateFloors()
             Light->SetupAttachment(RootComponent);Light->SetMobility(EComponentMobility::Movable);
             Light->SetRelativeLocation(P);Light->SetIntensityUnits(ELightUnits::Candelas);
             Light->SetIntensity(6);Light->SetAttenuationRadius(1200);
-            Light->SetCastShadows(false);Light->SetLightColor(FLinearColor(1,.94,.85));
+            Light->SetCastShadows(false);Light->SetLightColor(FLinearColor::White);
             Light->RegisterComponent();WarehouseLights.Add(Light);
         }
     if(HasAuthority() && Layout.Routes.Num()>1 && (Template->Archetype==EERMapArchetype::CentralBuilding || Template->Archetype==EERMapArchetype::MiddleEasternAlleys || Template->Archetype==EERMapArchetype::FireTraining || Template->Archetype==EERMapArchetype::Village || Template->Archetype==EERMapArchetype::UrbanTown || ClosedRooms))
@@ -718,6 +799,8 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
     H=HashCombine(H,GetTypeHash(LayoutConfig.ExpectedTeamSize));
     if(LayoutConfig.MapCandidate)H=HashCombine(H,GetTypeHash(LayoutConfig.MapCandidate));
     H=HashCombine(H,GetTypeHash(Layout.ThemeIndex));H=HashCombine(H,GetTypeHash(Layout.ThemeRevision));
+    if(const auto* Themes=LayoutConfig.TemplateAsset->ThemeLibrary.Get())if(const auto* Shared=Themes->SharedSurfaces.Get())
+    {H=HashCombine(H,GetTypeHash(Shared->Revision));H=HashCombine(H,FCrc::StrCrc32(*Shared->GetPathName()));}
     H=HashCombine(H,FCrc::StrCrc32(*Layout.ThemeName.ToString()));
     for(auto* M:Layout.ThemeMaterials)H=HashCombine(H,FCrc::StrCrc32(*M->GetPathName()));
     if(Layout.ThemeCeiling)H=HashCombine(H,FCrc::StrCrc32(*Layout.ThemeCeiling->GetPathName()));
@@ -790,6 +873,8 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
         for(const auto& Ladder:Layout.Ladders){MixVector(Ladder.Frame.GetLocation());MixVector(Ladder.Frame.GetRotation().GetForwardVector());MixVector(FVector(Ladder.Height,Ladder.DeckHeight,0));}
         for(const auto* Paths:{&Layout.RoomAccessRoutes,&Layout.StairRoutes,&Layout.CrossingRoutes})for(const auto& Route:*Paths)for(const auto& P:Route)MixVector(P);
     }
+    if(Layout.CircularArena)for(const auto& Pad:Layout.TerrainPads){MixVector(Pad.Min);MixVector(Pad.Max);}
+    for(const auto& Water:Layout.PoolWater){MixVector(Water.Min);MixVector(Water.Max);}
     for(const auto& Knot:Layout.VillageTerrainProfile)MixVector({Knot.X,Knot.Y,0});
     if(LayoutConfig.TemplateAsset->Town.Enabled)
     {

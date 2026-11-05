@@ -22,6 +22,11 @@ stride 95/130/150cm at 5/10/18 km/h, 80 low, 65 prone, 220ms safety interval, no
 `DA_ER_Footsteps` maps physical surfaces and cell materials to Hard, Wood, Metal, Grass, Gravel,
 LightHard; unknown falls back to Hard. Never change HP or collision for audio.
 
+**Glass break:** When a pane is destroyed by damage or collapse, the authority emits a
+spatial one-shot at its centre. Each listener randomly selects Freesound 221528 by unfa
+(CC0, first 330ms trimmed) or 41348 by datasoundsample (CC BY 4.0).
+Import with `scripts/setup_glass_break_audio.py`.
+
 **Explosions and smoke:** HE and smoke use Sonniss GDC 2024 WAVs. HE: spatial 5m inner, 75m falloff.
 Smoke `ReleaseVolume` defaults to about .2055, a Blueprint-editable local gain.
 Menu music: owner WAV, looping Bink SoundWave on `BP_ERPlayerController`, saved 0–100% slider,

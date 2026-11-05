@@ -196,7 +196,8 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
     }
     auto Clear=[&](FVector P)
     {
-        if(L.CircularArena && FVector2D(P).Size()>Half.X-50)return false;
+        if(L.CircularArena &&
+            FMath::Square(P.X/(Half.X-50))+FMath::Square(P.Y/(Half.Y-50))>1)return false;
         if(P.ContainsNaN() || FMath::Abs(P.X)>Half.X-40 || FMath::Abs(P.Y)>Half.Y-40 || P.Z<94 || P.Z>Size.Z-94)return false;
         for(const auto& Frame:VolumeFrames)
         {

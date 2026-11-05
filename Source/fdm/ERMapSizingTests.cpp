@@ -270,7 +270,7 @@ bool FERMapSizingTest::RunTest(const FString&)
             }
             if(TeamSize<=2)
             {
-                TestTrue(TEXT("compact central building has one floor"),Id!=TEXT("CentralBuilding") || L.BuildingFloors==1);
+                TestTrue(TEXT("central villa has a playable upper level"),Id!=TEXT("CentralBuilding") || L.BuildingFloors==TeamSize+1);
                 TestTrue(TEXT("compact alleys have two approaches"),Id!=TEXT("MiddleEasternAlleys") || L.DistrictAccesses==2);
                 TestTrue(TEXT("compact training hall has no nave grid"),Id!=TEXT("FireTraining") || L.WarehouseNaves==0);
                 TestTrue(TEXT("compact rooms have four, six or eight rooms"),Id!=TEXT("Rooms") || L.Rooms.Num()==6 || (TeamSize==2 && (L.Rooms.Num()==4 || L.Rooms.Num()==8)));

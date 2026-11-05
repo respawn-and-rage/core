@@ -390,11 +390,25 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
             auto P=[&](FVector V){return Frame.TransformPosition(V+FVector(-W*.5f,-D*.5f,0));};
             auto Solid=[&](FVector C,FVector Size){PairBox(P(C),Size,V.RoofSurface,true,Yaw);};
             TArray<FVector> Route{P({70,90,100}),P({70,180,100})};
-            for(int32 I=0;I<N;++I){const float H=(I+1)*Rise;Solid({70,200+(I+.5f)*30,H*.5f},{120,30,H});Route.Add(P({70,200+(I+.5f)*30,H+100}));}
-            Solid({150,200+Run+60,Height*.25f},{280,120,Height*.5f});
+            for(int32 I=0;I<N;++I){const float H=(I+1)*Rise;if(I+1<N)Solid({70,200+(I+.5f)*30,H*.5f},{120,30,H});Route.Add(P({70,200+(I+.5f)*30,H+100}));}
+            // Fill the rear stair bay to the lot edge. A player dropping from
+            // the roof lands on the switchback and can descend to the street.
+            const float LandingStart=200+Run-30;
+            Solid({150,(LandingStart+D)*.5f,Height*.25f},{300,D-LandingStart,Height*.5f});
             Route.Add(P({70,200+Run+60,Height*.5f+100}));Route.Add(P({230,200+Run+60,Height*.5f+100}));
-            for(int32 I=0;I<N;++I){const float H=(N+I+1)*Rise;Solid({230,200+Run-(I+.5f)*30,H*.5f},{120,30,H});Route.Add(P({230,200+Run-(I+.5f)*30,H+100}));}
-            const float Far=300+(W-300)*.15f;Solid({(170+Far)*.5f,140,Height-10},{Far-170,120,20});
+            for(int32 I=0;I<N;++I)
+            {
+                const float H=(N+I+1)*Rise;
+                const float Y=200+Run-(I+.5f)*30;
+                // The first upper tread sits on the landing, which also forms the last lower tread.
+                const float Bottom=I==0 ? Height*.5f:0.f;
+                Solid({230,Y,(H+Bottom)*.5f},{120,30,H-Bottom});
+                Route.Add(P({230,Y,H+100}));
+            }
+            const float Far=300+(W-300)*.15f;
+            // The procedural roof starts at x=300 in the stair frame.
+            const float LandingEnd=V.ProceduralHouses ? 300.f:Far;
+            Solid({(170+LandingEnd)*.5f,140,Height-10},{LandingEnd-170,120,20});
             Route.Add(P({230,140,Height+100}));Route.Add(P({Far,140,Height+100}));Route.Add(P({Far+50,140,(V.ProceduralHouses ? Height:Height*.94f)+100}));
             L.RooftopRoutes.Add(Route);TArray<FVector> Mate;for(auto Q:Route)Mate.Add(Opposite(Q));L.RooftopRoutes.Add(Mate);
         }
@@ -453,7 +467,8 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
                 if(Gap>=60)
                 {
                     FVector Deck=(P1+P2)*.5f;Deck.Z=FMath::Min(Left.Max.Z,Right.Max.Z)-10;
-                    FVector DeckSize(180,180,20);DeckSize[Axis]=Gap+100;
+                    FVector DeckSize(180,180,20);// Join the roof edges without putting a second visible surface on either slab.
+                    DeckSize[Axis]=Gap;
                     const FBox DeckBounds(Deck-DeckSize*.5f+FVector(.1f),Deck+DeckSize*.5f-FVector(.1f));
                     bool DeckClear=true;
                     for(const auto& Piece:Pieces)if(!Piece.VisualOnly)
