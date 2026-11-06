@@ -15,29 +15,33 @@ the wall layout is an ellipse stretched along the spawn axis, moving both starts
 
 The seed retains its hill configuration, one of four building profiles (rectangle,
 H, cross or stepped wings), and one of three crossing rules across geometry retries.
-The light concrete villa stays within 18 × 24m even on large arenas. Width and
+Some open lateral-hill layouts place the villa beside a long shallow-entry pool that
+follows the curved perimeter in joined sections. A timber boardwalk lines the shore;
+the dry side keeps the mirrored spawn approaches and secondary buildings, with mixed cover from 2v2 onward,
+and the opposite hill. The pool floor is 90cm below its waterline, with a 20cm
+entry shelf along the landward edge.
+The light concrete villa stays within 15 × 22m even on large arenas. Width and
 depth vary independently. A solid concrete floor follows the ground-floor plan
 and sits 5cm above the outdoor terrain. Main entrances sit on the west-facing
 side walls of each half. Every window has destructible clear glass. Wide front
 bays have low sills and multiple panes separated by concrete mullions.
 
-The villa has two storeys in 1v1 and three from 2v2 onward. Interior stairs
-connect every storey, with doors onto recessed first-floor terraces. Stairs use
-20cm risers and 30cm treads, and main doors are 240cm wide.
+The villa has two storeys in 1v1, three in 2v2 and 3v3, and four from 4v4 onward. One central interior ramp per level connects every storey and reaches the roof when it has a pool. Destructible glass panes follow both sides of the treads, rising with each step under a continuous sloping metal cap; a separate destructible glass guard encloses the upper floor opening. The seed chooses which team's side has the low end of the ramp; every floor uses the same direction. The ramp is the sole deliberate exception to the arena's mirror geometry; spawns and exterior approaches remain mirrored. Divided rooms on every floor have wide openings, destructible timber tables with open space beneath their tops, and low counters without blocking the central passage. Doors lead onto recessed first-floor terraces. Stairs use
+20cm risers and 25cm tread depth, and main doors are 240cm wide.
 
 Some open central-hill layouts have one wide central pool; other central-hill layouts can have two mirrored recessed courtyard pools. Their solid concrete
 floors are 20cm below the water at both ends and 90cm below it in the centre.
 The clear water surface has no collision, so players walk on the basin floor.
-Water detection stays within 95cm below the surface, excluding rooms beneath roof pools.
+Water detection stays within 105cm below the surface, excluding rooms beneath roof pools.
 Wading reduces movement speed progressively from 90% near the surface to 50% at 100cm depth.
 The wall separator extends below the local terrain grade so its underside stays hidden on slopes.
 `setup_pool_water.py` creates the owned translucent water material in Unreal.
-Open layouts on the central hill can have a compact roof pool even in 1v1. Its waterline is flush with the roof, its basin extends 80cm into the slab, and mirrored square corner treads lead from the rim to the floor. Paired exterior tread stairs reach the roof without an interior roof opening.
+Open layouts on the central hill can have a compact roof pool even in 1v1. Its waterline is flush with the roof, its basin extends 100cm into the slab, and five square treads in a corner of each mirrored half lead from the rim to the floor. The interior stairwell extends to the roof beside the pool.
 
 - Open: connected ground routes, with no central separator.
 - Wall division: 340cm exterior Brick separator, above the default jump and climb
-  reach. Inside the villa it meets the intact first-floor ceiling, with no crossing stairs or opening in the slab.
-- Railing division: the 100cm concrete plinth and steel module match the outer fence height; the divider meets a small side building at its outer walls.
+  reach. It stops at the villa facade, leaving the interior free of the divider.
+- Railing division: the 100cm concrete plinth and steel module match the outer fence height; the divider stops at the villa facade and meets a small side building at its outer walls.
   A ground route crosses the seam through its two connected rooms.
 - The wall division also has paired exterior stairs on the flank, away from
   the main building.

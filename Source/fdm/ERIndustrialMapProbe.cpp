@@ -79,12 +79,28 @@ void AERIndustrialMapProbe::Capture(AERProceduralMap* Map,int32 View)
         Camera->SetActorLocation(L.CentralBuildingCenter+FVector(-L.CentralBuildingSize.X*1.25f,-L.CentralBuildingSize.Y, L.CentralBuildingSize.Z+1000));
         Camera->SetActorRotation((Target-Camera->GetActorLocation()).Rotation());Camera->GetCameraComponent()->FieldOfView=65;
     }
+    if(View==6)
+    {
+        const float InnerBand=FMath::GridSnap(L.CentralBuildingSize.Y*.24f,100.f);
+        const FVector Eye=L.CentralBuildingCenter+FVector(-65,-InnerBand*.5f-270,165);
+        const FVector Target=L.CentralBuildingCenter+FVector(L.CentralBuildingSize.X*.25f,-InnerBand*.5f,115);
+        Camera->SetActorLocation(Eye);Camera->SetActorRotation((Target-Eye).Rotation());
+        Camera->GetCameraComponent()->FieldOfView=75;
+    }
+    if(View==7 && !L.StairRoutes.IsEmpty())
+    {
+        const FVector Stair=L.StairRoutes[0][0];
+        const FVector Target(Stair.X,0,Stair.Z+85);
+        Camera->SetActorLocation(Target+FVector(390,-330,35));
+        Camera->SetActorRotation((Target-Camera->GetActorLocation()).Rotation());
+        Camera->GetCameraComponent()->FieldOfView=72;
+    }
     if(!Ground)
     {
         Camera->GetCameraComponent()->ProjectionMode=ECameraProjectionMode::Orthographic;
         Camera->GetCameraComponent()->OrthoWidth=FMath::Max(L.ArenaSize.X,L.ArenaSize.Y*16.f/9)*1.08;
     }
-    const FString Filename=FPaths::ProjectSavedDir()/FString::Printf(TEXT("Testing/Industrial-%s-rule%d-seed%d.png"),View==5 ? TEXT("Architecture"):View==4 ? TEXT("Fence"):View==3 ? TEXT("Concrete"):View==2 ? TEXT("Container"):Ground ? TEXT("Ground"):TEXT("Plan"),int32(L.CrossingRule),Map->LayoutConfig.Seed);
+    const FString Filename=FPaths::ProjectSavedDir()/FString::Printf(TEXT("Testing/Industrial-%s-rule%d-seed%d.png"),View==7 ? TEXT("StairGlass"):View==6 ? TEXT("Interior"):View==5 ? TEXT("Architecture"):View==4 ? TEXT("Fence"):View==3 ? TEXT("Concrete"):View==2 ? TEXT("Container"):Ground ? TEXT("Ground"):TEXT("Plan"),int32(L.CrossingRule),Map->LayoutConfig.Seed);
     FTimerHandle ScreenshotTimer;GetWorldTimerManager().SetTimer(ScreenshotTimer,[Filename](){FScreenshotRequest::RequestScreenshot(Filename,false,false);},.35f,false);
 }
 void AERIndustrialMapProbe::TickWaterGallery(AERProceduralMap* Map)
@@ -185,7 +201,9 @@ void AERIndustrialMapProbe::Tick(float Delta)
     {
         if(!Phase && Elapsed>3)
         {Check(ERIndustrialTest::FactoryPaletteMatches(*Map),TEXT("factory_palette_applied_to_rendered_metal"));Check(ERIndustrialTest::IntermediateCoverMatches(*Map),TEXT("intermediate_cover_access_and_concealment"));Capture(Map);Publish(1,Map);
-            FTimerHandle ArchitectureTimer;GetWorldTimerManager().SetTimer(ArchitectureTimer,FTimerDelegate::CreateWeakLambda(this,[this,Map](){Capture(Map,5);}),1.5f,false);}
+            FTimerHandle ArchitectureTimer;GetWorldTimerManager().SetTimer(ArchitectureTimer,FTimerDelegate::CreateWeakLambda(this,[this,Map](){Capture(Map,5);}),1.5f,false);
+            FTimerHandle InteriorTimer;GetWorldTimerManager().SetTimer(InteriorTimer,FTimerDelegate::CreateWeakLambda(this,[this,Map](){Capture(Map,6);}),3.f,false);
+            FTimerHandle StairTimer;GetWorldTimerManager().SetTimer(StairTimer,FTimerDelegate::CreateWeakLambda(this,[this,Map](){Capture(Map,7);}),4.5f,false);}
         if(Phase && Elapsed>7 && Gallery==0){Capture(Map,2);++Gallery;}
         if(Phase && Elapsed>11 && Gallery==1){Capture(Map,1);++Gallery;}
         if(Phase && Elapsed>15 && Gallery==2){Capture(Map,3);++Gallery;}
@@ -243,7 +261,16 @@ void AERIndustrialMapProbe::Tick(float Delta)
                 if(WallAccess)Check(C->GetActorLocation().Z>90 && C->GetActorLocation().Z<110,TEXT("actual_pawn_crossed_3m_wall_and_descended"));
                 C->GetCharacterMovement()->StopMovementImmediately();++Flight;Walking=false;
             }
-            if(Walking && Elapsed-WalkStarted>(WallAccess ? 6:4)){Check(false,TEXT("stair_flight_timeout"));++Flight;Walking=false;}
+            if(Walking && Elapsed-WalkStarted>(WallAccess ? 6:4))
+            {
+                FHitResult StairHit;FCollisionQueryParams StairQuery(SCENE_QUERY_STAT(ERStairTimeout),false,C);
+                const bool Blocked=GetWorld()->SweepSingleByChannel(StairHit,Path[0],Path[1],FQuat::Identity,
+                    ECC_Pawn,FCollisionShape::MakeCapsule(34,92.5),StairQuery);
+                UE_LOG(LogTemp,Warning,TEXT("ER_INDUSTRIAL_STAIR_TIMEOUT flight=%d position=%s goal=%s start=%s next=%s blocked=%d hit=%s component=%s"),
+                    Flight,*C->GetActorLocation().ToString(),*Goal.ToString(),*Path[0].ToString(),*Path[1].ToString(),
+                    int32(Blocked),*GetNameSafe(StairHit.GetActor()),*GetNameSafe(StairHit.GetComponent()));
+                Check(false,TEXT("stair_flight_timeout"));++Flight;Walking=false;
+            }
         }
         else if(LadderIndex<Map->GetLayout().Ladders.Num())
         {

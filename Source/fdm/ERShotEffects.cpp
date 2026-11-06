@@ -1,8 +1,10 @@
 #include "ERShotEffects.h"
 #include "ERCharacter.h"
 #include "ERWeapon.h"
+#include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
@@ -298,17 +300,31 @@ AERAttachedTracer* AERAttachedTracer::Spawn(AERCharacter* Character, UNiagaraSys
     const FVector& End, bool bInFirstPerson, float Duration)
 {
     if (!Character || !System || !FApp::CanEverRender() || Character->GetNetMode() == NM_DedicatedServer || !Character->Weapon) return nullptr;
+    const FVector Tip = Character->GetRenderedMuzzle(bInFirstPerson);
+    const FVector ToEnd = End - Tip;
+    const double Distance = ToEnd.Size();
+    if (Distance < 1.) return nullptr;
+    // Sample movement once. The gap opens along the shot, even during a strafe.
+    const double Speed = Character->GetVelocity().Size();
+    const double RunSpeed = FMath::Max(1., double(Character->GetCharacterMovement()->MaxWalkSpeed));
+    // The rendered first-person muzzle is already compressed toward the camera.
+    const double ViewScale = bInFirstPerson && Character->Camera->bEnableFirstPersonScale ?
+        Character->Camera->FirstPersonScale : 1.;
+    const double Gap = Speed < 1. ? .75 : ViewScale * FMath::Lerp(50., 100., FMath::Clamp(Speed / RunSpeed, 0., 1.));
+    // Keep a visible segment ending at the impact, even at point-blank range.
+    const double MaxGap = Distance - FMath::Min(5., Distance * .25);
+    const FVector Start = Tip + (ToEnd / Distance) * FMath::Min(Gap, MaxGap);
+
     auto* Tracer = Character->GetWorld()->SpawnActorDeferred<AERAttachedTracer>(StaticClass(), FTransform::Identity,
         Character, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
     if (!Tracer) return nullptr;
     Tracer->Source = Character;
     Tracer->ShotData = Character->Weapon->Data;
+    Tracer->LastStart = Start;
     Tracer->LastEnd = End;
     Tracer->bFirstPerson = bInFirstPerson;
     Tracer->DurationSeconds = Duration;
     Tracer->Beam->SetAsset(System);
-    Tracer->AddTickPrerequisiteComponent(bInFirstPerson ? Character->FirstPersonBody.Get() : Character->GetMesh());
-    Tracer->AddTickPrerequisiteComponent(bInFirstPerson ? Character->FirstPersonRifle.Get() : Character->WorldRifle.Get());
     UGameplayStatics::FinishSpawningActor(Tracer, FTransform::Identity);
     return Tracer;
 }
@@ -316,23 +332,14 @@ void AERAttachedTracer::BeginPlay()
 {
     Super::BeginPlay();
     Beam->AddTickPrerequisiteActor(this);
-    UpdateBeam();
-    Beam->Activate(true);
-    Beam->PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
-}
-void AERAttachedTracer::UpdateBeam()
-{
-    if (!Source.IsValid()) return;
-    const FVector Tip = Source->GetRenderedMuzzle(bFirstPerson);
-    const FVector ToEnd = LastEnd - Tip;
-    const double Distance = ToEnd.Size();
-    LastStart = Tip + ToEnd.GetSafeNormal() * FMath::Min(.75, Distance * .25);
     const FVector Segment = LastEnd - LastStart;
     Beam->SetWorldLocation((LastStart + LastEnd) * .5);
     const FVector Extent = Segment.GetAbs() * .5 + FVector(4);
     Beam->SetSystemFixedBounds(FBox(-Extent, Extent));
     Beam->SetVariableVec3(TEXT("User.Alignment"), Segment.GetSafeNormal());
     Beam->SetVariableVec2(TEXT("User.Size"), FVector2D(.12, Segment.Size()));
+    Beam->Activate(true);
+    Beam->PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
 }
 void AERAttachedTracer::Tick(float DeltaSeconds)
 {
@@ -342,7 +349,6 @@ void AERAttachedTracer::Tick(float DeltaSeconds)
     const double Now = GetWorld()->GetTimeSeconds();
     if (VisibleSince < 0) VisibleSince = Now;
     else if (Now - VisibleSince >= DurationSeconds) { Destroy(); return; }
-    UpdateBeam();
     ++UpdatedFrames;
 #if !UE_BUILD_SHIPPING
     if (FParse::Param(FCommandLine::Get(), TEXT("ERTracerAudit")))

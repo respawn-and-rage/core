@@ -197,7 +197,7 @@ void AERClaymore::Detonate()
 {
     if(!HasAuthority() || State!=EERClaymoreState::Armed)return;
     if(GetWorld()->GetTimeSeconds()>=ExpiresAt) { Terminate();return; }
-    State=EERClaymoreState::Triggered;ForceNetUpdate();MulticastDetonation(BlastEffect);
+    State=EERClaymoreState::Triggered;ForceNetUpdate();
     auto* Controller=SessionOwner?Cast<AController>(SessionOwner->GetOwner()):nullptr;
     TArray<FOverlapResult> Candidates;FCollisionQueryParams Q(SCENE_QUERY_STAT(ERClaymoreDamage),false,this);
     GetWorld()->OverlapMultiByObjectType(Candidates,GetActorLocation(),FQuat::Identity,FCollisionObjectQueryParams(ECC_Pawn),FCollisionShape::MakeSphere(DamageRadius),Q);
@@ -212,6 +212,7 @@ void AERClaymore::Detonate()
         float Damage=ERWeaponBallistics::GrenadeDamage(PeakDamage,FVector::Distance(GetActorLocation(),T->GetActorLocation()),0,DamageRadius);
         UGameplayStatics::ApplyPointDamage(T,Damage,Direction,H,Controller,this,UDamageType::StaticClass());
     }
+    MulticastDetonation(BlastEffect);
     // Dedicated structural profile; front-biased origin, no HE profile inheritance.
     if(State==EERClaymoreState::Triggered)AERBlockRoom::ApplyWorldExplosion(GetWorld(),GetActorLocation()+GetActorForwardVector()*StructuralRadius,FERBlockExplosionProfile::Linear(StructuralRadius,StructuralDamage),this);
     Terminate();

@@ -5,7 +5,7 @@
 #include "ERPerformanceSettings.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
+#include "Sound/SoundWave.h"
 #include "Animation/AnimSequence.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -149,16 +149,25 @@ void AERGrenadeExplosion::PrecacheEffect(TSubclassOf<AERGrenadeExplosion> Effect
     Defaults->Burst->PrecachePSOs();
 }
 
+USoundBase* AERGrenadeExplosion::SelectSound(UWorld* World, const FVector& Position, USoundBase* DefaultSound,
+    UNiagaraSystem*& WaterSystem, FVector& WaterSurface)
+{
+    for (TActorIterator<AERProceduralMap> It(World); It; ++It)
+    {
+        if (It->WaterDepthAt(Position) <= 5.f || !It->WaterSurfaceAt(Position, WaterSurface)) continue;
+        WaterSystem = It->WaterExplosionSystem;
+        return It->WaterExplosionSound ? It->WaterExplosionSound.Get() : DefaultSound;
+    }
+    return DefaultSound;
+}
+
 void AERGrenadeExplosion::BeginPlay()
 {
     Super::BeginPlay();
     if (GetNetMode() == NM_DedicatedServer || !BurstTemplate) { Destroy(); return; }
-    USoundBase* SelectedSound=ExplosionSound;
-    UNiagaraSystem* SelectedWaterSystem=nullptr;
-    FVector WaterSurface=FVector::ZeroVector;
-    for(TActorIterator<AERProceduralMap> It(GetWorld());It;++It)
-        if(It->WaterDepthAt(GetActorLocation())>5.f && It->WaterSurfaceAt(GetActorLocation(),WaterSurface))
-        {if(It->WaterExplosionSound)SelectedSound=It->WaterExplosionSound;SelectedWaterSystem=It->WaterExplosionSystem;break;}
+    UNiagaraSystem* SelectedWaterSystem = nullptr;
+    FVector WaterSurface = FVector::ZeroVector;
+    USoundBase* SelectedSound = SelectSound(GetWorld(), GetActorLocation(), ExplosionSound, SelectedWaterSystem, WaterSurface);
     if(SelectedSound)
     {
         auto* Audio=UGameplayStatics::SpawnSoundAtLocation(this,SelectedSound,GetActorLocation(),FRotator::ZeroRotator,

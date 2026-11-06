@@ -125,7 +125,7 @@ FNetworkPredictionData_Client* UERMovement::GetPredictionData_Client() const
     if (!ClientPredictionData) const_cast<UERMovement*>(this)->ClientPredictionData = new FERPredictionData(*this);
     return ClientPredictionData;
 }
-bool UERMovement::FindLedge(FVector& Destination, float& Height) const
+bool UERMovement::FindLedge(FVector& Destination, float& Height, double ApproachReach) const
 {
     if (!CharacterOwner || !UpdatedComponent || Locomotion.HalfHeight < 92.f || bProneWanted || IsChangingPosture()) return false;
     const auto* Capsule = CharacterOwner->GetCapsuleComponent();
@@ -137,7 +137,7 @@ bool UERMovement::FindLedge(FVector& Destination, float& Height) const
     FCollisionQueryParams Params(SCENE_QUERY_STAT(ERLedge), false, CharacterOwner);
     FHitResult Wall, Top;
     // A short wall feeler prevents mounting distant blocks or ordinary stairs.
-    if (!GetWorld()->LineTraceSingleByChannel(Wall, Feet + FVector(0,0,35), Feet + FVector(0,0,35) + Forward*(Radius+25), ECC_Visibility, Params)) return false;
+    if (!GetWorld()->LineTraceSingleByChannel(Wall, Feet + FVector(0,0,35), Feet + FVector(0,0,35) + Forward*FMath::Max(Radius+25.0,ApproachReach), ECC_Visibility, Params)) return false;
     if (FMath::Abs(Wall.ImpactNormal.Z) > .2f) return false;
     auto SampleTop = [&](float Along,FHitResult& Hit)
     {
@@ -146,7 +146,8 @@ bool UERMovement::FindLedge(FVector& Destination, float& Height) const
     };
     // Start just inside the face. A fixed probe55cm beyond it skips thin
     // parapets completely, even when they have a valid walkable top.
-    const float Near=FVector::DotProduct(Wall.ImpactPoint-Feet,Forward)+2,Preferred=Radius+55;
+    const float Near=FVector::DotProduct(Wall.ImpactPoint-Feet,Forward)+2;
+    const float Preferred=ApproachReach > 0.0 ? FMath::Max(Radius+55,Near+30) : Radius+55;
     if(!SampleTop(Near,Top))return false;
     Height = Top.ImpactPoint.Z - Feet.Z;
     if (Height <= Step || Height > Climb || (Height > Vault && !bClimbHeld) || (IsFalling() && !bClimbHeld)) return false;
@@ -186,12 +187,10 @@ void UERMovement::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
     UpdatePosture(DeltaSeconds);
     UpdateSprint();
     if(!IsTraversing() && (IsMovingOnGround() || IsFalling()) && GetWorld()->GetTimeSeconds()>=RetryAfter && CanClimbLadder())
-        if(auto* Ladder=FindLadder(true))
+        if(FindLadder(true))
         {
-            const FVector Local=Ladder->GetActorTransform().InverseTransformPosition(UpdatedComponent->GetComponentLocation());
-            FHitResult Hit;
-            SafeMoveUpdatedComponent(Ladder->ClimbPosition(Local.Z-CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight(),CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight())-UpdatedComponent->GetComponentLocation(),UpdatedComponent->GetComponentQuat(),true,Hit);
-            if(!Hit.IsValidBlockingHit()){Velocity=FVector::ZeroVector;SetMovementMode(MOVE_Custom,2);}
+            Velocity=FVector::ZeroVector;
+            SetMovementMode(MOVE_Custom,2);
         }
     if (IsTraversing() || (!IsMovingOnGround() && !IsFalling()) || Acceleration.IsNearlyZero() || GetWorld()->GetTimeSeconds() < RetryAfter) return;
     if (FVector::DotProduct(Acceleration.GetSafeNormal2D(), CharacterOwner->GetActorForwardVector()) < .5f) return;
@@ -501,6 +500,25 @@ bool UERMovement::CanClimbLadder() const
     return C && !C->Health->bDead && Locomotion.HalfHeight>=92 && !bProneWanted && !bWantsToCrouch &&
         !IsChangingPosture();
 }
+bool UERMovement::ShouldLowerWeaponForLedge() const
+{
+    if (IsMantling()) return CustomMovementMode == 1;
+    if ((!IsMovingOnGround() && !IsFalling()) || GetWorld()->GetTimeSeconds() < RetryAfter ||
+        !CharacterOwner || FVector::DotProduct(Acceleration.GetSafeNormal2D(), CharacterOwner->GetActorForwardVector()) < .5)
+        return false;
+
+    const auto* Player = Cast<AERCharacter>(CharacterOwner);
+    const auto* Data = Player && Player->Weapon ? Player->Weapon->Data.Get() : nullptr;
+    if (!Data || !Data->Mesh || !Data->bWorldReferencePose) return false;
+
+    const auto Bounds = Data->Mesh->GetBounds();
+    const double MuzzleReach = FMath::Max(0.0, Bounds.Origin.X + Bounds.BoxExtent.X - Data->WorldStockContact.X) * Data->WorldWeaponScale;
+    const double Reach = 52.0 * Player->GetCapsuleComponent()->GetShapeScale() + MuzzleReach;
+    FVector Destination;
+    float Height;
+    return FindLedge(Destination, Height, Reach + 5.0);
+}
+
 bool UERMovement::IsWeaponAtLadder() const
 {
     const auto* Player=Cast<AERCharacter>(CharacterOwner);
@@ -518,9 +536,9 @@ bool UERMovement::IsWeaponAtLadder() const
         const FTransform& Frame=It->GetActorTransform();
         const FVector Local=Frame.InverseTransformPosition(Position);
         const float Feet=Local.Z-Half;
-        if(Local.X<30 || Local.X>Reach+20 || FMath::Abs(Local.Y)>50 ||
+        if(Local.X<30 || Local.X>Reach+20 || FMath::Abs(Local.Y)>60 ||
             Feet< -35 || Feet>It->Height+8 || !It->HasRung(Feet))continue;
-        if(FVector::DotProduct(Player->GetActorForwardVector(),-It->GetActorForwardVector())<.7f)continue;
+        if(FVector::DotProduct(Player->GetActorForwardVector(),-It->GetActorForwardVector())<.5f)continue;
         // The ladder cells belong to the map, not to the ladder actor.
         // Reject a separate wall between the weapon and the rung plane.
         FHitResult Cover;
@@ -548,7 +566,7 @@ AERLadder* UERMovement::FindLadder(bool Entry) const
         if(It->IsActorBeingDestroyed())continue;
         const FVector P=It->GetActorTransform().InverseTransformPosition(UpdatedComponent->GetComponentLocation());
         const float Feet=P.Z-Half;
-        const bool FromRoof=Entry && FMath::Abs(Feet-It->DeckHeight)<15 && P.X>=-130 && P.X<30;
+        const bool FromRoof=(Entry || IsOnLadder()) && FMath::Abs(Feet-It->DeckHeight)<15 && P.X>=-130 && P.X<30;
         if(FMath::Abs(P.Y)>60 || (P.X<30 && !FromRoof) || P.X>115 || Feet< -35 || Feet>It->Height+8)continue;
         const FVector Toward=FromRoof ? It->GetActorForwardVector():-It->GetActorForwardVector();
         if(Entry && (Acceleration.IsNearlyZero() || FVector::DotProduct(Acceleration.GetSafeNormal2D(),Toward)<.5f))continue;
@@ -566,6 +584,25 @@ void UERMovement::PhysLadder(float DeltaTime,int32 Iterations)
     {bLadderNeedsRelease=true;SetMovementMode(MOVE_Falling);RetryAfter=GetWorld()->GetTimeSeconds()+.35;StartNewPhysics(DeltaTime,Iterations);return;}
     const float Half=CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
     const FVector Local=Ladder->GetActorTransform().InverseTransformPosition(UpdatedComponent->GetComponentLocation());
+    const FVector Before = UpdatedComponent->GetComponentLocation();
+    const FVector Attach = Ladder->ClimbPosition(Local.Z-Half, Half);
+    const FVector ToAttach = Attach-Before;
+    if (!ToAttach.IsNearlyZero(.1))
+    {
+        // Align to the rungs at a bounded speed before applying vertical input.
+        constexpr float AttachSpeed = 300.f;
+        FHitResult Hit;
+        SafeMoveUpdatedComponent(ToAttach.GetClampedToMaxSize(AttachSpeed*DeltaTime),
+            UpdatedComponent->GetComponentQuat(), true, Hit);
+        Velocity = FVector::ZeroVector;
+        if (Hit.IsValidBlockingHit() || Hit.bStartPenetrating)
+        {
+            bLadderNeedsRelease = true;
+            RetryAfter = GetWorld()->GetTimeSeconds()+.35;
+            SetMovementMode(MOVE_Falling);
+        }
+        return;
+    }
     const float Input=FMath::Clamp(FVector::DotProduct(Acceleration,-Ladder->GetActorForwardVector())/GetMaxAcceleration(),-1.f,1.f);
     const float Feet=Local.Z-Half,Next=Feet+Input*LadderSpeed()*DeltaTime;
     FVector Target=Ladder->ClimbPosition(FMath::Clamp(Next,0.f,Ladder->Height),Half);
@@ -578,7 +615,7 @@ void UERMovement::PhysLadder(float DeltaTime,int32 Iterations)
         Velocity=FVector::ZeroVector;SetMovementMode(MOVE_Custom,3);
         return;
     }
-    FHitResult Hit;const FVector Before=UpdatedComponent->GetComponentLocation();
+    FHitResult Hit;
     SafeMoveUpdatedComponent(Target-Before,UpdatedComponent->GetComponentQuat(),true,Hit);
     Velocity=(UpdatedComponent->GetComponentLocation()-Before)/FMath::Max(DeltaTime,SMALL_NUMBER);
     if(Next<=0 && Input<0){bLadderNeedsRelease=true;SetMovementMode(MOVE_Falling);Velocity=FVector::ZeroVector;RetryAfter=GetWorld()->GetTimeSeconds()+.5;}

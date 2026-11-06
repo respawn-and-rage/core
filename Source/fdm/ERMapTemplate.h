@@ -119,7 +119,7 @@ struct FERCentralBuildingRecipe
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FVector2D BuildingWidth=FVector2D(1800,2400);
     UPROPERTY(EditAnywhere, BlueprintReadWrite) FVector2D BuildingDepth=FVector2D(2200,3000);
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="1",ClampMax="3")) int32 MinFloors=1;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="1",ClampMax="3")) int32 MaxFloors=3;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="1",ClampMax="4")) int32 MaxFloors=4;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<class UStaticMesh> FenceMesh;
     // Optional original straight module, repeated inside the existing barrier bounds.
     UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<class UStaticMesh> FenceModule;
@@ -302,6 +302,8 @@ struct FERMapTemplatePiece
     UPROPERTY(EditAnywhere, BlueprintReadWrite) EERBlockMaterial Material=EERBlockMaterial::Wood;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) bool Destructible=true;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) bool Mirrored=false;
+    // Generated central-villa stair treads and glass guards may cross the mirror seam.
+    bool bAsymmetricCentralStair=false;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) bool Anchored=false;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="1",ClampMax="16")) float Strength=1;
     // Fixed boxes or horizontal destructible construction panels, never fitted art.

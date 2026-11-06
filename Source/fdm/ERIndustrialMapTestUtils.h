@@ -111,9 +111,11 @@ inline bool IntermediateCoverMatches(AERProceduralMap& Map,bool Breached=false)
     for(int32 I=0;I<Map.GetLayout().CoverSites.Num();++I)
     {
         const auto& Site=Map.GetLayout().CoverSites[I];
-        if(World->SweepSingleByChannel(Hit,Frame.TransformPosition(Site.Entry),Frame.TransformPosition(Site.Hide),FQuat::Identity,ECC_Pawn,FCollisionShape::MakeCapsule(34,Site.HalfHeight),Q))return false;
+        if(World->SweepSingleByChannel(Hit,Frame.TransformPosition(Site.Entry),Frame.TransformPosition(Site.Hide),FQuat::Identity,ECC_Pawn,FCollisionShape::MakeCapsule(34,Site.HalfHeight),Q))
+        {UE_LOG(LogTemp,Warning,TEXT("ER_COVER_ACCESS_REJECT seed=%d site=%d hit=%s"),Map.LayoutConfig.Seed,I,*GetNameSafe(Hit.GetComponent()));return false;}
         const bool Hidden=World->LineTraceSingleByChannel(Hit,Frame.TransformPosition(Site.SightFrom),Frame.TransformPosition(Site.SightTo),ECC_GameTraceChannel1,Q);
-        if(Hidden!=(I!=0 || !Breached))return false;
+        if(Hidden!=(I!=0 || !Breached))
+        {UE_LOG(LogTemp,Warning,TEXT("ER_COVER_CONCEALMENT_REJECT seed=%d site=%d hidden=%d"),Map.LayoutConfig.Seed,I,int32(Hidden));return false;}
     }
     return true;
 }

@@ -61,7 +61,10 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
             (Piece.Destructible && (Piece.VisualOnly || Piece.FixedSurface)) || (!Piece.Destructible && (Piece.CellSurface || Piece.MirroredCellSurface)))
             return false;
         if(Piece.SymmetryCenter.ContainsNaN() || (!Central && !Piece.SymmetryCenter.IsNearlyZero()) || Piece.SymmetryCenter.Y!=0 || Piece.SymmetryCenter.Z!=0 || FMath::Abs(Piece.SymmetryCenter.X)>1000)return false;
-        if(Symmetric && !Piece.Mirrored && ((!Mirror && !FMath::IsNearlyEqual(Piece.Center.X,Piece.SymmetryCenter.X)) || !FMath::IsNearlyZero(Piece.Center.Y) || !Piece.Jitter.IsNearlyZero()))return false;
+        if(Piece.bAsymmetricCentralStair && (!Central || !Mirror || Piece.Mirrored ||
+            !((Piece.WalkableSurface && !Piece.Destructible) || Piece.Material==EERBlockMaterial::Glass) ||
+            !Piece.Jitter.IsNearlyZero()))return false;
+        if(Symmetric && !Piece.Mirrored && !Piece.bAsymmetricCentralStair && ((!Mirror && !FMath::IsNearlyEqual(Piece.Center.X,Piece.SymmetryCenter.X)) || !FMath::IsNearlyZero(Piece.Center.Y) || !Piece.Jitter.IsNearlyZero()))return false;
         FRandomStream Random(int32(HashCombine(uint32(C.Seed),uint32(Piece.Group))));
         const float OffsetX=Random.RandRange(-int32(Piece.Jitter.X/50),int32(Piece.Jitter.X/50))*50;
         const float OffsetY=Random.RandRange(-int32(Piece.Jitter.Y/50),int32(Piece.Jitter.Y/50))*50;
@@ -73,6 +76,7 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
             const FBox Bounds=FBox(-Piece.Size*.5,Piece.Size*.5).TransformBy(FTransform(Piece.RotationYaw!=0 ? PhysicalRotation:FQuat::Identity,Center));
             const FVector Min=Bounds.Min,Max=Bounds.Max;
             const float FloorLimit=Alleys && T->Town.LowCoverAndUnderpass ? -420.f:
+                L.CircularArena && !L.PoolWater.IsEmpty() ? -120.f:
                 L.CircularArena && L.CrossingRule==EERCrossingRule::ClimbableWall ? -100.f:0.f;
             if(Min.X < -Half.X-.01 || Max.X > Half.X+.01 || Min.Y < -Half.Y-.01 || Max.Y > Half.Y+.01 || Min.Z<FloorLimit-.01 || Max.Z>Size.Z+.01)
             {UE_LOG(LogTemp,Warning,TEXT("ER_TEMPLATE_BOUNDS_REJECT seed=%d bounds=%s arena=%s"),C.Seed,*Bounds.ToString(),*Size.ToString());return false;}

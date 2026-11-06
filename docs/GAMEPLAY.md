@@ -49,7 +49,9 @@ spent by a fresh gesture; a held key never auto-restarts. Hold Ctrl/C to crouch,
 tap to latch prone, press again to rise; prone entry passes through crouch before
 lowering to the floor. Standing waits for ceiling clearance. Forward
 input vaults; Space+forward climbs, also while airborne. `FindLedge` handles parapets
-down to 20cm wide.
+down to 20cm wide. When forward input targets a valid ledge within the ready
+weapon's reach, long weapons lower for the approach. The body closes the gap
+with normal collision before starting the mantle.
 
 Prone reserves a horizontal body footprint before lowering. Movement sweeps that
 footprint as well as the central capsule; turns sample intervening orientations
@@ -60,7 +62,8 @@ Ladders use custom movement mode 2 (1 is mantle, 3 is the ladder-to-roof transit
 W/S climbs, Space detaches. Pistols, knives and hand grenades stay usable; other
 weapons stow when their forward reach meets a nearby usable ladder, allowing
 the approach before attachment, and return once clear of the ladder. Walls in front of
-the ladder prevent this approach stow. Rungs must physically survive.
+the ladder prevent this approach stow. Rungs must physically survive. On entry,
+the capsule sweeps toward the rung line at a bounded speed before climbing.
 
 Traversal uses `UERMovement` and saved moves. `IA_Look` scalar is 0.18. Camera bob is
 cosmetic. FPS arms, weapon and muzzle flash render as FirstPerson primitives.

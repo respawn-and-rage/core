@@ -185,6 +185,16 @@ public:
     void ApplyDeathVisuals();
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 private:
+    UFUNCTION(Client, Reliable)
+    void ClientBlastRinging(float HoldSeconds, FVector_NetQuantize Origin, TSubclassOf<class AERGrenadeExplosion> Effect);
+    UPROPERTY(Transient) TObjectPtr<class UAudioComponent> BlastRinging;
+    UPROPERTY(Transient) TObjectPtr<class USoundSubmix> BlastWorldMix;
+    TArray<TWeakObjectPtr<UAudioComponent>> BlastVoices;
+    double BlastRecoverAt = 0;
+    float BlastWorldGain = 1.f;
+    void UpdateBlastRinging();
+    void StopBlastRinging();
+
     bool bDeathVisualsApplied = false;
     UPROPERTY(Transient) TArray<FERProtectionSurfaceState> ProtectionSurfaces;
     bool bProtectionVisualsApplied = false;
@@ -194,6 +204,7 @@ private:
     FVector FirstPersonBodyBaseLocation = FVector::ZeroVector;
     FRotator FirstPersonBodyBaseRotation = FRotator::ZeroRotator;
     float IronAimBlend = 0;
+    float LedgeWeaponLowerBlend = 0;
     void UpdateWeaponPresentation();
     FVector LastHitDirection = FVector::ForwardVector;
     FVector DamageViewKick = FVector::ZeroVector;

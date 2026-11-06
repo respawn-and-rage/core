@@ -1,6 +1,6 @@
 # Audio
 
-**Code:** `ERAudio`, `ERFootsteps`, `MulticastShot` in `ERWeapon`, `ReleaseVolume` in `ERSmokeCloud`.
+**Code:** `ERAudio`, `ERBlastRinging`, `ERFootsteps`, `MulticastShot` in `ERWeapon`, `ReleaseVolume` in `ERSmokeCloud`.
 
 `UERWeaponData.ShotAudio` references a `UEROneShotAudio` palette. The server-authorized
 `MulticastShot` carries the accepted weapon data; no variant index is replicated. Each emitter
@@ -35,9 +35,21 @@ Smoke `ReleaseVolume` defaults to about .2055, a Blueprint-editable local gain.
 Menu music: owner WAV, looping Bink SoundWave on `BP_ERPlayerController`, saved 0–100% slider,
 half gain in the Esc menu.
 
+**Blast ringing:** A surviving player who loses health or armor to a blast hears
+the ring immediately. The world submix is muted on that client while the triggering
+blast remains audible. Recovery starts after the blast and the damage-based hold
+(up to 10 seconds) have elapsed. The ring fades as the world mix returns over 1.2
+seconds. A new hit restarts the sample and can extend the hold. Death and pawn
+teardown reset the mix.
+The ring uses a single playback of Freesound 377205 by tnturner (CC0). Import
+through Unreal on macOS with `scripts/setup_blast_ringing_audio.py` and
+`ER_BLAST_RINGING_WAV` set to the original WAV.
+
 Regenerate with `scripts/prepare_audio_pass.py` then `setup_audio_pass.py`; per-sound scripts
 (`setup_shotgun_audio.py`, ...) are reapplied by it. Headless runs never prove listening quality.
 
 ## Verify
 
 `test-audio.py` (`--network --render`), `test-network.py --shot-feedback`. Native: `EclipseRecoil.Audio.*`.
+For blast ringing, listen on both the host and remote client after a survived blast.
+Check the start against the explosion, silence during sustain, the recovery fade, and cleanup on death.

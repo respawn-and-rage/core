@@ -48,6 +48,7 @@ void AERTraversalProbe::Next()
     if(Phase<=6)
     {
         Place(Client,{Phase==1 ? 150.f:220.f,0,4095});
+        if(Phase==3)Place(Client,{145,-75,4095});
         if(Phase==1 || Phase==3)
             for(int32 I=0;I<Client->Inventory.Num();++I)if(Client->Inventory[I]->Data && !Client->Inventory[I]->Data->bOneHanded && Client->Inventory[I]->Data->Payload==EERPayload::Bullet){Client->ServerSelectWeapon(I);break;}
         if(Phase==2 || Phase==4)
@@ -72,7 +73,8 @@ void AERTraversalProbe::Tick(float Delta)
         {
             LocalPhase=Phase;Time=PeakSpeed=0;SawLadder=Sent=false;EquipmentChecks=0;
             for(FKey Key:{EKeys::W,EKeys::S,EKeys::SpaceBar})Input(PC,Key,IE_Released);
-            PC->SetControlRotation(FRotator(0,Phase==4?0:180,0));
+            const float ApproachYaw=Phase==4 ? 0.f : (Phase==3 ? 150.f : 180.f);
+            PC->SetControlRotation(FRotator(0,ApproachYaw,0));
             if(Phase==6){for(int32 I=Fixture->GetInstanceCount()-1;I>=4;--I)Fixture->RemoveInstance(I);}
         }
         const float Previous=Time;Time+=Delta;
@@ -116,6 +118,7 @@ void AERTraversalProbe::Tick(float Delta)
         if(Phase==2 || Phase==3)
         {
             if(SawLadder && !M->IsOnLadder() && C->GetActorLocation().Z>4400)Input(PC,EKeys::W,IE_Released);
+            if(Phase==3 && !SawLadder && M->IsOnLadder())PC->SetControlRotation(FRotator(0,180,0));
             SawLadder|=M->IsOnLadder();
             if(M->IsOnLadder())
             {
@@ -159,6 +162,12 @@ void AERTraversalProbe::Tick(float Delta)
     if(Phase==3 && M->IsMantling() && M->CustomMovementMode==3 && !EquipmentChecks)
     {EquipmentChecks=1;Check(Client->IsWeaponStowed(),TEXT("heavy weapon stays stowed during roof transition"));}
     if(Phase==4 && int32(Time)!=int32(Time-Delta))UE_LOG(LogTemp,Display,TEXT("ER_TRAVERSAL_DESCEND time=%.1f pos=%s mode=%d/%d accel=%s can=%d nearby=%d"),Time,*Client->GetActorLocation().ToString(),M->MovementMode.GetValue(),M->CustomMovementMode,*M->GetCurrentAcceleration().ToString(),M->CanClimbLadder(),M->FindLadder(true)!=nullptr);
+    if(Phase==3 && !SawLadder && M->IsOnLadder())
+    {
+        const FVector Offset=Ladder->GetActorTransform().InverseTransformPosition(Client->GetActorLocation());
+        Check(FMath::Abs(Offset.Y)>15 && Client->IsWeaponStowed(),
+            TEXT("oblique ladder entry starts stowed and aligns over time"));
+    }
     SawLadder|=M->IsOnLadder();SawFall|=M->IsFalling();
     if(M->IsOnLadder())PeakSpeed=FMath::Max(PeakSpeed,FMath::Abs(M->Velocity.Z));
     if(Phase==0 && Time>3){Place(Host,{600,500,4095});Next();}

@@ -88,8 +88,11 @@ CS2 seeds or spray paths: never claim CS2 parity.
   80, torso 40, limbs 25; +20 on head/neck/torso from the rear 120° ground sector.
   Unknown bones keep 40 with no rear bonus.
 - Tracers: every authorized bullet shot, from the rendered muzzle to server endpoints.
-  The shot multicast carries up to 16 pellet endpoints. Audio, recoil and flash stay one
-  event per cartridge. Rockets and thrown utility stay physical.
+  Each segment stays fixed in world space. In motion, the gap along the shot grows
+  with speed up to normal running speed, uses the viewmodel scale in first person,
+  and is shortened for close impacts.
+  The shot multicast carries up to 16 pellet endpoints. Audio, recoil and the brief muzzle
+  flash stay one event per cartridge. Rockets and thrown utility stay physical.
 - Decals: 128 marks, 20s, on surfaces only. Player wounds are replicated bone-local state
   (32 marks) copied to the corpse; health loss uses four wound PNGs, armor-only damage
   four fabric tears. Weapons and Claymores reject decals at runtime.

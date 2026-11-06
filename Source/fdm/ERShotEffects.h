@@ -33,7 +33,7 @@ public:
         const FVector& Position, const FVector& Right, const FVector& Forward, float VisualScale = 1.f);
 };
 
-// Short local tracer: follow the rendered barrel after camera/pose updates.
+// Short local tracer with fixed world-space endpoints.
 UCLASS()
 class FDM_API AERAttachedTracer : public AActor
 {
@@ -44,7 +44,7 @@ public:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
     static AERAttachedTracer* Spawn(class AERCharacter* Character, class UNiagaraSystem* System,
-        const FVector& End, bool bFirstPerson, float Duration = .02f);
+        const FVector& End, bool bFirstPerson, float Duration = .016f);
     FVector LastStart = FVector::ZeroVector;
     FVector LastEnd = FVector::ZeroVector;
     uint32 UpdatedFrames = 0;
@@ -53,6 +53,5 @@ private:
     TWeakObjectPtr<class UERWeaponData> ShotData;
     bool bFirstPerson = false;
     double VisibleSince = -1;
-    float DurationSeconds = .02f;
-    void UpdateBeam();
+    float DurationSeconds = .016f;
 };

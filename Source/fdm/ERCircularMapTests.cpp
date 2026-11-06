@@ -11,17 +11,49 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
 {
     auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.circular");T->Archetype=EERMapArchetype::CentralBuilding;
     FERProceduralConfig C;C.TemplateAsset=T;FERBlockRoomConfig B;TSet<bool> Modes;TSet<int32> Shapes,Rules;TSet<FIntPoint> Dimensions;TSet<FName> CoverKinds;TSet<FIntVector> CoverDimensions;int32 FiringSites=0,GroundOnlySites=0;
-    int32 PoolLayouts=0,SinglePoolLayouts=0,PairedPoolLayouts=0,RoofPoolLayouts=0,SmallRoofPoolLayouts=0;
-    int32 PhysicalRoofSeed=INDEX_NONE,PhysicalSingleSeed=INDEX_NONE,PhysicalPairSeed=INDEX_NONE;
+    int32 PoolLayouts=0,SinglePoolLayouts=0,PairedPoolLayouts=0,WaterfrontLayouts=0,RoofPoolLayouts=0,SmallRoofPoolLayouts=0;
+    int32 PhysicalRoofSeed=INDEX_NONE,PhysicalSingleSeed=INDEX_NONE,PhysicalPairSeed=INDEX_NONE,PhysicalWaterfrontSeed=INDEX_NONE;
+    int32 PhysicalAlphaStairSeed=INDEX_NONE,PhysicalOmegaStairSeed=INDEX_NONE;
     for(int32 TeamSize:{1,2,3,4,8,16})for(int32 Seed=0;Seed<516;++Seed)
     {
         C.ExpectedTeamSize=TeamSize;C.Seed=Seed;FERProceduralLayout L;
         if(!ERProcedural::Build(C,B,L)){AddError(FString::Printf(TEXT("circular layout failed size=%d seed=%d"),TeamSize,Seed));return false;}
-        if(L.CentralBuildingSize.X>1800 || L.CentralBuildingSize.Y>2400 ||
-            L.BuildingFloors!=(TeamSize==1 ? 2 : 3))
+        if(L.CentralBuildingSize.X>1500 || L.CentralBuildingSize.Y>2200 ||
+            L.BuildingFloors!=(TeamSize==1 ? 2 : TeamSize>=4 ? 4 : 3))
         {AddError(TEXT("villa exceeds its footprint or storey budget"));return false;}
         if(!L.FeatureNames.Contains(FName(TEXT("VillaTerraces"))))
         {AddError(TEXT("upper storey is missing its terraces"));return false;}
+        if(!L.FeatureNames.Contains(FName(TEXT("VillaSingleStair"))) ||
+           !L.FeatureNames.Contains(FName(TEXT("VillaSlopedGlassGuard"))) ||
+           !L.FeatureNames.Contains(FName(TEXT("VillaInteriorRooms"))))
+        {AddError(TEXT("villa needs its single stairwell and divided rooms"));return false;}
+        const int32 InteriorFlights=L.BuildingFloors-1+int32(L.FeatureNames.Contains(FName(TEXT("RooftopPool"))));
+        if(L.StairRoutes.Num()<InteriorFlights)
+        {AddError(TEXT("villa stairwell is missing a floor"));return false;}
+        int32 StairGlassPanes=0,WoodTableLegs=0;
+        for(const auto& Panel:L.Panels)
+        {
+            if(Panel.Material==EERBlockMaterial::Glass && FMath::IsNearlyEqual(Panel.Size.X,25,.01) &&
+               FMath::IsNearlyEqual(Panel.Size.Z,100,.01))
+                ++StairGlassPanes;
+            if(Panel.Material==EERBlockMaterial::Wood && FMath::IsNearlyEqual(Panel.Size.X,8,.01) &&
+               FMath::IsNearlyEqual(Panel.Size.Z,73,.01))
+                ++WoodTableLegs;
+        }
+        if(StairGlassPanes!=InteriorFlights*32 || WoodTableLegs<L.BuildingFloors*8)
+        {AddError(FString::Printf(TEXT("stair glass and wood table legs must use destructible cells: glass=%d/%d wood=%d/%d"),
+            StairGlassPanes,InteriorFlights*32,WoodTableLegs,L.BuildingFloors*8));return false;}
+        const bool AlphaStair=L.StairRoutes[0][0].Y<0;
+        if(TeamSize==2)
+        {
+            int32& PhysicalSeed=AlphaStair ? PhysicalAlphaStairSeed:PhysicalOmegaStairSeed;
+            if(PhysicalSeed==INDEX_NONE)PhysicalSeed=Seed;
+        }
+        for(int32 Flight=0;Flight<InteriorFlights;++Flight)
+            if((L.StairRoutes[Flight][0].Y<0)!=AlphaStair ||
+               (L.StairRoutes[Flight].Last().Y>0)!=AlphaStair ||
+               FMath::Abs(L.StairRoutes[Flight][0].X-L.CentralBuildingCenter.X)>300.f)
+            {AddError(TEXT("single central ramp must face the same team on every floor"));return false;}
         if(!L.PoolWater.IsEmpty())
         {
             ++PoolLayouts;
@@ -32,18 +64,32 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
                 if(TeamSize==1)++SmallRoofPoolLayouts;
                 if(TeamSize==2 && PhysicalRoofSeed==INDEX_NONE)PhysicalRoofSeed=Seed;
                 const auto& RoofWater=L.PoolWater.Last();
-                if(!FMath::IsNearlyEqual(RoofWater.Max.Z,L.CentralBuildingCenter.Z+L.BuildingFloors*320.f,.01f) ||
+                const float RoofZ=L.CentralBuildingCenter.Z+L.BuildingFloors*320.f;
+                const bool InteriorRoofAccess=L.StairRoutes.ContainsByPredicate([&](const TArray<FVector>& Stair)
+                {return !Stair.IsEmpty() && FMath::IsNearlyEqual(Stair.Last().Z,RoofZ+100.f,1.f) &&
+                    FMath::Abs(Stair.Last().X-L.CentralBuildingCenter.X)<L.CentralBuildingSize.X*.5f;});
+                if(!FMath::IsNearlyEqual(RoofWater.Max.Z,RoofZ,.01f) ||
                    RoofWater.GetSize().X>(TeamSize==1 ? 240.f:300.f)+.01f ||
-                   RoofWater.GetSize().Y>(TeamSize==1 ? 360.f:500.f)+.01f || L.StairRoutes.Num()<2)
+                   RoofWater.GetSize().Y>(TeamSize==1 ? 360.f:500.f)+.01f || !InteriorRoofAccess)
                 {AddError(TEXT("rooftop pool must be compact, flush with the roof and stair-accessible"));return false;}
             }
             const int32 GroundPoolCount=L.PoolWater.Num()-(RoofPool ? 1:0);
+            const bool Waterfront=L.FeatureNames.Contains(FName(TEXT("VillaWaterfront")));
+            if(Waterfront)
+            {
+                ++WaterfrontLayouts;
+                if(TeamSize==2 && PhysicalWaterfrontSeed==INDEX_NONE)PhysicalWaterfrontSeed=Seed;
+                if(GroundPoolCount!=9 || RoofPool || (TeamSize>1 && L.CoverSites.Num()<2) ||
+                   L.PoolWater[0].Min.X>=-L.ArenaSize.X*.475f ||
+                   L.PoolWater[0].Max.X>=L.CentralBuildingCenter.X-L.CentralBuildingSize.X*.5f)
+                {AddError(TEXT("waterfront must span the villa shore to the perimeter"));return false;}
+            }
             const bool Single=GroundPoolCount==1 && L.PoolWater[0].Max.Z<600 &&
                 FMath::IsNearlyZero(L.PoolWater[0].GetCenter().Y,.001);
             const bool Pair= GroundPoolCount==2 && L.PoolWater[0].Max.Z<600 &&
                 L.PoolWater[0].GetCenter().Equals(L.PoolWater[1].GetCenter()*FVector(1,-1,1),.001) &&
                 L.PoolWater[0].GetSize().Equals(L.PoolWater[1].GetSize(),.001);
-            if((GroundPoolCount==0 && !RoofPool) || (GroundPoolCount>0 && !Single && !Pair))
+            if((GroundPoolCount==0 && !RoofPool) || (GroundPoolCount>0 && !Single && !Pair && !Waterfront))
             {AddError(TEXT("courtyard pool must be central or mirrored"));return false;}
             if(Single){++SinglePoolLayouts;if(TeamSize==3 && PhysicalSingleSeed==INDEX_NONE)PhysicalSingleSeed=Seed;}
             if(Pair){++PairedPoolLayouts;if(TeamSize==2 && PhysicalPairSeed==INDEX_NONE)PhysicalPairSeed=Seed;}
@@ -61,6 +107,10 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
         if(TeamSize==3)Dimensions.Add(FIntPoint(FMath::RoundToInt32(L.CentralBuildingSize.X),FMath::RoundToInt32(L.CentralBuildingSize.Y)));
         if(!L.CentralHill && L.SecondaryStructures.Num()<2){AddError(TEXT("lateral hill missing secondary buildings"));return false;}
         if(L.CentralEntrances.Num()!=2 || FVector::DotProduct(L.CentralEntrances[0].GetRotation().GetForwardVector(),L.CentralEntrances[1].GetRotation().GetForwardVector())<.99){AddError(TEXT("main entries must share side-facing direction"));return false;}
+        if(L.CrossingRule!=EERCrossingRule::OpenYard && !L.CrossingRoutes.ContainsByPredicate([&](const TArray<FVector>& Route)
+            {return Route.ContainsByPredicate([&](const FVector& P){return FMath::Abs(P.Y)<1.f &&
+                FMath::Abs(P.X-L.CentralBuildingCenter.X)<L.CentralBuildingSize.X*.5f;});}))
+        {AddError(TEXT("central divider must stop at the villa, leaving an interior route"));return false;}
         if(!L.CircularArena || L.LayoutSymmetry!=EERTemplateSymmetry::Mirror || L.AlphaSpawns.Num()!=10 || L.OmegaSpawns.Num()!=10)return false;
         if(L.CrossingRule==EERCrossingRule::ClimbableWall ? L.ArenaSize.Y<L.ArenaSize.X*1.2f :
             !FMath::IsNearlyEqual(L.ArenaSize.X,L.ArenaSize.Y,.01f))return false;
@@ -73,14 +123,19 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
                 FMath::Square(A.Y/(L.ArenaSize.Y*.5-100))>1)return false;
         }
         for(const auto& Route:L.CrossingRoutes)for(const auto P:Route)
-            if(FMath::Abs(P.Z-ERProcedural::CentralGroundHeight(L,FVector2D(P))-100)>.001)return false;
+            if(FMath::Abs(P.Z-ERProcedural::CentralGroundHeight(L,FVector2D(P))-
+                (L.FeatureNames.Contains(FName(TEXT("VillaWaterfront"))) ? 120.f:100.f))>.001)return false;
     }
     TestTrue(TEXT("some layouts have courtyard pools"),PoolLayouts>0);
     TestTrue(TEXT("some layouts have one central pool"),SinglePoolLayouts>0);
     TestTrue(TEXT("some layouts retain mirrored courtyard pools"),PairedPoolLayouts>0);
+    TestTrue(TEXT("some layouts have a perimeter waterfront"),WaterfrontLayouts>0);
+    TestTrue(TEXT("some 2v2 layouts have a physical waterfront probe"),PhysicalWaterfrontSeed!=INDEX_NONE);
     TestTrue(TEXT("some open layouts have rooftop pools"),RoofPoolLayouts>0);
     TestTrue(TEXT("some 1v1 layouts have rooftop pools"),SmallRoofPoolLayouts>0);
     TestTrue(TEXT("some 2v2 layouts have a physical rooftop pool probe"),PhysicalRoofSeed!=INDEX_NONE);
+    TestTrue(TEXT("both teams can receive the lower stair approach"),
+        PhysicalAlphaStairSeed!=INDEX_NONE && PhysicalOmegaStairSeed!=INDEX_NONE);
     TestTrue(TEXT("some cover has firing steps"),FiringSites>0);
     TestTrue(TEXT("some cover stays at ground level"),GroundOnlySites>0);
     TestEqual(TEXT("five cover profiles sampled"),CoverKinds.Num(),5);
@@ -93,10 +148,13 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
     auto* World=UWorld::CreateWorld(EWorldType::Game,false,NAME_None,nullptr,true,ERHIFeatureLevel::Num,&Values);if(!World)return false;
     auto* Map=World->SpawnActor<AERProceduralMap>();Map->LayoutConfig.TemplateAsset=T;Map->LayoutConfig.ExpectedTeamSize=2;Map->bCeilings=false;
     FCollisionQueryParams Q(SCENE_QUERY_STAT(ERCircularTerrain),false);FHitResult Hit;const auto Capsule=FCollisionShape::MakeCapsule(34,92.5);
-    TArray<FIntPoint> PhysicalCases{{2,42},{2,73},{2,7919},{2,1}};
+    TArray<FIntPoint> PhysicalCases{{2,42},{2,73},{2,7919},{2,1},{1,11}};
+    if(PhysicalAlphaStairSeed!=INDEX_NONE)PhysicalCases.AddUnique({2,PhysicalAlphaStairSeed});
+    if(PhysicalOmegaStairSeed!=INDEX_NONE)PhysicalCases.AddUnique({2,PhysicalOmegaStairSeed});
     if(PhysicalRoofSeed!=INDEX_NONE)PhysicalCases.AddUnique({2,PhysicalRoofSeed});
     if(PhysicalSingleSeed!=INDEX_NONE)PhysicalCases.AddUnique({3,PhysicalSingleSeed});
     if(PhysicalPairSeed!=INDEX_NONE)PhysicalCases.AddUnique({2,PhysicalPairSeed});
+    if(PhysicalWaterfrontSeed!=INDEX_NONE)PhysicalCases.AddUnique({2,PhysicalWaterfrontSeed});
     for(const FIntPoint& Case:PhysicalCases)
     {
         Map->LayoutConfig.ExpectedTeamSize=Case.X;
@@ -134,7 +192,7 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
         for(const auto& Site:L.CoverSites)
         {
             const bool Blocked=World->SweepSingleByChannel(Hit,Site.Entry,Site.Hide,FQuat::Identity,ECC_Pawn,FCollisionShape::MakeCapsule(34,Site.HalfHeight),Q);
-            if(Blocked)AddError(FString::Printf(TEXT("cover access from=%s to=%s hit=%s"),*Site.Entry.ToString(),*Site.Hide.ToString(),*GetNameSafe(Hit.GetComponent())));
+            if(Blocked)AddError(FString::Printf(TEXT("cover access seed=%d from=%s to=%s hit=%s"),Seed,*Site.Entry.ToString(),*Site.Hide.ToString(),*GetNameSafe(Hit.GetComponent())));
             TestFalse(TEXT("cover pocket accessible"),Blocked);
             TestTrue(TEXT("cover hides crouching or standing eye"),World->LineTraceSingleByChannel(Hit,Site.SightFrom,Site.SightTo,ECC_GameTraceChannel1,Q));
             if(Site.FiringStair!=INDEX_NONE)
@@ -168,11 +226,27 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
                     Map->WaterSurfaceAt(Surface-FVector(0,0,110),SpuriousSurface));
                 TestTrue(TEXT("recessed roof basin has a solid floor"),World->LineTraceSingleByChannel(
                     Hit,Surface+FVector(0,0,40),Surface-FVector(0,0,130),ECC_WorldStatic,Q));
-                TestTrue(TEXT("roof basin floor is 80cm below flush water"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-80,.1));
+                TestTrue(TEXT("roof basin floor is 100cm below flush water"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-100,.1));
+                TestEqual(TEXT("roof pool reaches full wading depth"),Map->WaterDepthAt(Surface-FVector(0,0,100)),100.f);
                 const FVector Corner=Surface+FVector(-Bounds.GetExtent().X+15,-Bounds.GetExtent().Y+30,0);
                 TestTrue(TEXT("square corner step supports entry"),World->LineTraceSingleByChannel(
                     Hit,Corner+FVector(0,0,40),Corner-FVector(0,0,100),ECC_WorldStatic,Q));
                 TestTrue(TEXT("upper corner step is flush with roof"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z,.1));
+                const FVector DeepStep=Corner+FVector(120,0,0);
+                TestTrue(TEXT("deep corner step supports exit"),World->LineTraceSingleByChannel(
+                    Hit,DeepStep+FVector(0,0,40),DeepStep-FVector(0,0,120),ECC_WorldStatic,Q));
+                TestTrue(TEXT("deep corner step is 80cm below water"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-80,.1));
+                continue;
+            }
+            if(L.FeatureNames.Contains(FName(TEXT("VillaWaterfront"))))
+            {
+                TestTrue(TEXT("waterfront has a solid deep floor"),World->LineTraceSingleByChannel(
+                    Hit,Surface+FVector(0,0,50),Surface-FVector(0,0,120),ECC_WorldStatic,Q));
+                TestTrue(TEXT("waterfront floor is 90cm below water"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-90,.1));
+                const FVector Shallow(Bounds.Max.X-50,Surface.Y,Surface.Z);
+                TestTrue(TEXT("waterfront has a shallow entry"),World->LineTraceSingleByChannel(
+                    Hit,Shallow+FVector(0,0,50),Shallow-FVector(0,0,120),ECC_WorldStatic,Q));
+                TestTrue(TEXT("waterfront entry is 20cm below water"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-20,.1));
                 continue;
             }
             TestEqual(TEXT("space below the ground basin is dry"),
@@ -201,6 +275,27 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
             if(TerrainComponent->LineTraceComponent(Hit,FVector(P,Height+10),FVector(P,Height-10),Q))
                 TestTrue(TEXT("terrain sampler matches actual collision triangles"),FMath::Abs(Hit.ImpactPoint.Z-Height)<.1);
             else AddError(TEXT("missing terrain collision"));
+        }
+        if(Case==FIntPoint(2,42))
+        {
+            const auto& CellPanels=Map->GetCellWorld().GetPanels();
+            int32 GlassIndex=INDEX_NONE,WoodIndex=INDEX_NONE;
+            for(int32 I=0;I<CellPanels.Num();++I)
+            {
+                if(GlassIndex==INDEX_NONE && CellPanels[I].Material==EERBlockMaterial::Glass &&
+                   FMath::IsNearlyEqual(CellPanels[I].Size.X,25,.01) &&
+                   FMath::IsNearlyEqual(CellPanels[I].Size.Z,100,.01))GlassIndex=I;
+                if(WoodIndex==INDEX_NONE && CellPanels[I].Material==EERBlockMaterial::Wood &&
+                   FMath::IsNearlyEqual(CellPanels[I].Size.X,8,.01) &&
+                   FMath::IsNearlyEqual(CellPanels[I].Size.Z,73,.01))WoodIndex=I;
+            }
+            if(GlassIndex==INDEX_NONE || WoodIndex==INDEX_NONE)
+            {AddError(TEXT("physical villa lacks destructible stair glass or table legs"));continue;}
+            const FERCellId GlassCell{GlassIndex,0,0,0},WoodCell{WoodIndex,0,0,0};
+            TMap<FERCellId,float> Damage;Damage.Add(GlassCell,1000);Damage.Add(WoodCell,1000);
+            Map->ApplyCellBatch(Damage);
+            TestFalse(TEXT("stair glass cell breaks"),Map->GetCellWorld().IsAlive(GlassCell));
+            TestFalse(TEXT("wood furniture cell breaks"),Map->GetCellWorld().IsAlive(WoodCell));
         }
     }
     World->DestroyWorld(false);return true;

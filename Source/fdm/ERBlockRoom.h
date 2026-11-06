@@ -28,6 +28,10 @@ struct FERBlockCollapseSettings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0.1",ClampMax="20")) float DebrisSettleAfter=2;
 };
 
+// Protocol 59: Central Building waterfront basin and shore layout.
+// Protocol 58: villa table pieces and stair glass guards use destructible cells.
+// Protocol 57: glass guards follow the Central Building villa stair treads.
+// Protocol 56: seeded approach direction for the Central Building villa stair.
 // Protocol 55: brick house shells throughout Middle Eastern Alleys.
 // Protocol 54: Town corner service buildings. Protocol 53: offset Town chambers and bent street shoulders. Protocol 52: Fire Training office clusters and rotated interior rooms.
 // Protocol 51: larger Village central blocks and flat hut roofs.
@@ -40,7 +44,7 @@ struct FERBlockNetworkDescriptor
 {
     GENERATED_BODY()
     UPROPERTY() uint32 Epoch=0;
-    UPROPERTY() uint32 Protocol=55;
+    UPROPERTY() uint32 Protocol=59;
     UPROPERTY() uint32 LayoutDigest=0;
     UPROPERTY() uint32 Sequence=0;
     UPROPERTY() int32 BlockCount=0;

@@ -2,6 +2,7 @@
 #include "ERWounds.h"
 #include "ERWorldWeaponPose.h"
 #include "ERClaymore.h"
+#include "ERGrenadeExplosion.h"
 #include "ERLoadout.h"
 #include "ERFootsteps.h"
 #include "ERPostureMesh.h"
@@ -512,6 +513,7 @@ void AERCharacter::FaceRotation(FRotator NewControlRotation, float DeltaTime)
 void AERCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+    if (BlastRinging) UpdateBlastRinging();
     Cast<UERMovement>(GetCharacterMovement())->ApplyPosturePresentation();
     if(HasAuthority())for(auto Item:Inventory)if(Item)Item->UpdateAccuracyRecovery();
     UpdateWeaponPresentation();
@@ -535,7 +537,12 @@ void AERCharacter::Tick(float DeltaTime)
     }
 #endif
     const auto* Movement = Cast<UERMovement>(GetCharacterMovement());
-    if (HasAuthority() && (Movement->bHighClimb || IsWeaponStowed()) && Weapon)
+    const bool bStowed = IsWeaponStowed();
+    const bool bLowerForApproach = bStowed && !Movement->IsTraversing() && Movement->ShouldLowerWeaponForLedge();
+    const bool bHideStowed = bStowed && !bLowerForApproach;
+    LedgeWeaponLowerBlend = FMath::FInterpConstantTo(LedgeWeaponLowerBlend,
+        bLowerForApproach ? 1.f : 0.f, DeltaTime, 8.f);
+    if (HasAuthority() && (Movement->bHighClimb || bStowed) && Weapon)
     {
         if(Weapon->bCookingGrenade) Weapon->Cancel();
         else Weapon->StopFire();
@@ -547,9 +554,9 @@ void AERCharacter::Tick(float DeltaTime)
     const bool bHideGrenade=(Weapon && AppliedWeaponData && AppliedWeaponData->Payload==EERPayload::Claymore && Weapon->MagazineAmmo<=0) || (bGrenade && ((Weapon && Weapon->IsGrenadeHandHidden()) ||
         (IsLocallyControlled() && ((bLocalGrenadeInputHeld && LocalNow<LocalGrenadeCookDeadline) || LocalNow<LocalGrenadeHideUntil))));
     if(Weapon)Weapon->UpdateScopeMotion();
-    const bool bOptic = Weapon && Weapon->HasOpticalScope() && Weapon->ScopeLevel;
+    const bool bOptic = !bStowed && Weapon && Weapon->HasOpticalScope() && Weapon->ScopeLevel;
     const bool bIronSights = Weapon && Weapon->ScopeLevel && Weapon->Data && Weapon->Data->ScopeMode == 1;
-    const bool bRaise=bIronSights && !Health->bDead && !(Movement->bHighClimb || IsWeaponStowed());
+    const bool bRaise=bIronSights && !Health->bDead && !(Movement->bHighClimb || bStowed);
     IronAimBlend=FMath::FInterpConstantTo(IronAimBlend,bRaise?1.f:0.f,FMath::Min(DeltaTime,.05f),5.f);
     const float AimBlend=GetIronAimBlend();
     FirstPersonBody->SetVisibility(!Health->bDead && !bOptic && AimBlend<.01f);
@@ -568,23 +575,30 @@ void AERCharacter::Tick(float DeltaTime)
             // Keep the authored aiming anchor on the optical centre at its weapon-specific eye distance.
             FirstPersonBody->SetRelativeLocation(Base+FVector(AppliedWeaponData->IronSightEyeDistance-Sight.X,-Sight.Y,-Sight.Z-AppliedWeaponData->IronSightDrop)*AimBlend);
         }
+        if (LedgeWeaponLowerBlend > 0.f)
+        {
+            const float Lower = LedgeWeaponLowerBlend;
+            FirstPersonBody->AddRelativeLocation(FVector(0,0,-14.f*Lower));
+            FirstPersonBody->SetRelativeRotation((FQuat(FRotator(-25.f*Lower,0,0))*
+                FirstPersonBody->GetRelativeRotation().Quaternion()).Rotator());
+        }
     }
-    FirstPersonRifle->SetVisibility(Weapon && !bOptic && !Health->bDead && !(Movement->bHighClimb || IsWeaponStowed()) && !bHideGrenade);
-    WorldRifle->SetVisibility(Weapon && !IsWeaponStowed() && !Health->bDead && (bReadyToThrow || !(Weapon && Weapon->IsGrenadeHandHidden())));
-    FirstPersonSight->SetVisibility(!bOptic && !Health->bDead && !(Movement->bHighClimb || IsWeaponStowed()) && AppliedWeaponData && AppliedWeaponData->SightMesh);
-    WorldSight->SetVisibility(!Health->bDead && !IsWeaponStowed() && AppliedWeaponData && AppliedWeaponData->SightMesh);
-    const bool bFlash = GetWorld()->GetTimeSeconds() < MuzzleFlashUntil && !Health->bDead && !(Movement->bHighClimb || IsWeaponStowed());
+    FirstPersonRifle->SetVisibility(Weapon && !bOptic && !Health->bDead && !(Movement->bHighClimb || bHideStowed) && !bHideGrenade);
+    WorldRifle->SetVisibility(Weapon && !bStowed && !Health->bDead && (bReadyToThrow || !(Weapon && Weapon->IsGrenadeHandHidden())));
+    FirstPersonSight->SetVisibility(!bOptic && !Health->bDead && !(Movement->bHighClimb || bHideStowed) && AppliedWeaponData && AppliedWeaponData->SightMesh);
+    WorldSight->SetVisibility(!Health->bDead && !bStowed && AppliedWeaponData && AppliedWeaponData->SightMesh);
+    const bool bFlash = GetWorld()->GetTimeSeconds() < MuzzleFlashUntil && !Health->bDead && !(Movement->bHighClimb || bStowed);
     FirstPersonMuzzleFlash->SetVisibility(bFlash && !bOptic);
     WorldMuzzleFlash->SetVisibility(bFlash);
-    CameraKick = Health->bDead || (Movement->bHighClimb || IsWeaponStowed()) ? 0.f : FMath::FInterpTo(CameraKick, 0.f, DeltaTime, Weapon && Weapon->GetScopeRecoilMultiplier()<1.f ? 44.f : 22.f);
-    const bool bHideLeft = Movement->bHighClimb || IsWeaponStowed() || (AppliedWeaponData && AppliedWeaponData->bOneHanded && !(Weapon && Weapon->bReloading));
+    CameraKick = Health->bDead || (Movement->bHighClimb || bStowed) ? 0.f : FMath::FInterpTo(CameraKick, 0.f, DeltaTime, Weapon && Weapon->GetScopeRecoilMultiplier()<1.f ? 44.f : 22.f);
+    const bool bHideLeft = Movement->bHighClimb || bHideStowed || (AppliedWeaponData && AppliedWeaponData->bOneHanded && !(Weapon && Weapon->bReloading));
     if (bLeftArmHidden != bHideLeft)
     {
         bLeftArmHidden = bHideLeft;
         if (bLeftArmHidden) FirstPersonBody->HideBoneByName(TEXT("upperarm_l"), EPhysBodyOp::PBO_None);
         else FirstPersonBody->UnHideBoneByName(TEXT("upperarm_l"));
     }
-    const bool bHideRight=bHideGrenade || IsWeaponStowed();
+    const bool bHideRight=bHideGrenade || bHideStowed;
     if(bRightArmHidden!=bHideRight)
     {
         bRightArmHidden=bHideRight;
@@ -836,6 +850,7 @@ void AERCharacter::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult)
 }
 void AERCharacter::EndPlay(const EEndPlayReason::Type Reason)
 {
+    StopBlastRinging();
     if (HasAuthority())
     {
         for (auto Item : Inventory) if (IsValid(Item)) Item->Destroy();
@@ -919,6 +934,18 @@ float AERCharacter::TakeDamage(float Damage, const FDamageEvent& Event, AControl
     }
     Health->ReceiveDamage(Damage, Killer, Ratio, Facts, bBullet ? &WoundHit : nullptr);
     const float Applied=Before-Health->Health;
+    if (Facts.Explosion && !Health->bDead && (Applied > 0 || Health->Armor < ArmorBefore)
+        && Controller && Controller->IsPlayerController())
+    {
+        TSubclassOf<AERGrenadeExplosion> BlastEffect;
+        if (const auto* Mine = Cast<AERClaymore>(Causer)) BlastEffect = Mine->BlastEffect;
+        if (const auto* Projectile = Cast<AERProjectile>(Causer); Projectile && Facts.Grenade)
+            BlastEffect = Projectile->GrenadeExplosionClass;
+        const float MaxHealth = FMath::Max(1.f, ERServer::Get(GetWorld(), "Health.Max"));
+        const float DamageTaken = Applied + ArmorBefore - Health->Armor;
+        ClientBlastRinging(10.f * FMath::Clamp(DamageTaken / MaxHealth, 0.f, 1.f),
+            Causer->GetActorLocation(), BlastEffect);
+    }
     if(Applied>0)
     {
         if(bBullet && !Health->bDead)
@@ -1005,6 +1032,7 @@ void AERCharacter::ApplyDeathVisuals()
 {
     if (bDeathVisualsApplied) return;
     bDeathVisualsApplied = true;
+    StopBlastRinging();
     ResetAimPunch();
     if (HasAuthority()) for (auto Item : Inventory) if (Item) Item->Cancel();
     if (HasAuthority() && CorpseClass)
@@ -1134,7 +1162,9 @@ bool AERCharacter::CanHoldWeaponOnLadder() const
 bool AERCharacter::IsWeaponStowed() const
 {
     const auto* M=Cast<UERMovement>(GetCharacterMovement());
-    return Weapon && M && (M->IsOnLadder() || M->IsWeaponAtLadder() || (M->IsMantling() && M->CustomMovementMode==3)) && !CanHoldWeaponOnLadder();
+    return Weapon && M && !CanHoldWeaponOnLadder() &&
+        (M->IsOnLadder() || (M->IsMantling() && M->CustomMovementMode==3) ||
+            M->IsWeaponAtLadder() || M->ShouldLowerWeaponForLedge());
 }
 void AERCharacter::ServerSelectWeapon_Implementation(int32 Slot)
 {
@@ -1264,12 +1294,6 @@ void AERCharacter::MulticastShot_Implementation(FVector_NetQuantize Start, FVect
         for(TActorIterator<AERSmokeCloud> It(GetWorld());It;++It) It->AddShot(Start,End);
     if (GetNetMode() == NM_DedicatedServer || Health->bDead || IsWeaponStowed() || Cast<UERMovement>(GetCharacterMovement())->bHighClimb) return;
     const bool bFirstPerson = IsLocallyControlled() && Controller && Controller->IsPlayerController();
-    if (Data && Data->WeaponFireAnimation)
-        for (auto* Component : {FirstPersonRifle.Get(), WorldRifle.Get()})
-        {
-            Component->PlayAnimation(Data->WeaponFireAnimation, false);
-            Component->SetPlayRate(FMath::Max(1.f, Data->WeaponFireAnimation->GetPlayLength() / FMath::Max(.01f, Data->ShotInterval)));
-        }
     if (bTracer && Data && Data->Payload == EERPayload::Bullet)
     {
         if (PelletEnds.IsEmpty())
@@ -1278,6 +1302,12 @@ void AERCharacter::MulticastShot_Implementation(FVector_NetQuantize Start, FVect
             for (int32 I=0;I<FMath::Min(PelletEnds.Num(),16);++I)
                 AERAttachedTracer::Spawn(this, TracerSystem, PelletEnds[I], bFirstPerson);
     }
+    if (Data && Data->WeaponFireAnimation)
+        for (auto* Component : {FirstPersonRifle.Get(), WorldRifle.Get()})
+        {
+            Component->PlayAnimation(Data->WeaponFireAnimation, false);
+            Component->SetPlayRate(FMath::Max(1.f, Data->WeaponFireAnimation->GetPlayLength() / FMath::Max(.01f, Data->ShotInterval)));
+        }
     if (Data && Data->Payload == EERPayload::Bullet && ShotFeedbackCount % 2 == 1)
     {
         const FVector Forward = GetBaseAimRotation().Vector();
@@ -1331,7 +1361,10 @@ void AERCharacter::MulticastShot_Implementation(FVector_NetQuantize Start, FVect
             *GetName(),bFirstPerson,*GetNameSafe(Palette),AudioVariant,ShotFeedbackCount,AudioData?AudioData->Pellets:1);
 #endif
     // Align the glow along the rifle's model-space barrel (+Y), without rotating the rifle.
-    const FVector FlashScale(.012f, .025f, .012f);
+    const bool bBulletFlash = Data && Data->Payload == EERPayload::Bullet;
+    const bool bShowFlash = !(Data && Data->bOneHanded && !bBulletFlash);
+    const bool bOptic = Weapon && Weapon->HasOpticalScope() && Weapon->ScopeLevel;
+    const FVector FlashScale = bBulletFlash ? FVector(.016, .030, .016) : FVector(.012, .025, .012);
     for (auto* Flash : {FirstPersonMuzzleFlash.Get(), WorldMuzzleFlash.Get()})
     {
         Flash->SetWorldRotation(Flash->GetAttachParent()->GetComponentQuat() *
@@ -1340,9 +1373,9 @@ void AERCharacter::MulticastShot_Implementation(FVector_NetQuantize Start, FVect
             (Data && Data->Mesh ? Flash->GetAttachParent()->GetComponentTransform().TransformVectorNoScale(FVector(4, 0, 0)) :
             Flash->GetAttachParent()->GetComponentTransform().TransformVectorNoScale(FVector(0, 4, 0))));
         Flash->SetWorldScale3D(FlashScale);
-        Flash->SetVisibility(!(Data && Data->bOneHanded && Data->Payload != EERPayload::Bullet));
+        Flash->SetVisibility(bShowFlash && (Flash != FirstPersonMuzzleFlash || !bOptic));
     }
-    MuzzleFlashUntil = GetWorld()->GetTimeSeconds() + (Data && Data->bOneHanded && Data->Payload != EERPayload::Bullet ? 0 : .018);
+    MuzzleFlashUntil = GetWorld()->GetTimeSeconds() + (bShowFlash ? (bBulletFlash ? .028 : .018) : 0.);
 #if !UE_BUILD_SHIPPING
     if (FParse::Param(FCommandLine::Get(), TEXT("ERShotAudit")))
     {

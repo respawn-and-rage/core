@@ -41,9 +41,9 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
         T.CentralBuilding.ArenaMin=T.CentralBuilding.ArenaMax=T.SizingArena;
         if(T.CentralBuilding.CircularTerrain)
         {
-            T.CentralBuilding.BuildingWidth={1400,1800};
-            T.CentralBuilding.BuildingDepth={2000,2400};
-            T.CentralBuilding.MinFloors=T.CentralBuilding.MaxFloors=TeamSize==1 ? 2 : 3;
+            T.CentralBuilding.BuildingWidth={1100,1500};
+            T.CentralBuilding.BuildingDepth={1900,2200};
+            T.CentralBuilding.MinFloors=T.CentralBuilding.MaxFloors=TeamSize==1 ? 2 : TeamSize>=4 ? 4 : 3;
         }
         else
         {

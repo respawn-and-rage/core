@@ -31,6 +31,8 @@ public:
     UFUNCTION(BlueprintCallable, Category="Respawn & Rage|Editor")
     static bool ConfigureCompactBurst(UParticleSystem* System);
     static void PrecacheEffect(TSubclassOf<AERGrenadeExplosion> EffectClass);
+    static USoundBase* SelectSound(UWorld* World, const FVector& Position, USoundBase* DefaultSound,
+        class UNiagaraSystem*& WaterSystem, FVector& WaterSurface);
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
 private:

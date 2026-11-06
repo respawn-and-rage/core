@@ -62,13 +62,14 @@ public:
     virtual void PhysFalling(float DeltaTime,int32 Iterations) override;
     float LandingSpeed() const;
     virtual void PhysCustom(float DeltaTime, int32 Iterations) override;
-    bool FindLedge(FVector& Destination, float& Height) const;
+    bool FindLedge(FVector& Destination, float& Height, double ApproachReach = 0.0) const;
     bool IsMantling() const { return MovementMode == MOVE_Custom && (CustomMovementMode == 1 || CustomMovementMode == 3); }
     bool IsOnLadder() const { return MovementMode == MOVE_Custom && CustomMovementMode == 2; }
     bool IsTraversing() const { return IsMantling() || IsOnLadder(); }
     virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
     bool CanClimbLadder() const;
     bool IsWeaponAtLadder() const;
+    bool ShouldLowerWeaponForLedge() const;
     class AERLadder* FindLadder(bool Entry=false) const;
     float LadderSpeed() const;
     void PhysLadder(float DeltaTime,int32 Iterations);

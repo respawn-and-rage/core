@@ -92,6 +92,9 @@ https://ambientcg.com
 https://creativecommons.org/publicdomain/zero/1.0/
 
 AUDIO & MUSIC
+tinnitus.wav — tnturner. CC0 1.0. Converted to 16-bit PCM for blast ringing.
+https://freesound.org/s/377205/
+https://creativecommons.org/publicdomain/zero/1.0/
 Glass Break — unfa. CC0 1.0. Trimmed the first 330 ms and converted to mono.
 https://freesound.org/people/unfa/sounds/221528/
 https://creativecommons.org/publicdomain/zero/1.0/

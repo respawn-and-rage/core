@@ -930,7 +930,7 @@ float AERProceduralMap::WaterDepthAt(const FVector& WorldFeet) const
         if(P.X>=Water.Min.X && P.X<=Water.Max.X && P.Y>=Water.Min.Y && P.Y<=Water.Max.Y)
         {
             const float Depth=float(Water.Max.Z-P.Z);
-            if(Depth>=0.f && Depth<=95.f)return Depth;
+            if(Depth>=0.f && Depth<=105.f)return Depth;
         }
     return 0.f;
 }
@@ -950,7 +950,7 @@ bool AERProceduralMap::WaterSurfaceAt(const FVector& WorldPosition,FVector& OutS
     const FVector P=GetActorTransform().InverseTransformPosition(WorldPosition);
     for(const FBox& Water:Layout.PoolWater)
         if(P.X>=Water.Min.X && P.X<=Water.Max.X && P.Y>=Water.Min.Y && P.Y<=Water.Max.Y &&
-           P.Z<=Water.Max.Z-1 && P.Z>=Water.Max.Z-95)
+           P.Z<=Water.Max.Z-1 && P.Z>=Water.Max.Z-105)
         {OutSurface=GetActorTransform().TransformPosition(FVector(P.X,P.Y,Water.Max.Z));return true;}
     return false;
 }
