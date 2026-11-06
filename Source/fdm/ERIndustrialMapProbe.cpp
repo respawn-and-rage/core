@@ -9,6 +9,9 @@
 #include "ERWeapon.h"
 #include "ERMatch.h"
 #include "ERBotController.h"
+#include "ERGrenadeExplosion.h"
+#include "ERShotEffects.h"
+#include "NiagaraSystem.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "EngineUtils.h"
@@ -84,11 +87,68 @@ void AERIndustrialMapProbe::Capture(AERProceduralMap* Map,int32 View)
     const FString Filename=FPaths::ProjectSavedDir()/FString::Printf(TEXT("Testing/Industrial-%s-rule%d-seed%d.png"),View==5 ? TEXT("Architecture"):View==4 ? TEXT("Fence"):View==3 ? TEXT("Concrete"):View==2 ? TEXT("Container"):Ground ? TEXT("Ground"):TEXT("Plan"),int32(L.CrossingRule),Map->LayoutConfig.Seed);
     FTimerHandle ScreenshotTimer;GetWorldTimerManager().SetTimer(ScreenshotTimer,[Filename](){FScreenshotRequest::RequestScreenshot(Filename,false,false);},.35f,false);
 }
+void AERIndustrialMapProbe::TickWaterGallery(AERProceduralMap* Map)
+{
+    if(!Map->IsMapReady() || Map->GetLayout().PoolWater.IsEmpty() || !FApp::CanEverRender())return;
+    auto* PC=UGameplayStatics::GetPlayerController(GetWorld(),0);
+    if(!PC || Elapsed<3.f)return;
+    const auto& Pool=Map->GetLayout().PoolWater[0];
+    const FVector Surface=Map->GetActorTransform().TransformPosition(
+        FVector(Pool.GetCenter().X,Pool.GetCenter().Y,Pool.Max.Z));
+    if(WaterGalleryStage==0)
+    {
+        WaterGallerySurface=Surface;
+        auto* Camera=GetWorld()->SpawnActor<ACameraActor>();
+        Camera->SetActorLocation(Surface+FVector(0,-650,260));
+        Camera->SetActorRotation((Surface+FVector(0,0,35)-Camera->GetActorLocation()).Rotation());
+        Camera->GetCameraComponent()->FieldOfView=60;
+        PC->SetViewTarget(Camera);
+        UERShotEffects::Prewarm(GetWorld(),Map->WaterExplosionSystem,Surface);
+        UERShotEffects::Prewarm(GetWorld(),Map->WaterSplashSystem,Surface);
+        FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir()/TEXT("Testing/WaterEffects/Baseline.png"),false,false);
+        UE_LOG(LogTemp,Display,TEXT("ER_WATER_GALLERY_ASSETS explosion=%s splash=%s"),
+            *GetNameSafe(Map->WaterExplosionSystem.Get()),*GetNameSafe(Map->WaterSplashSystem.Get()));
+        WaterGalleryStart=Elapsed;WaterGalleryStage=1;return;
+    }
+    if(WaterGalleryStage==1)
+    {
+        if(Elapsed-WaterGalleryStart<2.f)return;
+        auto* EffectClass=LoadClass<AERGrenadeExplosion>(nullptr,
+            TEXT("/Game/EclipseRecoil/Effects/Grenade/BP_ERGrenadeExplosion.BP_ERGrenadeExplosion_C"));
+        if(!EffectClass){UE_LOG(LogTemp,Error,TEXT("ER_WATER_GALLERY_FAIL grenade effect class missing"));FPlatformMisc::RequestExitWithStatus(false,1);return;}
+        UGameplayStatics::SetGlobalTimeDilation(GetWorld(),.07f);
+        GetWorld()->SpawnActor<AERGrenadeExplosion>(EffectClass,Surface-FVector(0,0,40),FRotator::ZeroRotator);
+        UE_LOG(LogTemp,Display,TEXT("ER_WATER_GALLERY_EXPLOSION at=%s"),*Surface.ToCompactString());
+        WaterGalleryStart=Elapsed;WaterGalleryStage=2;return;
+    }
+    const float Age=Elapsed-WaterGalleryStart;
+    auto CaptureWater=[this](const TCHAR* Name)
+    {
+        FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir()/TEXT("Testing/WaterEffects")/Name,false,false);
+        UE_LOG(LogTemp,Display,TEXT("ER_WATER_GALLERY_CAPTURE %s"),Name);
+    };
+    if(WaterGalleryStage==2 && Age>=.04f){CaptureWater(TEXT("Explosion-Start.png"));WaterGalleryStage=3;}
+    else if(WaterGalleryStage==3 && Age>=.18f){CaptureWater(TEXT("Explosion-Middle.png"));WaterGalleryStage=4;}
+    else if(WaterGalleryStage==4 && Age>=.34f){CaptureWater(TEXT("Explosion-End.png"));WaterGalleryStage=5;}
+    else if(WaterGalleryStage==5 && Age>=.65f)
+    {
+        const bool Splash=Map->PlayWaterImpactAt(WaterGallerySurface+FVector(120,0,-20));
+        UE_LOG(LogTemp,Display,TEXT("ER_WATER_GALLERY_BULLET_SPLASH result=%d"),Splash);
+        WaterGalleryStage=Splash ? 6 : 8;
+    }
+    else if(WaterGalleryStage==6 && Age>=.71f){CaptureWater(TEXT("Bullet-Splash.png"));WaterGalleryStage=7;}
+    else if(WaterGalleryStage==7 && Age>=1.1f)
+    {UE_LOG(LogTemp,Display,TEXT("ER_WATER_GALLERY_COMPLETE result=PASS"));FPlatformMisc::RequestExitWithStatus(false,0);WaterGalleryStage=8;}
+    else if(WaterGalleryStage==8)
+    {UE_LOG(LogTemp,Error,TEXT("ER_WATER_GALLERY_COMPLETE result=FAIL"));FPlatformMisc::RequestExitWithStatus(false,1);WaterGalleryStage=9;}
+}
 void AERIndustrialMapProbe::Tick(float Delta)
 {
     Super::Tick(Delta);Elapsed+=Delta;
     TActorIterator<AERProceduralMap> It(GetWorld());auto* Map=It ? *It:nullptr;
     if(!Map){if(Elapsed>60)FPlatformMisc::RequestExitWithStatus(false,1);return;}
+    if(FParse::Param(FCommandLine::Get(),TEXT("ERWaterEffectsGallery")))
+    {TickWaterGallery(Map);return;}
     if(!HasAuthority())
     {
         if(Phase && SeenPhase!=Phase && Elapsed>NextDiagnostic)

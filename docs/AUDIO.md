@@ -18,14 +18,17 @@ Owner plays centred 2D; others spatial (300cm inner, 3700cm falloff). 24 per own
 | Empty trigger | Freesound 387482, CosmicEmbers (CC BY 3.0): owner-only, server-checked, 400ms limit, firearms only |
 
 **Footsteps:** `UERFootsteps` emits authority-driven transient multicasts from real travel:
+In pools, two trimmed takes from Freesound 560886 by jakubp.jp replace dry steps. The first moving contact plays immediately and resets the stride interval. Water steps and bullet impacts use distance attenuation at their world positions; a dedicated Niagara spray accompanies projectile impacts on submerged surfaces. Freesound 519008 by Sheyvan replaces the ordinary grenade sound only when the detonation point is underwater; a separate Niagara water crown replaces the dry flash and debris. Nearby dry detonations retain the normal sound and effect.
 stride 95/130/150cm at 5/10/18 km/h, 80 low, 65 prone, 220ms safety interval, no landing sound.
 `DA_ER_Footsteps` maps physical surfaces and cell materials to Hard, Wood, Metal, Grass, Gravel,
 LightHard; unknown falls back to Hard. Never change HP or collision for audio.
 
 **Glass break:** When a pane is destroyed by damage or collapse, the authority emits a
-spatial one-shot at its centre. Each listener randomly selects Freesound 221528 by unfa
+spatial one-shot near the first broken cell, once per pane. Each listener randomly selects Freesound 221528 by unfa
 (CC0, first 330ms trimmed) or 41348 by datasoundsample (CC BY 4.0).
-Import with `scripts/setup_glass_break_audio.py`.
+The owned attenuation has a 125cm full-volume radius and 22m falloff. Import with
+`scripts/setup_glass_break_audio.py`; adjust existing installations with
+`scripts/setup_glass_break_distance.py` without reimporting the waves.
 
 **Explosions and smoke:** HE and smoke use Sonniss GDC 2024 WAVs. HE: spatial 5m inner, 75m falloff.
 Smoke `ReleaseVolume` defaults to about .2055, a Blueprint-editable local gain.

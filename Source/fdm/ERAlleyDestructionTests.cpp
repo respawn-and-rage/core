@@ -13,6 +13,9 @@ bool FERAlleyArchitectureTest::RunTest(const FString& Parameters)
     auto* W=UWorld::CreateWorld(EWorldType::Game,false,NAME_None,nullptr,true,ERHIFeatureLevel::Num,&V);if(!W)return false;
     auto* M=W->SpawnActor<AERProceduralMap>();M->LayoutConfig.TemplateAsset=LoadObject<UERMapTemplate>(nullptr,TEXT("/Game/EclipseRecoil/Art/MapTemplates/DA_MiddleEasternAlleys"));M->LayoutConfig.Seed=73;M->bCeilings=false;
     if(!TestTrue(TEXT("destructible district builds"),M->Regenerate())){W->DestroyWorld(false);return false;}
+    for(const auto& Panel:M->GetLayout().Panels)
+        if(Panel.Id>=100001 && !Panel.Skin.IsEmpty())
+            TestTrue(TEXT("house skins use brick resistance"),Panel.Material==EERBlockMaterial::Brick);
     M->RequestSupportCheck();for(int32 I=0;I<500 && M->IsSupportPending();++I)M->StepSupport();
     TestEqual(TEXT("intact house shells have grounded structural support"),M->GetCellWorld().GetRemovedCount(),int64(0));
     ERAlleyDestruction::FBreach B;

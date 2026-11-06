@@ -1,4 +1,7 @@
 #include "ERGrenadeExplosion.h"
+#include "ERProceduralMap.h"
+#include "ERShotEffects.h"
+#include "EngineUtils.h"
 #include "ERPerformanceSettings.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
@@ -150,12 +153,24 @@ void AERGrenadeExplosion::BeginPlay()
 {
     Super::BeginPlay();
     if (GetNetMode() == NM_DedicatedServer || !BurstTemplate) { Destroy(); return; }
-    if(ExplosionSound)
+    USoundBase* SelectedSound=ExplosionSound;
+    UNiagaraSystem* SelectedWaterSystem=nullptr;
+    FVector WaterSurface=FVector::ZeroVector;
+    for(TActorIterator<AERProceduralMap> It(GetWorld());It;++It)
+        if(It->WaterDepthAt(GetActorLocation())>5.f && It->WaterSurfaceAt(GetActorLocation(),WaterSurface))
+        {if(It->WaterExplosionSound)SelectedSound=It->WaterExplosionSound;SelectedWaterSystem=It->WaterExplosionSystem;break;}
+    if(SelectedSound)
     {
-        auto* Audio=UGameplayStatics::SpawnSoundAtLocation(this,ExplosionSound,GetActorLocation(),FRotator::ZeroRotator,
+        auto* Audio=UGameplayStatics::SpawnSoundAtLocation(this,SelectedSound,GetActorLocation(),FRotator::ZeroRotator,
             .65f,1.f,0.f,ExplosionAttenuation,ExplosionConcurrency,true);
         UE_LOG(LogTemp,Display,TEXT("ER_GRENADE_AUDIO sound=%s started=%d spatial=%d concurrency=%d"),
-            *GetNameSafe(ExplosionSound),Audio && Audio->IsPlaying(),ExplosionAttenuation!=nullptr,ExplosionConcurrency!=nullptr);
+            *GetNameSafe(SelectedSound),Audio && Audio->IsPlaying(),ExplosionAttenuation!=nullptr,ExplosionConcurrency!=nullptr);
+    }
+    if(SelectedWaterSystem)
+    {
+        UERShotEffects::SpawnWaterExplosion(GetWorld(),SelectedWaterSystem,WaterSurface);
+        Destroy(); // The underwater burst replaces the dry flash, debris and light.
+        return;
     }
     SetActorScale3D(FVector(FMath::Clamp(BurstScale, .1f, 2.f)));
     Debris->SetVisibility(false);

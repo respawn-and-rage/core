@@ -49,9 +49,6 @@ public:
     int32 AlphaBots = 0;
     int32 OmegaBots = 1;
     int32 BotBehavior = 0; // stationary, movement, combat
-    // Offline-only free skin choice; -1 keeps the role skin. Never sent to servers.
-    int32 OfflineAlphaSkin = -1;
-    int32 OfflineOmegaSkin = -1;
     FString ServerAddress = TEXT("127.0.0.1:7777");
     bool Join(const FString& Address);
     void ReturnToMenu();

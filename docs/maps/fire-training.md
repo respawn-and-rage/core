@@ -17,7 +17,9 @@ when the general ceiling display option is disabled.
 - High steel routes vary in width, wall inset, end position and height. H crossings,
   paired inner bridges, an end-linked ring, double doglegs, offset connections and S routes provide six patterns. Rails follow the deck union so junctions remain open.
   Optional paired islands occupy a separate height plane with two ladder accesses.
-- Ground timber rooms and corridors include paired interior through-rooms with offset doors, window openings and optional internal returns. Destructible cargo uses matte ribbed sheets with smooth perimeter frames and seeded oxide red, green or ochre paint. Cargo and denser staggered groups of six cover types fill the ground; only movement and ladder volumes remain reserved.
+- Ground timber rooms and corridors include paired interior through-rooms with offset doors, window openings and optional internal returns. Interiors can run along or
+  across the hall. Some layouts include paired suites of two connected offices with a
+  shared partition, interior window and a route between offset exterior doors. Destructible cargo uses matte ribbed sheets with smooth perimeter frames and seeded oxide red, green or ochre paint. Cargo and denser staggered groups of six cover types fill the ground; only movement and ladder volumes remain reserved.
   Clear routes, full climbing shafts and ladder exit sweeps are reserved before
   furnishing. Ladders step off at deck level instead of overshooting into overhead decks.
 - Elevated projection ≤30%, overhead ≤40%, and a connected region open to the ceiling

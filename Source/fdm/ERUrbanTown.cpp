@@ -64,12 +64,28 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
     Diagonal.Transform=FTransform((DiagonalB-DiagonalA).Rotation(),(DiagonalA+DiagonalB)*.5,FVector((DiagonalB-DiagonalA).Size(),40,1400)/100);
     L.FixedPieces.Add(Diagonal);Diagonal.Transform=Diagonal.Transform*Turn;L.FixedPieces.Add(Diagonal);
     const float IndentMin=-HY*.56f,IndentMax=-HY*.18f,Indent=Street*.55f;
-    ClosedBox({-HX+Indent*.5,(IndentMin+IndentMax)*.5,700},{Indent,IndentMax-IndentMin,1400},EERBlockMaterial::Concrete);
+    const float Shoulder=FMath::Min(340.f,(IndentMax-IndentMin)*.25f);
+    const TArray<FVector> StreetShoulder{{-HX,IndentMin,0},{-HX+Indent,IndentMin+Shoulder,0},
+        {-HX+Indent,IndentMax-Shoulder,0},{-HX,IndentMax,0}};
+    Polygon(StreetShoulder,L.InaccessibleGroundPolygons);
+    for(int32 Edge=0;Edge<3;++Edge)
+    {
+        const FVector A=StreetShoulder[Edge],End=StreetShoulder[Edge+1];
+        FERLayoutFixedPiece FacadePiece;
+        FacadePiece.Material=EERBlockMaterial::Concrete;
+        FacadePiece.Transform=FTransform((End-A).Rotation(),(A+End)*.5+FVector(0,0,700),
+            FVector((End-A).Size()+40,40,1400)/100);
+        L.FixedPieces.Add(FacadePiece);
+        FacadePiece.Transform=FacadePiece.Transform*Turn;
+        L.FixedPieces.Add(FacadePiece);
+    }
     const float ProjectionX=Random.FRandRange(-.12f,.08f)*Arena.X;
     const float ProjectionWidth=FMath::Min(Arena.X*.28f,1600.f),ProjectionDepth=Random.RandRange(400,580);
     ClosedBox({ProjectionX,-HY+ProjectionDepth*.5,700},{ProjectionWidth,ProjectionDepth,1400},EERBlockMaterial::Brick);
-    const float CoreWidth=Arena.X-2*Street,CoreHalfDepth=HY-1050;
-    const int32 Columns=FMath::Max(2,2*FMath::FloorToInt32((CoreWidth+Gap)/3200));
+    const bool Compact=T->SizingTeamSize<=3;
+    const float LeftMargin=Compact ? 200.f:0.f,RightMargin=Compact ? 850.f:0.f;
+    const float CoreWidth=Arena.X-2*Street-LeftMargin-RightMargin,CoreHalfDepth=HY-1050;
+    const int32 Columns=Compact ? 1:FMath::Max(2,2*FMath::FloorToInt32((CoreWidth+Gap)/3200));
     const int32 Rows=FMath::Max(1,FMath::FloorToInt32((CoreHalfDepth+Gap*.5)/2400));
     const float BandDepth=(CoreHalfDepth-(Rows-.5f)*Gap)/Rows;
     if(BandDepth<650 || CoreWidth-(Columns-1)*Gap<Columns*700)return false;
@@ -92,12 +108,12 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
     {
         TArray<float> Weights;float Sum=0;
         for(int32 Col=0;Col<Columns;++Col){const float Weight=Random.FRandRange(.6f,1.6f);Weights.Add(Weight);Sum+=Weight;}
-        const float Remainder=CoreWidth-(Columns-1)*Gap-Columns*700;float X=-CoreWidth*.5;
+        const float Remainder=CoreWidth-(Columns-1)*Gap-Columns*700;float X=-HX+Street+LeftMargin;
         for(int32 Col=0;Col<Columns;++Col)
         {
             const float LotWidth=700+Remainder*Weights[Col]/Sum;
             float Front=Random.RandRange(0,3)*50.f,Back=Random.RandRange(0,2)*40.f;
-            if(Row==0 && Col==Columns-1)Front=FMath::Max(Front,CutY-500);
+            if(Row==0 && Col==Columns-1 && !Compact)Front=FMath::Max(Front,CutY-500);
             const float Width=LotWidth-Random.RandRange(0,2)*40.f,Depth=BandDepth-Front-Back;
             const float Y=-CoreHalfDepth+Row*(BandDepth+Gap)+Front;
             if(Width<650 || Depth<550)return false;
@@ -106,7 +122,9 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
             const int32 Storeys=Random.RandRange(1,R.MaxStoreys);
             const float Height=Storeys*R.StoreyHeight,NotchX=Width*Random.FRandRange(.33f,.46f),NotchY=Depth*Random.FRandRange(.48f,.62f);
             const auto Material=Random.RandRange(0,1)==0 ? EERBlockMaterial::Brick:EERBlockMaterial::Concrete;
-            const TArray<FVector> Outline{{0,0,0},{Width,0,0},{Width,Depth,0},{NotchX,Depth,0},{NotchX,NotchY,0},{0,NotchY,0}};
+            const float ShoulderX=Width*.59f,ShoulderY=Depth*.20f;
+            const TArray<FVector> Outline{{0,0,0},{ShoulderX,0,0},{ShoulderX,ShoulderY,0},{Width,ShoulderY,0},
+                {Width,Depth,0},{NotchX,Depth,0},{NotchX,NotchY,0},{0,NotchY,0}};
             const bool Closed=Columns>2 && Col%3==2;
             if(Closed)
             {
@@ -123,7 +141,7 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
                 for(int32 Edge=0;Edge<Outline.Num();++Edge)
                 {
                     const FVector A=Outline[Edge],D=Outline[(Edge+1)%Outline.Num()]-A;
-                    const bool Portal=Edge==0 || Edge==2;
+                    const bool Portal=Edge==0 || Edge==4;
                     const float DoorAlong=Edge==0 ? DoorX:Width-ExitX;
                     Wall(A,float(D.Size2D()),float(D.Rotation().Yaw),R.StoreyHeight,Material,Portal,DoorAlong);
                     if(Storeys>1)
@@ -139,16 +157,30 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
                 TArray<float> RoofLevels{R.StoreyHeight+10};if(Storeys>1)RoofLevels.Add(Height+10);
                 for(float Z:RoofLevels)
                 {
-                    Fixed({Width*.5,NotchY*.5,Z},{Width,NotchY,20},EERBlockMaterial::Concrete,true,true);
+                    Fixed({ShoulderX*.5,ShoulderY*.5,Z},{ShoulderX,ShoulderY,20},EERBlockMaterial::Concrete,true,true);
+                    Fixed({Width*.5,(ShoulderY+NotchY)*.5,Z},{Width,NotchY-ShoulderY,20},EERBlockMaterial::Concrete,true,true);
                     Fixed({(Width+NotchX)*.5,(Depth+NotchY)*.5,Z},{Width-NotchX,Depth-NotchY,20},EERBlockMaterial::Concrete,true,true);
                 }
                 Facade(Width,Depth,Storeys,NotchX);
                 Fixed({DoorX,-50,285},{280,100,10},EERBlockMaterial::Metal,true);
                 Fixed({ExitX,Depth+50,285},{280,100,10},EERBlockMaterial::Metal,true);
-                Fixed({Width*.5,-60,6},{Width,120,12},EERBlockMaterial::Concrete,true);
+                Fixed({ShoulderX*.5,-60,6},{ShoulderX,120,12},EERBlockMaterial::Concrete,true);
                 Fixed({(Width+NotchX)*.5,Depth+60,6},{Width-NotchX,120,12},EERBlockMaterial::Concrete,true);
-                const float TurnY=PartitionY*.5f;
-                Route({{DoorX,-160,112},{DoorX,TurnY,112},{ExitX,TurnY,112},{ExitX,Depth+160,112}});
+                const float TurnY=(ShoulderY+PartitionY)*.5f;
+                TArray<FVector> Through{{DoorX,-160,112},{DoorX,TurnY,112},{ExitX,TurnY,112}};
+                if(Depth>=1300 && Width>=1000)
+                {
+                    const float SecondY=(NotchY+Depth)*.5f;
+                    const float OffsetDoor=Width*.63f;
+                    Wall({NotchX+5,SecondY,0},Width-NotchX-10,0,R.StoreyHeight,
+                        EERBlockMaterial::Drywall,true,OffsetDoor-NotchX-5);
+                    const float Approach=(NotchY+SecondY)*.5f;
+                    const float Departure=(SecondY+Depth)*.5f;
+                    Through.Append({{ExitX,Approach,112},{OffsetDoor,Approach,112},
+                        {OffsetDoor,Departure,112},{ExitX,Departure,112}});
+                }
+                Through.Add({ExitX,Depth+160,112});
+                Route(Through);
                 const FBox Bounds=FBox(FVector::ZeroVector,FVector(Width,Depth,Height)).TransformBy(Placement);
                 L.TownBuildings.Add(Bounds);L.TownBuildings.Add(Bounds.TransformBy(Turn));
                 Polygon(Outline,L.TownFootprints);L.FeatureNames.Add(TEXT("ThroughShop"));
@@ -170,7 +202,9 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
         const FVector P=FMath::Abs(Path[0].Y)<FMath::Abs(Path.Last().Y) ? Path[0]:Path.Last();
         if(FMath::Abs(P.Y)<400)Mouths.Add(P);
     }
-    float GalleryMin=0,GalleryMax=0;
+    const float Bend=Random.RandRange(280,500);
+    const float Drift=T->ReflectionBuild ? 0.f:float(Random.RandRange(60,95));
+    auto SpineY=[&](double X){return Drift*FMath::Clamp(X/Bend,-1.,1.);};
     auto Gallery=[&](FVector A,FVector B)
     {
         const FVector D=B-A;if(D.Size2D()<1)return;
@@ -180,22 +214,44 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
         Roof.Transform=FTransform(D.Rotation(),(A+B)*.5+FVector(0,0,R.StoreyHeight-102),FVector(D.Size2D(),320,20)/100);
         L.FixedPieces.Add(Roof);L.RoomAccessRoutes.Add({A,B});
     };
+    double GalleryReach=Bend;
     for(const auto& Mouth:Mouths)
     {
-        const FVector Join(Mouth.X,0,112);
-        Gallery(Mouth+FVector(0,FMath::Sign(Mouth.Y)*170,0),Join);GalleryMin=FMath::Min(GalleryMin,float(Mouth.X));GalleryMax=FMath::Max(GalleryMax,float(Mouth.X));
+        const FVector Join(Mouth.X,SpineY(Mouth.X),112);
+        Gallery(Mouth+FVector(0,FMath::Sign(Mouth.Y)*170,0),Join);
+        GalleryReach=FMath::Max(GalleryReach,FMath::Abs(Mouth.X));
     }
-    Gallery({GalleryMin,0,112},{GalleryMax,0,112});
+    const TArray<FVector> Spine{{-GalleryReach,-Drift,112},{-Bend,-Drift,112},
+        {Bend,Drift,112},{GalleryReach,Drift,112}};
+    for(int32 I=1;I<Spine.Num();++I)Gallery(Spine[I-1],Spine[I]);
     // The ring follows the jagged lots and the diagonal corner rather than a
     // rectangle. Both halves share the same sampled physical construction.
     TArray<FVector> Left{{-HX+Street*.5,-HY+800,100},{-HX+Street*.5,IndentMin-220,100},
         {-HX+Street*.8,IndentMin-100,100},{-HX+Street*.8,IndentMax+100,100},
-        {-HX+Street*.5,IndentMax+220,100},{-HX+Street*.5,HY-CutY-250,100}};
+        {-HX+Street*.5,IndentMax+220,100}};
+    if(Compact)
+    {
+        // Closed service buildings divide the wide corner court into staggered
+        // lanes. The block footprints and the bypass have the same half-turn mate.
+        const float CornerY=-HY+CutY+270;
+        const float LaneY=-HY+CutY+800;
+        ClosedBox({HX-1130,CornerY,340},{440,300,680},EERBlockMaterial::Brick);
+        ClosedBox({HX-620,LaneY,340},{480,340,680},EERBlockMaterial::Concrete);
+        const float InnerTurn=-LaneY-285;
+        const float OuterTurn=-CornerY-300;
+        Left.Append({{-HX+Street*.5,InnerTurn,100},{-HX+1100,InnerTurn,100},
+            {-HX+1100,OuterTurn,100},{-HX+650,OuterTurn,100},
+            {-HX+650,HY-CutY-330,100}});
+    }
+    Left.Add({-HX+Street*.5,HY-CutY-250,100});
     Route(Left);L.GroundRoutes.Add(Left);
     const TArray<FVector> Bottom{Left[0],{HX-CutX-250,-HY+800,100},{HX-Street*.5,-HY+CutY+250,100}};
     Route(Bottom);
     // A second transverse street reaches the courtyard side of the shops.
-    L.CrossingRoutes.Add({{LeftX(0),0,112},{HX-Street*.5,0,112}});
+    TArray<FVector> Cross{{LeftX(-Drift),-Drift,112}};
+    Cross.Append(Spine);
+    Cross.Add({HX-Street*.5,Drift,112});
+    L.CrossingRoutes.Add(MoveTemp(Cross));
     // Screened bases occupy opposite ends of the ring, away from the diagonal
     // closed corners. The outer street and interiors remain independently open.
     Wall({-HX+100,-HY+650,0},800,0,340,EERBlockMaterial::Brick,false,0);

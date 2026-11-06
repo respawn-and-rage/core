@@ -12,6 +12,8 @@ public:
     static void Prewarm(UWorld* World, class UNiagaraSystem* System, const FVector& Position);
     static void SpawnTracer(UWorld* World, class UNiagaraSystem* System, const FVector& Start, const FVector& End, float Lifetime = .02f);
     static void SpawnImpact(UWorld* World, class UNiagaraSystem* System, const FVector& Position, const FVector& Normal);
+    static void SpawnWaterSplash(UWorld* World, class UNiagaraSystem* System, const FVector& Surface);
+    static void SpawnWaterExplosion(UWorld* World, class UNiagaraSystem* System, const FVector& Surface);
     UFUNCTION(BlueprintCallable, Category="Development")
     static bool ConfigureImpact(class UNiagaraSystem* System, class UMaterialInterface* Material);
     UFUNCTION(BlueprintCallable, Category="Development")

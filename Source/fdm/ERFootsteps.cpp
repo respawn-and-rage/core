@@ -2,8 +2,13 @@
 #include "ERCharacter.h"
 #include "ERMovement.h"
 #include "ERPlayerController.h"
+#include "ERProceduralMap.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundWave.h"
+#include "UObject/ConstructorHelpers.h"
 
 float FERFootstepCadence::Stride(float Speed, bool Low, bool Prone)
 {
@@ -35,6 +40,10 @@ bool FERFootstepCadence::Advance(const FVector& Position, bool Active, float Spe
 }
 UERFootsteps::UERFootsteps()
 {
+    static ConstructorHelpers::FObjectFinder<USoundWave> SplashA(TEXT("/Game/EclipseRecoil/Audio/Water/S_ER_Wade_A"));
+    static ConstructorHelpers::FObjectFinder<USoundWave> SplashB(TEXT("/Game/EclipseRecoil/Audio/Water/S_ER_Wade_B"));
+    if(SplashA.Succeeded())WaterSteps.Add(SplashA.Object);
+    if(SplashB.Succeeded())WaterSteps.Add(SplashB.Object);
     PrimaryComponentTick.bCanEverTick=true;
     PrimaryComponentTick.TickGroup=TG_PostPhysics;
     SetIsReplicatedByDefault(true);
@@ -58,8 +67,29 @@ void UERFootsteps::TickComponent(float DeltaTime, ELevelTick TickType, FActorCom
         !Movement->IsTraversing() && !(PC && (PC->bMenuOpen || PC->IsMoveInputIgnored()));
     const float Speed=Movement->Velocity.Size2D();
     const bool Low=Movement->Locomotion.HalfHeight<80.f, Prone=Movement->IsProne();
-    if (!Cadence.Advance(Character->GetActorLocation(),Active,Speed,Low,Prone,GetWorld()->GetTimeSeconds())) return;
+    const double Now=GetWorld()->GetTimeSeconds();
+    const bool RegularStep=Cadence.Advance(Character->GetActorLocation(),Active,Speed,Low,Prone,Now);
     const FVector Feet=Character->GetActorLocation()-FVector(0,0,Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+    bool InWater=false;
+    for(TActorIterator<AERProceduralMap> It(GetWorld());It;++It)
+        if(It->WaterDepthAt(Feet)>5.f)
+        {InWater=true;break;}
+    const bool CanHearEntry=Character->GetController() && !Character->Health->bDead &&
+        !Movement->IsTraversing() && !(PC && (PC->bMenuOpen || PC->IsMoveInputIgnored()));
+    const bool WaterEntry=InWater && !bWasInWater && CanHearEntry && Movement->Velocity.Size()>5.f;
+    bWasInWater=InWater;
+    if(WaterEntry)
+    {
+        Cadence.Distance=0;
+        Cadence.LastStep=Now;
+    }
+    if(!WaterEntry && !RegularStep)return;
+    if(InWater)
+    {
+        ++EmittedCount;
+        MulticastStep(Feet,EERFootstepSurface::Water,FERFootstepCadence::Gain(Speed,Low,Prone));
+        return;
+    }
     FHitResult Hit;
     FCollisionQueryParams Query(SCENE_QUERY_STAT(ERFootstepFloor),false,Character); Query.bReturnPhysicalMaterial=true;
     if (!GetWorld()->LineTraceSingleByObjectType(Hit,Feet+FVector(0,0,15),Feet-FVector(0,0,30),
@@ -73,6 +103,16 @@ void UERFootsteps::MulticastStep_Implementation(FVector_NetQuantize Position, EE
     if (!Character || Character->GetNetMode()==NM_DedicatedServer || Character->Health->bDead || !Audio) return;
     const bool Local=Character->IsLocallyControlled() && Character->Controller && Character->Controller->IsPlayerController();
     if (Local) if (const auto* PC=Cast<AERPlayerController>(Character->Controller); PC && PC->bMenuOpen) return;
+    if(Surface==EERFootstepSurface::Water)
+    {
+        if(WaterSteps.Num()>0)
+        {
+            const int32 Variant=int32(PlaybackCount++%uint32(WaterSteps.Num()));
+            UGameplayStatics::PlaySoundAtLocation(this,WaterSteps[Variant],Position,
+                Audio->BaseVolume*Gain*(Local?Audio->OwnerVolume:1.f),1.f,0.f,Audio->Attenuation);
+        }
+        return;
+    }
     auto* Palette=Audio->Find(Surface);
     const int32 Variant=ERAudio::Play(Character,Palette,Shuffles.FindOrAdd(Palette),Position,Local,
         Audio->BaseVolume*FMath::Clamp(Gain,0.f,1.2f)*(Local?Audio->OwnerVolume:1.f),Audio->Attenuation);

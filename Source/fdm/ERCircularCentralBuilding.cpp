@@ -42,6 +42,11 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
     constexpr float FloorThickness=5;
     const float Grade=L.CentralHill ? L.HillHeight:0;
     const float Base=Grade+FloorThickness;
+    const bool RoofPool=L.CrossingRule==EERCrossingRule::OpenYard && L.CentralHill;
+    const float RoofPoolHalfX=L.BuildingFloors==2 ? 120.f:150.f;
+    const float RoofPoolHalfY=L.BuildingFloors==2 ? 180.f:250.f;
+    const FBox2D RoofPoolHole({HallX-RoofPoolHalfX-20,-RoofPoolHalfY-20},
+                              {HallX+RoofPoolHalfX+20,RoofPoolHalfY+20});
     L.CentralBuildingCenter={BuildingX,0,Base};
     L.TerrainPads.Add(FBox(FVector(BuildingX-W*.5f,-D*.5f,Grade),FVector(BuildingX+W*.5f,D*.5f,Grade)));
     auto Surface=[&](const TArray<TObjectPtr<UMaterialInterface>>& Palette,uint32 Salt)->UMaterialInterface*
@@ -182,11 +187,17 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
                 for(double Cut:{Hole.Min.X,Hole.Max.X})if(Cut>Rect.Min.X && Cut<Rect.Max.X)CX.AddUnique(Cut);
                 for(double Cut:{Hole.Min.Y,Hole.Max.Y})if(Cut>DeckFront && Cut<Rect.Max.Y)CY.AddUnique(Cut);
             }
+            if(RoofPool && Floor==L.BuildingFloors-1)
+            {
+                for(double Cut:{RoofPoolHole.Min.X,RoofPoolHole.Max.X})if(Cut>Rect.Min.X && Cut<Rect.Max.X)CX.AddUnique(Cut);
+                for(double Cut:{RoofPoolHole.Min.Y,RoofPoolHole.Max.Y})if(Cut>DeckFront && Cut<Rect.Max.Y)CY.AddUnique(Cut);
+            }
             CX.Sort();CY.Sort();
             for(int32 IX=1;IX<CX.Num();++IX)for(int32 IY=1;IY<CY.Num();++IY)
             {
                 const FVector2D Mid((CX[IX-1]+CX[IX])*.5,(CY[IY-1]+CY[IY])*.5);
-                if(StairAbove && Hole.IsInside(Mid))continue;
+                if((StairAbove && Hole.IsInside(Mid)) ||
+                   (RoofPool && Floor==L.BuildingFloors-1 && RoofPoolHole.IsInside(Mid)))continue;
                 BuildingBox({Mid.X,Mid.Y,Z+Stride-10},{CX[IX]-CX[IX-1],CY[IY]-CY[IY-1],20},EERBlockMaterial::Metal,true,true,true);
             }
         }
@@ -285,26 +296,84 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
     }
     // Recessed courtyard basins: 20cm at either entrance, 80cm in the centre.
     // The terrain is carved below the solid floor; the water has no collision.
-    const FVector2D PoolCenter(BuildingX-W*.5f-520,-550);
+    const FVector2D PoolCenter(BuildingX-W*.5f-650,-650);
     const bool Pools=L.CentralHill && Radius>=2900 &&
         (HashCombineFast(uint32(Choice),0x504f4f4cu)&4)!=0;
     if(Pools)
     {
+        const bool SinglePool=L.CrossingRule==EERCrossingRule::OpenYard && (uint32(Choice)%7u)<3u;
+        if(SinglePool)
+        {
+            const FVector Center(PoolCenter.X,0,Grade),WaterHalf(220,700,0);
+            L.PoolWater.Emplace(Center-WaterHalf,Center+WaterHalf);
+            Box({Center.X,0,Grade-100},{480,1460,20},EERBlockMaterial::Concrete,true,false,true);
+            for(float Side:{-1.f,1.f})
+                Box({Center.X+Side*230,0,Grade-30},{20,1460,120},EERBlockMaterial::Concrete,true,false);
+            Box({Center.X,-710,Grade-30},{440,20,120},EERBlockMaterial::Concrete,true,true);
+            Box({Center.X,-600,Grade-55},{440,200,70},EERBlockMaterial::Concrete,true,true,true);
+            L.FeatureNames.Add(TEXT("VillaPoolSingle"));
+        }
+        else
+        {
+            for(float Side:{-1.f,1.f})
+            {
+                const FVector Center(PoolCenter.X,Side*PoolCenter.Y,Grade),WaterHalf(220,390,0);
+                L.PoolWater.Emplace(Center-WaterHalf,Center+WaterHalf);
+            }
+            Box(FVector(PoolCenter,Grade-100),{480,820,20},EERBlockMaterial::Concrete,true,true,true);
+            for(float Side:{-1.f,1.f})
+            {
+                Box(FVector(PoolCenter+FVector2D(Side*230,0),Grade-30),{20,820,120},EERBlockMaterial::Concrete,true);
+                Box(FVector(PoolCenter+FVector2D(0,Side*400),Grade-30),{440,20,120},EERBlockMaterial::Concrete,true);
+                Box(FVector(PoolCenter+FVector2D(0,Side*290),Grade-55),{440,190,70},EERBlockMaterial::Concrete,true,true,true);
+            }
+            L.FeatureNames.Add(TEXT("VillaPools"));
+        }
+    }
+    // The roof slab wraps a recessed basin; its waterline is level with the
+    // walking surface. Paired exterior flights keep access outside the villa.
+    if(RoofPool)
+    {
+        const float Roof=Base+L.BuildingFloors*Stride;
+        const float RoofPoolX=BuildingX+HallX;
+        L.PoolWater.Emplace(FVector(RoofPoolX-RoofPoolHalfX,-RoofPoolHalfY,Roof),
+                            FVector(RoofPoolX+RoofPoolHalfX,RoofPoolHalfY,Roof));
+        Box({RoofPoolX,0,Roof-90},{2*RoofPoolHalfX,2*RoofPoolHalfY,20},EERBlockMaterial::Concrete,true,false,true);
         for(float Side:{-1.f,1.f})
         {
-            const FVector Center(PoolCenter.X,Side*PoolCenter.Y,Grade);
-            const FVector WaterCenter=Center;
-            const FVector WaterHalf(160,300,0);
-            L.PoolWater.Emplace(WaterCenter-WaterHalf,WaterCenter+WaterHalf);
+            Box({RoofPoolX+Side*(RoofPoolHalfX+10),0,Roof-40},
+                {20,2*(RoofPoolHalfY+20),80},EERBlockMaterial::Concrete,true,false);
         }
-        Box(FVector(PoolCenter,Grade-90),{360,640,20},EERBlockMaterial::Concrete,true,true,true);
-        for(float Side:{-1.f,1.f})
+        Box({RoofPoolX,-RoofPoolHalfY-10,Roof-40},
+            {2*RoofPoolHalfX,20,80},EERBlockMaterial::Concrete,true,true);
+        // Four square 30cm treads in each mirrored inner corner rise from
+        // the 80cm-deep floor to the flush roof edge.
+        for(int32 Step=0;Step<4;++Step)
         {
-            Box(FVector(PoolCenter+FVector2D(Side*170,0),Grade-30),{20,640,100},EERBlockMaterial::Concrete,true);
-            Box(FVector(PoolCenter+FVector2D(0,Side*310),Grade-30),{320,20,100},EERBlockMaterial::Concrete,true);
-            Box(FVector(PoolCenter+FVector2D(0,Side*225),Grade-50),{320,150,60},EERBlockMaterial::Concrete,true,true,true);
+            const float Height=80.f-Step*20.f;
+            Box({RoofPoolX-RoofPoolHalfX+15+Step*30,-RoofPoolHalfY+30,Roof-80+Height*.5f},
+                {30,60,Height},EERBlockMaterial::Concrete,true,true,true);
         }
-        L.FeatureNames.Add(TEXT("VillaPools"));
+        const float StairWorldX=BuildingX+W*.5f+750;
+        int32 Steps=FMath::CeilToInt32((Roof-CentralGroundHeight(L,{StairWorldX,-1500}))/20.f);
+        Steps=FMath::Clamp(Steps,30,70);
+        const float StartY=-Steps*30.f;
+        const float GroundStart=CentralGroundHeight(L,{StairWorldX,StartY});
+        TArray<FVector> Flight{{StairWorldX,StartY-80,GroundStart+100}};
+        for(int32 Step=0;Step<Steps;++Step)
+        {
+            const float TreadY=StartY+(Step+.5f)*30.f;
+            const float TreadTop=FMath::Lerp(GroundStart,Roof,float(Step+1)/Steps);
+            Box({StairWorldX,TreadY,TreadTop*.5f},{180,30,TreadTop},EERBlockMaterial::Concrete,true,true,true);
+            Flight.Add({StairWorldX,TreadY,TreadTop+100});
+        }
+        Box({BuildingX+W*.5f+330,0,Roof-10},{660,180,20},EERBlockMaterial::Metal,true,false,true);
+        Flight.Add({StairWorldX,0,Roof+100});
+        Flight.Add({BuildingX+W*.5f-100,0,Roof+100});
+        L.StairRoutes.Add(Flight);
+        for(auto& Point:Flight)Point=Mate(Point);
+        L.StairRoutes.Add(Flight);
+        L.FeatureNames.Add(TEXT("RooftopPool"));
     }
     // Small, varied cover groups; sample the north half and mirror every member.
     // Rear entries stay outside all return walls, even in the pocket profile.
@@ -391,7 +460,7 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
                 const float Lo=FMath::Lerp(A,B,float(J)/Count),Hi=FMath::Lerp(A,B,float(J+1)/Count),CX=(Lo+Hi)*.5f;
                 const float H=FMath::Max3(CentralGroundHeight(L,{Lo,0}),CentralGroundHeight(L,{Hi,0}),CentralGroundHeight(L,{CX,0}));
                 const bool InsideVilla=CX>BuildingX+MinI && CX<BuildingX+MaxI;
-                const float DividerBase=InsideVilla ? Base : 0;
+                const float DividerBase=InsideVilla ? Base : FMath::Min3(CentralGroundHeight(L,{Lo,0}),CentralGroundHeight(L,{Hi,0}),CentralGroundHeight(L,{CX,0}))-80;
                 const float DividerTop=InsideVilla ? Base+Stride-20 : H+WallHeight;
                 if(Railing)
                 {

@@ -261,7 +261,6 @@ void UERGameInstance::StartSession()
     Options += FString::Printf(TEXT("?Primary=%d?AlphaSkin=%d?OmegaSkin=%d?Team=%d?ERAlphaBots=%d?EROmegaBots=%d?ERBotMode=%s"),
         GetStartingWeapon(), AlphaSkin, OmegaSkin, FMath::Clamp(PlayerTeam,0,1), FMath::Clamp(AlphaBots,0,10), FMath::Clamp(OmegaBots,0,10), Behaviors[FMath::Clamp(BotBehavior,0,2)]);
     Options += FString::Printf(TEXT("?Magazines=%d?HE=%d?Smoke=%d?Stun=%d"), SpareMagazines, HECount, SmokeCount, StunCount);
-    if(SessionMode==0)Options+=FString::Printf(TEXT("?ERFreeAlphaSkin=%d?ERFreeOmegaSkin=%d"),OfflineAlphaSkin,OfflineOmegaSkin);
     if(Map.Procedural)Options+=FString::Printf(TEXT("?MapSeed=%d"),SessionRules.Get("Map.FixedSeed")>0?int32(SessionRules.Get("Map.Seed")):FMath::Rand());
     UGameplayStatics::OpenLevel(GetWorld(), FName(Map.Package), true, Options);
 }

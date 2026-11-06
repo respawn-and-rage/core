@@ -30,14 +30,22 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     TArray<FERVillageBlock> Plans;
     const bool Odd=Count%2!=0;
     float Envelope=0,RequiredWidth=0;const float CenterGap=Sample(300,500);
+    // Keep the compact layouts' approach lengths and widen their blocks by one metre.
+    const bool Compact=T->SizingTeamSize==1 || (T->SizingTeamSize==2 && Count==2);
+    auto SampleBlockSize=[&]()
+    {
+        const float Width=Sample(R.BlockWidth.X,R.BlockWidth.Y);
+        const float Depth=Sample(R.BlockDepth.X,R.BlockDepth.Y);
+        return FVector2D(Width+(Compact ? 100 : 200),Depth+(Compact ? 0 : 100));
+    };
     if(Odd)
     {
-        FERVillageBlock P;P.Frame=FTransform::Identity;P.Size={Sample(R.BlockWidth.X,R.BlockWidth.Y),Sample(R.BlockDepth.X,R.BlockDepth.Y)};
+        FERVillageBlock P;P.Frame=FTransform::Identity;P.Size=SampleBlockSize();
         P.Storeys=Geometry.RandRange(R.MinStoreys,R.MaxStoreys);P.SelfSymmetric=true;Plans.Add(P);Envelope=P.Size.Y*.5f;
     }
     for(int32 I=0;I<Count/2;++I)
     {
-        FERVillageBlock P;P.Size={Sample(R.BlockWidth.X,R.BlockWidth.Y),Sample(R.BlockDepth.X,R.BlockDepth.Y)};
+        FERVillageBlock P;P.Size=SampleBlockSize();
         const float Gap=Envelope>0 ? Sample(600,900):CenterGap*.5f;
         P.Frame=FTransform(FVector(Sample(-300,300),-Envelope-Gap-P.Size.Y*.5f,0));
         P.Storeys=Geometry.RandRange(R.MinStoreys,R.MaxStoreys);Envelope+=Gap+P.Size.Y;Plans.Add(P);
@@ -225,12 +233,8 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
         for(float DX:{-1.f,1.f})for(float DY:{-1.f,1.f})Wood({X+DX*(Width*.5f-18),Y+DY*(Depth*.5f-18),Floor+Height*.5f},{20,20,Height});
         for(float DY:{-1.f,1.f})Wood({X,Y+DY*(Depth*.5f-18),Floor+Height-10},{Width-56,20,20});
         if(Roof)
-        {
-        for(float DX:{-1.f,1.f})Wood({X+DX*(Width*.5f-4),Y,Floor+Height+55},{8,20,110});
-        Wood({X,Y,Floor+Height+100},{Width-16,20,20});
-        const float HalfDepth=Depth*.5f+35,RoofRise=110,Angle=FMath::Atan2(RoofRise,HalfDepth),Slope=FMath::Sqrt(HalfDepth*HalfDepth+RoofRise*RoofRise);
-        for(float Side:{-1.f,1.f})Box({X,Y+Side*HalfDepth*.5f,Floor+Height+RoofRise*.5f},{Width+70,Slope,Cells.SheetThickness},EERBlockMaterial::Metal,false,FQuat(FVector::ForwardVector,-Side*Angle));
-        }
+            Box({X,Y,Floor+Height+Cells.SheetThickness*.5f},
+                {Width+70,Depth+70,Cells.SheetThickness},EERBlockMaterial::Metal,false);
         FERLayoutSecondary House;House.Frame=FTransform(FVector(X,Y,Floor));House.Size={Width,Depth,Height};House.Material=EERBlockMaterial::Wood;
         L.SecondaryStructures.Add(House);if(MirrorConstruction){House.Frame=House.Frame*HalfTurn;L.SecondaryStructures.Add(House);}
     };
@@ -390,7 +394,7 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     const float StoreW=Sample(500,600),StoreD=Sample(600,800),StoreH=260+40*Geometry.RandRange(0,2);
     const FVector Store(HX-StoreW*.5f-130,-HY+850,StoreH*.5f);
     if(R.StorageStructure && !ImportedWood(R.StorageStructure,Store,{StoreW,StoreD,StoreH}))return false;
-    if(!R.StorageStructure)Hut(Store.X,Store.Y,0,StoreW,StoreD,StoreH);
+    if(!R.StorageStructure)Hut(Store.X,Store.Y,0,StoreW,StoreD,StoreH,false);
     Wood(Store+FVector(0,0,StoreH*.5f-3),{StoreW,StoreD,6});GraySheet(Store+FVector(0,0,StoreH*.5f+.1f),{StoreW+40,StoreD+40,.2f});
     const FBox Shack(Store-FVector(StoreW,StoreD,StoreH)*.5f,Store+FVector(StoreW,StoreD,StoreH)*.5f);L.TownBuildings.Add(Shack);L.TownBuildings.Add(Shack.TransformBy(HalfTurn));
     // Timber ladder on the inward side of the shack roof, away from the flank.

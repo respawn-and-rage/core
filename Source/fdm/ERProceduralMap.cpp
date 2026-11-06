@@ -6,6 +6,11 @@
 #include "ERIndustrialFence.h"
 #include "ERMapPlayability.h"
 #include "ERMapSelection.h"
+#include "ERShotEffects.h"
+#include "NiagaraSystem.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundWave.h"
+#include "Sound/SoundAttenuation.h"
 #include "Components/DynamicMeshComponent.h"
 #include "Components/PointLightComponent.h"
 #include "DynamicMesh/DynamicMesh3.h"
@@ -400,6 +405,16 @@ AERProceduralMap::AERProceduralMap()
     static ConstructorHelpers::FObjectFinder<UMaterialInterface> Water(
         TEXT("/Game/EclipseRecoil/Art/OutdoorBackdrop/M_PoolWater.M_PoolWater"));
     PoolWaterSurface=Water.Object;
+    static ConstructorHelpers::FObjectFinder<USoundWave> WaterBlast(TEXT("/Game/EclipseRecoil/Audio/Water/S_ER_WaterExplosion"));
+    WaterExplosionSound=WaterBlast.Object;
+    static ConstructorHelpers::FObjectFinder<USoundWave> WaterHit(TEXT("/Game/EclipseRecoil/Audio/Water/S_ER_Wade_A"));
+    WaterImpactSound=WaterHit.Object;
+    static ConstructorHelpers::FObjectFinder<USoundAttenuation> WaterAttenuation(TEXT("/Game/EclipseRecoil/Audio/SA_ER_Footsteps"));
+    WaterImpactAttenuation=WaterAttenuation.Object;
+    static ConstructorHelpers::FObjectFinder<UNiagaraSystem> Splash(TEXT("/Game/EclipseRecoil/Effects/Shots/NS_ER_WaterSplash"));
+    WaterSplashSystem=Splash.Object;
+    static ConstructorHelpers::FObjectFinder<UNiagaraSystem> WaterBurst(TEXT("/Game/EclipseRecoil/Effects/Shots/NS_ER_WaterExplosion"));
+    WaterExplosionSystem=WaterBurst.Object;
     auto Create=[&](const TCHAR* Name)
     {
         auto* Mesh=CreateDefaultSubobject<UInstancedStaticMeshComponent>(Name);
@@ -906,4 +921,36 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
         for(const auto& G:Layout.TownGates){MixVector(G.Frame.GetLocation());MixVector(FVector(G.Gap,G.Width,G.Angle));for(const auto& P:G.Passage)MixVector(P);}
     }
     return H;
+}
+
+float AERProceduralMap::WaterDepthAt(const FVector& WorldFeet) const
+{
+    const FVector P=GetActorTransform().InverseTransformPosition(WorldFeet);
+    for(const FBox& Water:Layout.PoolWater)
+        if(P.X>=Water.Min.X && P.X<=Water.Max.X && P.Y>=Water.Min.Y && P.Y<=Water.Max.Y)
+        {
+            const float Depth=float(Water.Max.Z-P.Z);
+            if(Depth>=0.f && Depth<=95.f)return Depth;
+        }
+    return 0.f;
+}
+
+bool AERProceduralMap::PlayWaterImpactAt(const FVector& WorldPosition) const
+{
+    FVector Surface;
+    if(GetNetMode()==NM_DedicatedServer || !WaterSurfaceAt(WorldPosition,Surface))return false;
+    if(WaterImpactSound)UGameplayStatics::PlaySoundAtLocation(this,WaterImpactSound,Surface,
+        .55f,1.f,0.f,WaterImpactAttenuation);
+    UERShotEffects::SpawnWaterSplash(GetWorld(),WaterSplashSystem,Surface);
+    return true;
+}
+
+bool AERProceduralMap::WaterSurfaceAt(const FVector& WorldPosition,FVector& OutSurface) const
+{
+    const FVector P=GetActorTransform().InverseTransformPosition(WorldPosition);
+    for(const FBox& Water:Layout.PoolWater)
+        if(P.X>=Water.Min.X && P.X<=Water.Max.X && P.Y>=Water.Min.Y && P.Y<=Water.Max.Y &&
+           P.Z<=Water.Max.Z-1 && P.Z>=Water.Max.Z-95)
+        {OutSurface=GetActorTransform().TransformPosition(FVector(P.X,P.Y,Water.Max.Z));return true;}
+    return false;
 }

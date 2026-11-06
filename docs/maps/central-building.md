@@ -25,10 +25,14 @@ The villa has two storeys in 1v1 and three from 2v2 onward. Interior stairs
 connect every storey, with doors onto recessed first-floor terraces. Stairs use
 20cm risers and 30cm treads, and main doors are 240cm wide.
 
-Some central-hill layouts have mirrored recessed courtyard pools. Their solid concrete
-floors are 20cm below the water at both ends and 80cm below it in the centre.
+Some open central-hill layouts have one wide central pool; other central-hill layouts can have two mirrored recessed courtyard pools. Their solid concrete
+floors are 20cm below the water at both ends and 90cm below it in the centre.
 The clear water surface has no collision, so players walk on the basin floor.
+Water detection stays within 95cm below the surface, excluding rooms beneath roof pools.
+Wading reduces movement speed progressively from 90% near the surface to 50% at 100cm depth.
+The wall separator extends below the local terrain grade so its underside stays hidden on slopes.
 `setup_pool_water.py` creates the owned translucent water material in Unreal.
+Open layouts on the central hill can have a compact roof pool even in 1v1. Its waterline is flush with the roof, its basin extends 80cm into the slab, and mirrored square corner treads lead from the rim to the floor. Paired exterior tread stairs reach the roof without an interior roof opening.
 
 - Open: connected ground routes, with no central separator.
 - Wall division: 340cm exterior Brick separator, above the default jump and climb

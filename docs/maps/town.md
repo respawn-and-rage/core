@@ -4,14 +4,13 @@
 `scripts/setup_town.py`, `ERUrbanTownProbe.cpp`.
 
 `DA_Town` / `L_Town` is an original urban layout inspired by the supplied Chinatown
-overhead reference. A broken open-air loop follows diagonal corners, deep boundary
-recesses and projecting closed lots. A shared central gallery links the traversable room wings into one complex, with
-open courtyards between the branches. Central parcels have unequal widths and staggered
-setbacks, with paired L-shaped through-shops and closed wings. Reentrant outdoor courts
-and transverse alleys connect the outside streets and ground-floor interior shortcuts.
-Offset portals and internal partitions interrupt straight shots through each shop.
-Closed urban fabric bends the outside lanes; diagonal spawn pockets exit behind
-their front screens. The shared builder rejects exposed opposing starts.
+overhead reference. The open-air ring bends around angled facades, recesses and
+projecting closed lots. Compact layouts have one broad, stepped building mass per
+half, with paired closed service buildings that split the corner courts into
+staggered lanes. Larger layouts add more parcels. A bent covered passage joins the wings,
+with outdoor courts in their recesses. Doors sit on different axes and deeper
+wings add a third room, creating successive turns through the complex. Screened
+spawn pockets sit at opposite ends of the ring.
 
 All initial circulation stays on the ground, with 12cm pavement thresholds. One to
 three storeys give the blocks height and overhead shelter; upper facades and concrete

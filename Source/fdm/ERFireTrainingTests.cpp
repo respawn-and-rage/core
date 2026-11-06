@@ -27,7 +27,7 @@ bool FERFireTrainingLayoutTest::RunTest(const FString& Parameters)
 {
     auto* T=GreyboxFireTraining(TEXT("test.fire-training"));
     FERProceduralConfig C;C.TemplateAsset=T;FERBlockRoomConfig B;FERProceduralLayout L,Again;
-    TSet<int32> Widths,Depths,Heights,CatwalkHeights,Variants;int32 Islands=0;
+    TSet<int32> Widths,Depths,Heights,CatwalkHeights,Variants;int32 Islands=0,OfficeLayouts=0;
     TArray<int32> Seeds;for(int32 I=0;I<512;++I)Seeds.Add(I);Seeds.Append({7919,-17,INT32_MIN,INT32_MAX});
     for(int32 Seed:Seeds)
     {
@@ -52,6 +52,7 @@ bool FERFireTrainingLayoutTest::RunTest(const FString& Parameters)
         for(const auto& Deck:L.ElevatedDecks)TestTrue(TEXT("standing headroom"),Deck.Max.Z+200<=L.IndoorCeiling);
         for(int32 Access:L.ElevatedAccesses)TestTrue(TEXT("two independent accesses"),Access>=2);
         for(const auto& Walk:L.WarehouseCatwalks)CatwalkHeights.Add(FMath::RoundToInt32(Walk.Max.Z));
+        OfficeLayouts+=L.FeatureNames.Contains(FName(TEXT("OfficeCluster"))) ? 1:0;
         Islands+=L.FeatureNames.Contains(FName(TEXT("UpperIsland"))) ? 1:0;
         int32 Roofs=0;
         for(const auto& Piece:L.FixedPieces)
@@ -65,13 +66,14 @@ bool FERFireTrainingLayoutTest::RunTest(const FString& Parameters)
     }
     TestTrue(TEXT("free widths"),Widths.Num()>10);TestTrue(TEXT("free depths"),Depths.Num()>10);TestTrue(TEXT("free ceiling heights"),Heights.Num()>5);
     TestTrue(TEXT("varied catwalk heights"),CatwalkHeights.Num()>5);TestEqual(TEXT("six high route patterns"),Variants.Num(),6);TestTrue(TEXT("separate-height islands sampled"),Islands>0);
+    TestTrue(TEXT("office clusters appear in a subset of layouts"),OfficeLayouts>0 && OfficeLayouts<Seeds.Num());
     C.Seed=42;TestTrue(TEXT("deterministic build"),ERProcedural::Build(C,B,L));TestTrue(TEXT("repeat build"),ERProcedural::Build(C,B,Again));
     TestEqual(TEXT("panel count stable"),L.Panels.Num(),Again.Panels.Num());TestEqual(TEXT("fixed count stable"),L.FixedPieces.Num(),Again.FixedPieces.Num());
     for(int32 I=0;I<L.Panels.Num();++I)TestTrue(TEXT("cells stable"),L.Panels[I].Id==Again.Panels[I].Id && L.Panels[I].Transform.Equals(Again.Panels[I].Transform));
     C.LayoutAttempt=ERProcedural::FireTrainingAttempts-1;TestTrue(TEXT("safe reference layout"),ERProcedural::BuildTemplate(C,B,L,FERCellSettings()));
     const int32 Count=L.Panels.Num();T->FireTraining.ContinuousUpperFloors=true;
     TestFalse(TEXT("global upper floors rejected"),ERProcedural::Build(C,B,L));TestEqual(TEXT("atomic rejection"),L.Panels.Num(),Count);
-    AddInfo(FString::Printf(TEXT("ER_FIRE_PROCEDURAL seeds=%d widths=%d depths=%d ceilings=%d catwalk_heights=%d patterns=%d islands=%d"),Seeds.Num(),Widths.Num(),Depths.Num(),Heights.Num(),CatwalkHeights.Num(),Variants.Num(),Islands));
+    AddInfo(FString::Printf(TEXT("ER_FIRE_PROCEDURAL seeds=%d widths=%d depths=%d ceilings=%d catwalk_heights=%d patterns=%d islands=%d offices=%d"),Seeds.Num(),Widths.Num(),Depths.Num(),Heights.Num(),CatwalkHeights.Num(),Variants.Num(),Islands,OfficeLayouts));
     return true;
 }
 

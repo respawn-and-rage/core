@@ -58,7 +58,8 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
             (Piece.MeshCollision && (!Piece.FixedMesh || Piece.Destructible || Piece.VisualOnly || Piece.PawnBarrier || Piece.WalkableSurface)) ||
             (Piece.CollisionOnly && (Piece.Destructible || Piece.FixedMesh || Piece.VisualOnly || Piece.PawnBarrier || Piece.WalkableSurface || Piece.MeshCollision)) ||
             (Piece.Roof && (Piece.Destructible || (!Piece.FixedMesh && !Fire))) ||
-            (Piece.Destructible && (Piece.VisualOnly || Piece.FixedSurface)) || (!Piece.Destructible && (Piece.CellSurface || Piece.MirroredCellSurface))) return false;
+            (Piece.Destructible && (Piece.VisualOnly || Piece.FixedSurface)) || (!Piece.Destructible && (Piece.CellSurface || Piece.MirroredCellSurface)))
+            return false;
         if(Piece.SymmetryCenter.ContainsNaN() || (!Central && !Piece.SymmetryCenter.IsNearlyZero()) || Piece.SymmetryCenter.Y!=0 || Piece.SymmetryCenter.Z!=0 || FMath::Abs(Piece.SymmetryCenter.X)>1000)return false;
         if(Symmetric && !Piece.Mirrored && ((!Mirror && !FMath::IsNearlyEqual(Piece.Center.X,Piece.SymmetryCenter.X)) || !FMath::IsNearlyZero(Piece.Center.Y) || !Piece.Jitter.IsNearlyZero()))return false;
         FRandomStream Random(int32(HashCombine(uint32(C.Seed),uint32(Piece.Group))));
@@ -71,7 +72,8 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
             const FQuat PhysicalRotation=FRotator(0,Copy ? (Mirror ? -Piece.RotationYaw:Piece.RotationYaw+180):Piece.RotationYaw,0).Quaternion();
             const FBox Bounds=FBox(-Piece.Size*.5,Piece.Size*.5).TransformBy(FTransform(Piece.RotationYaw!=0 ? PhysicalRotation:FQuat::Identity,Center));
             const FVector Min=Bounds.Min,Max=Bounds.Max;
-            const float FloorLimit=Alleys && T->Town.LowCoverAndUnderpass ? -420.f:0.f;
+            const float FloorLimit=Alleys && T->Town.LowCoverAndUnderpass ? -420.f:
+                L.CircularArena && L.CrossingRule==EERCrossingRule::ClimbableWall ? -100.f:0.f;
             if(Min.X < -Half.X-.01 || Max.X > Half.X+.01 || Min.Y < -Half.Y-.01 || Max.Y > Half.Y+.01 || Min.Z<FloorLimit-.01 || Max.Z>Size.Z+.01)
             {UE_LOG(LogTemp,Warning,TEXT("ER_TEMPLATE_BOUNDS_REJECT seed=%d bounds=%s arena=%s"),C.Seed,*Bounds.ToString(),*Size.ToString());return false;}
             const FBox Box(Min,Max);

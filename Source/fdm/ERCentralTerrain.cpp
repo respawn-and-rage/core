@@ -85,6 +85,7 @@ float Field(const FERProceduralLayout& L,FVector2D P)
 {
     for(const auto& Water:L.PoolWater)
     {
+        if(Water.Max.Z>600)continue; // Rooftop basins must not carve the ground below.
         const FVector Center=Water.GetCenter();
         // Keep terrain below the solid pool floor, including triangle edges.
         if(FMath::Abs(P.X-Center.X)<Water.GetExtent().X+45 &&

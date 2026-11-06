@@ -40,8 +40,8 @@ void AERDustTemplateProbe::TickArchitecture(AERProceduralMap* M,AERCharacter* C,
         FAssetCompilingManager::Get().FinishAllCompilation();
 #endif
         ERAlleyDestruction::FBreach B;FERCellId R;
-        const bool Found=ERAlleyDestruction::FindWall(M,B,EERBlockMaterial::Stone) && ERAlleyDestruction::FindRoof(M,ArchitectureRoof,R,EERBlockMaterial::Stone);
-        Check(Found,TEXT("architecture_original_stone_facade_and_roof_resolve"));
+        const bool Found=ERAlleyDestruction::FindWall(M,B,EERBlockMaterial::Brick) && ERAlleyDestruction::FindRoof(M,ArchitectureRoof,R,EERBlockMaterial::Brick);
+        Check(Found,TEXT("architecture_original_brick_facade_and_roof_resolve"));
         if(!Found){FPlatformMisc::RequestExitWithStatus(false,1);return;}
         ArchitectureOutside=B.Outside;ArchitectureInside=B.Inside;WallPoint=B.Hit.ImpactPoint;WallNormal=B.Hit.ImpactNormal;WallPanel=B.Cell.Panel;RoofPanel=R.Panel;
         WallFloor=M->GetCellWorld().GetPanels()[WallPanel].Transform.GetLocation().Z;
@@ -89,7 +89,7 @@ void AERDustTemplateProbe::TickArchitecture(AERProceduralMap* M,AERCharacter* C,
         if(Delta.Size()<30 && Move->IsMovingOnGround())
         {
             Check(true,TEXT("architecture_real_pawn_enters_new_facade_hole"));FERCellId RoofCell;
-            Check(ERAlleyDestruction::FindRoof(M,ArchitectureRoof,RoofCell,EERBlockMaterial::Stone),TEXT("architecture_undamaged_stone_roof_selected_after_facade_blast"));RoofPanel=RoofCell.Panel;
+            Check(ERAlleyDestruction::FindRoof(M,ArchitectureRoof,RoofCell,EERBlockMaterial::Brick),TEXT("architecture_undamaged_brick_roof_selected_after_facade_blast"));RoofPanel=RoofCell.Panel;
             Place(ArchitectureRoof+FVector(0,0,98));ArchitectureStage=6;StageTime=Elapsed;
         }
         else if(Elapsed-StageTime>10){Check(false,TEXT("architecture_facade_pawn_timeout"));Place(ArchitectureRoof+FVector(0,0,98));ArchitectureStage=6;StageTime=Elapsed;}

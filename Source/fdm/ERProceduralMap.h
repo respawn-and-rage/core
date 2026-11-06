@@ -234,6 +234,14 @@ public:
     void ResolveMapCandidate();
     uint32 GetTemplateGeometryDigest() const;
     const FERProceduralLayout& GetLayout() const { return Layout; }
+    float WaterDepthAt(const FVector& WorldFeet) const;
+    bool PlayWaterImpactAt(const FVector& WorldPosition) const;
+    bool WaterSurfaceAt(const FVector& WorldPosition,FVector& OutSurface) const;
+    UPROPERTY() TObjectPtr<class USoundWave> WaterExplosionSound;
+    UPROPERTY() TObjectPtr<class USoundWave> WaterImpactSound;
+    UPROPERTY() TObjectPtr<class USoundAttenuation> WaterImpactAttenuation;
+    UPROPERTY() TObjectPtr<class UNiagaraSystem> WaterSplashSystem;
+    UPROPERTY() TObjectPtr<class UNiagaraSystem> WaterExplosionSystem;
     virtual FVector GetSpawnLocation() const override { return GetActorTransform().TransformPosition(Layout.Spawn); }
 protected:
     virtual bool GenerateLogicalWorld() override;

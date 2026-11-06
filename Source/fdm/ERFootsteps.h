@@ -22,6 +22,7 @@ class FDM_API UERFootsteps : public UActorComponent
 public:
     UERFootsteps();
     UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<UERFootstepAudio> Audio;
+    UPROPERTY(EditDefaultsOnly, Category="Water") TArray<TObjectPtr<class USoundWave>> WaterSteps;
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
     UFUNCTION(NetMulticast, Unreliable) void MulticastStep(FVector_NetQuantize Position, EERFootstepSurface Surface, float Gain);
@@ -29,5 +30,6 @@ public:
     EERFootstepSurface LastSurface=EERFootstepSurface::Hard;
 private:
     FERFootstepCadence Cadence;
+    bool bWasInWater=false;
     TMap<const UEROneShotAudio*, FERAudioShuffle> Shuffles;
 };

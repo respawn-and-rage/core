@@ -267,7 +267,7 @@ def main():
     # Order: Drywall, Brick, Concrete, Wood, Stone, Metal, Glass.
     specs = {
      'CentralBuilding': ('Urban', ['PlasterCoating02','BrickRough03','PouredConcrete01','OldPlanks','StoneWall01','CortenSteel01','Glass_Clear'], 'PouredConcrete01','AluPanels150x150','ConcreteSlabs01',['Asphalt02','GrassPlain01','Snow01']),
-     'MiddleEasternAlleys': ('Stone', ['PlasterCoating03','BrickRough03','PouredConcrete01','OldPlanks','StoneWall03','CortenSteel01','Glass_Clear'], 'StoneWall03','PavementSquare01','PavementSquare01',['DesertSand01']),
+     'MiddleEasternAlleys': ('Stone', ['PlasterCoating03','BrickPainted01','PouredConcrete01','OldPlanks','StoneWall03','CortenSteel01','Glass_Clear'], 'StoneWall03','PavementSquare01','PavementSquare01',['DesertSand01']),
      'FireTraining': ('Warehouse', ['Plasterboards01','CinderblockBare02','PouredConcrete05','Plywood01','StoneWall01','CortenSteel01','Glass_Tinted'], 'PouredConcrete01','BareConcrete03','ConcreteSlabs01',['BareConcrete03']),
      'Rooms': ('Tunnels', ['Plasterboards01','CinderblockBare01','PouredConcrete01','Plywood02','StoneWall01','CortenSteel01','Glass_Frosted'], 'PouredConcrete01','BareConcrete03','PouredConcrete01',['BareConcrete03']),
      'Village': ('Jungle', ['PlasterCoating03','BrickRough03','BareConcrete03','RoughPlanks','StoneWall02','SlateRoofing01','Glass_Clear'], 'RoughPlanks','RoughPlanks','SlateRoofing01',['ForestBranches01','GroundDirt02','GrassPlain01']),

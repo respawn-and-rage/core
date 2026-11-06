@@ -17,6 +17,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
+#include "ERProceduralMap.h"
 #include "Camera/CameraComponent.h"
 #include "Components/DecalComponent.h"
 #include "Components/SphereComponent.h"
@@ -643,6 +644,8 @@ void AERWeapon::TryFire()
 }
 void AERWeapon::MulticastImpact_Implementation(FVector_NetQuantize Position, FVector_NetQuantizeNormal Normal, float Roll, uint8 Variant)
 {
+    for(TActorIterator<AERProceduralMap> It(GetWorld());It;++It)
+        if(It->PlayWaterImpactAt(Position))return;
     const AERProjectile* Defaults = ProjectileClass ? ProjectileClass->GetDefaultObject<AERProjectile>() : nullptr;
     UMaterialInterface* Material = ImpactDecalVariants.IsValidIndex(Variant) ? ImpactDecalVariants[Variant].Get() : (Defaults ? Defaults->ImpactDecalMaterial.Get() : nullptr);
     SpawnBulletHole(GetWorld(), Material, Position, Normal, Roll);
@@ -1041,6 +1044,8 @@ void AERProjectile::MulticastDetonate_Implementation(FVector_NetQuantize Positio
 }
 void AERProjectile::MulticastImpact_Implementation(FVector_NetQuantize Position, FVector_NetQuantizeNormal Normal, float Roll)
 {
+    for(TActorIterator<AERProceduralMap> It(GetWorld());It;++It)
+        if(It->PlayWaterImpactAt(Position))return;
     SpawnBulletHole(GetWorld(), ImpactDecalMaterial, Position, Normal, Roll);
 }
 

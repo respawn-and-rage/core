@@ -257,7 +257,9 @@ void AERGameMode::BeginPlay()
     if (FParse::Param(FCommandLine::Get(),TEXT("ERFieldClothingProbe"))) GetWorld()->SpawnActor<AERFieldClothingProbe>();
     if (FParse::Param(FCommandLine::Get(),TEXT("ERBotLoadoutProbe"))) GetWorld()->SpawnActor<AERBotLoadoutProbe>();
     if (FParse::Param(FCommandLine::Get(),TEXT("ERReconProbe"))) GetWorld()->SpawnActor<AERReconProbe>();
-    if (GetWorld()->GetMapName().Contains(TEXT("L_CentralBuilding")) && FParse::Param(FCommandLine::Get(),TEXT("ERIndustrialMapProbe")))GetWorld()->SpawnActor<AERIndustrialMapProbe>();
+    if (GetWorld()->GetMapName().Contains(TEXT("L_CentralBuilding")) &&
+        (FParse::Param(FCommandLine::Get(),TEXT("ERIndustrialMapProbe")) || FParse::Param(FCommandLine::Get(),TEXT("ERWaterEffectsGallery"))))
+        GetWorld()->SpawnActor<AERIndustrialMapProbe>();
     if (FParse::Param(FCommandLine::Get(), TEXT("ERProtectionRespawnGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERProtectionGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERPostureGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERTeamGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERCorpseGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERSkinGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERFPSForearmsGallery"))) GetWorld()->SpawnActor<AERTeamGallery>();
 #endif
     if (GameSession) GameSession->MaxPlayers = MaxHumanPlayers;
@@ -412,14 +414,6 @@ void AERGameMode::RestartPlayer(AController* Player)
                 PS->LoadoutPreset=Kit.Preset;PS->LoadoutVariant=Kit.Variant;
                 PS->AlphaSkin=ERLoadouts::Resolve(Kit.Preset,Kit.Variant,false,Cast<AERCharacter>(GetDefaultPawnClassForController(Player)->GetDefaultObject()),&ERServer::Rules(GetWorld())).Skin;
                 PS->OmegaSkin=ERLoadouts::Resolve(Kit.Preset,Kit.Variant,true,Cast<AERCharacter>(GetDefaultPawnClassForController(Player)->GetDefaultObject()),&ERServer::Rules(GetWorld())).Skin;
-            }
-            // Offline free skin choice overrides the role skin for the local human only.
-            if(GetNetMode()==NM_Standalone && !PS->IsABot())
-            {
-                const int32 FreeAlpha=FCString::Atoi(GetWorld()->URL.GetOption(TEXT("ERFreeAlphaSkin="),TEXT("-1")));
-                const int32 FreeOmega=FCString::Atoi(GetWorld()->URL.GetOption(TEXT("ERFreeOmegaSkin="),TEXT("-1")));
-                if(FreeAlpha>=0 && FreeAlpha<ERSkins::Count)PS->AlphaSkin=FreeAlpha;
-                if(FreeOmega>=0 && FreeOmega<ERSkins::Count)PS->OmegaSkin=FreeOmega;
             }
             PS->ActiveSkin = ERSkins::ValidIndex(PS->Team == EERTeam::Alpha ? PS->AlphaSkin : PS->OmegaSkin); PS->ForceNetUpdate(); }
         TGuardValue<bool> SpawnGuard(bSpawningPresetPawn,!GetWorld()->URL.HasOption(TEXT("ERLegacyArsenal")) && !GetWorld()->URL.HasOption(TEXT("ERFullArsenalTest")));

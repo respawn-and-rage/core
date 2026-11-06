@@ -3,6 +3,7 @@
 #include "ERCharacter.h"
 #include "ERWeapon.h"
 #include "ERLadder.h"
+#include "ERProceduralMap.h"
 #include "EngineUtils.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/GameStateBase.h"
@@ -95,10 +96,21 @@ float UERMovement::GetMaxSpeed() const
     if (IsOnLadder()) return LadderSpeed();
     if (IsMantling()) return 0;
     if (IsChangingPosture()) return ERServer::Get(GetWorld(),"Move.Posture")/.036f;
-    if (IsProne()) return ERServer::Get(GetWorld(),"Move.Prone")/.036f;
-    if (Locomotion.HalfHeight < 92.f) return ERServer::Get(GetWorld(),"Move.Crouch")/.036f;
-    if (IsSprinting()) return ERServer::Get(GetWorld(),"Move.Sprint")/.036f;
-    return bWalkHeld ? ERServer::Get(GetWorld(),"Move.Walk")/.036f : ERServer::Get(GetWorld(),"Move.Run")/.036f;
+    float Speed=0;
+    if (IsProne()) Speed=ERServer::Get(GetWorld(),"Move.Prone")/.036f;
+    else if (Locomotion.HalfHeight < 92.f) Speed=ERServer::Get(GetWorld(),"Move.Crouch")/.036f;
+    else if (IsSprinting()) Speed=ERServer::Get(GetWorld(),"Move.Sprint")/.036f;
+    else Speed=(bWalkHeld ? ERServer::Get(GetWorld(),"Move.Walk") : ERServer::Get(GetWorld(),"Move.Run"))/.036f;
+    if(CharacterOwner && GetWorld())
+    {
+        const FVector Feet=CharacterOwner->GetActorLocation()-FVector(0,0,CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+        for(TActorIterator<AERProceduralMap> It(GetWorld());It;++It)
+        {
+            const float Depth=It->WaterDepthAt(Feet);
+            if(Depth>0) return Speed*FMath::Lerp(.9f,.5f,FMath::Clamp(Depth/100.f,0.f,1.f));
+        }
+    }
+    return Speed;
 }
 void UERMovement::UpdateFromCompressedFlags(uint8 Flags)
 {

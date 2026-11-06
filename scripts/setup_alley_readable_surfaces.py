@@ -10,7 +10,7 @@ theme = assets.load_asset(art+'MapTemplates/DA_Theme_MiddleEasternAlleys')
 catalog = theme.get_editor_property('shared_surfaces')
 by_name = {item.get_name(): item for item in catalog.get_editor_property('surfaces')}
 paving = by_name['MI_PavementSquare01']
-brick = by_name['MI_BrickRough03']
+brick = by_name['MI_BrickPainted01']
 palettes = list(theme.get_editor_property('themes'))
 if any(p.get_editor_property('floor') != paving or p.get_editor_property('ceiling') != paving
        or p.get_editor_property('materials')[1] != brick for p in palettes):

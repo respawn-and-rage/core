@@ -17,7 +17,11 @@ private:
     float NextDiagnostic=0;
     int32 SeenPhase=0,Flight=0,Gallery=0,LadderIndex=0;
     bool Failed=false,Walking=false,LadderClimbing=false,SawLadder=false;
+    int32 WaterGalleryStage=0;
+    float WaterGalleryStart=0;
+    FVector WaterGallerySurface=FVector::ZeroVector;
     void Check(bool Value,const TCHAR* Label);
     void Publish(int32 Next,class AERProceduralMap* Map);
     void Capture(class AERProceduralMap* Map,int32 View=0);
+    void TickWaterGallery(class AERProceduralMap* Map);
 };

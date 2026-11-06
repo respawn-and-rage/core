@@ -46,7 +46,7 @@ void FinishAlleyHouseModules(const UERMapTemplate& T,const TArray<FERMapTemplate
         if(!Clear){House.Entrances.RemoveAt(I);House.EntranceFaces.RemoveAt(I);}
     }
     auto& P=L.Panels.AddDefaulted_GetRef();P.Id=100001+Index;
-    P.Material=(Index/2)%2 ? EERBlockMaterial::Stone:EERBlockMaterial::Brick;
+    P.Material=EERBlockMaterial::Brick;
     P.Surface=T.Town.WoodSurface;P.Size=Size+FVector(0,0,Cap);
     P.Transform=FTransform(Frame.GetRotation(),Frame.TransformPosition(-FVector(Size.X,Size.Y,0)*.5));
     P.Cell={FERCellWorld::FitCell(P.Size.X,5),FERCellWorld::FitCell(P.Size.Y,5),FERCellWorld::FitCell(P.Size.Z,5)};

@@ -309,18 +309,6 @@ void AERPlayerController::ShowMenu(bool bShow)
             IntChoice(TEXT("Alpha bots"), BotCounts, &GI->AlphaBots);
             IntChoice(TEXT("Omega bots"), BotCounts, &GI->OmegaBots);
             IntChoice(TEXT("Bot behavior"), {TEXT("Stationary targets"), TEXT("Movement only"), TEXT("Movement and combat")}, &GI->BotBehavior);
-            // Free skin choice (offline only): role default or any of the catalog skins.
-            for (bool Omega : {false, true})
-            {
-                TArray<FString> Skins{TEXT("Role default")};
-                for (int32 I = 0; I < ERSkins::Count; ++I)
-                {
-                    const auto* TeamSkins = Catalog ? &(Omega ? Catalog->OmegaSkins : Catalog->AlphaSkins) : nullptr;
-                    Skins.Add(TeamSkins && TeamSkins->IsValidIndex(I) && !(*TeamSkins)[I].DisplayName.IsEmpty() ? (*TeamSkins)[I].DisplayName : FString::Printf(TEXT("Skin %d"), I + 1));
-                }
-                int32* Value = Omega ? &GI->OfflineOmegaSkin : &GI->OfflineAlphaSkin;
-                Choice(Field(), Omega ? TEXT("Omega skin") : TEXT("Alpha skin"), Skins, [Value]() { return *Value + 1; }, [this, Value](int32 I) { *Value = I - 1; RefreshLoadoutPreview(); });
-            }
             Add(Panel, Button(TEXT("Player"), Go(6)));
             Add(Panel, Button(TEXT("Gameplay settings"),Go(10)));
             Add(Panel, Button(TEXT("Start Match"), [GI]() { GI->StartSession(); return FReply::Handled(); }));
@@ -756,8 +744,6 @@ void AERPlayerController::RefreshLoadoutPreview()
     const auto* PS=(!IsMenuLevel() || IsInLobby())?GetPlayerState<AERPlayerState>():nullptr;const auto* GI=GetGameInstance<UERGameInstance>();
     const bool Omega=PS && PS->Team!=EERTeam::None?(PS->PendingTeam!=EERTeam::None?PS->PendingTeam:PS->Team)==EERTeam::Omega:GI->PlayerTeam==1;
     auto Kit=ResolveMenuLoadout(DraftPreset,DraftVariant);
-    const int32 Free=Omega?GI->OfflineOmegaSkin:GI->OfflineAlphaSkin;
-    if(IsMenuLevel() && !IsInLobby() && GI->SessionMode==0 && Free>=0)Kit.Skin=Free;
     MenuPreview->ShowLoadout(ERSkins::Select(Omega?Catalog->OmegaSkins:Catalog->AlphaSkins,Omega?Catalog->OmegaAppearance:Catalog->AlphaAppearance,Kit.Skin),Kit,Catalog->ReferenceArsenal);
 }
 

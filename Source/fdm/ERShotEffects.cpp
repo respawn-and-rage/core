@@ -86,6 +86,95 @@ void UERShotEffects::SpawnImpact(UWorld* World, UNiagaraSystem* System, const FV
         RemoveAfter(World, Effect, .035f);
     }
 }
+void UERShotEffects::SpawnWaterSplash(UWorld* World, UNiagaraSystem* System, const FVector& Surface)
+{
+    if(!World || !System || !FApp::CanEverRender() || World->GetNetMode()==NM_DedicatedServer)return;
+    TArray<TWeakObjectPtr<UNiagaraComponent>> Sprays;
+    for(int32 I=0;I<5;++I)
+    {
+        const float Angle=float(I)*2.f*PI/5.f;
+        const FVector Offset(FMath::Cos(Angle)*6,FMath::Sin(Angle)*6,14);
+        if(auto* Effect=UNiagaraFunctionLibrary::SpawnSystemAtLocation(World,System,Surface+Offset,
+            FRotator::ZeroRotator,FVector::OneVector,true,false,ENCPoolMethod::None,false))
+        {
+            Effect->SetSystemFixedBounds(FBox(FVector(-100),FVector(100)));
+            Effect->SetVariablePosition(TEXT("User.Position"),Surface+Offset);
+            Effect->SetVariableVec3(TEXT("User.Alignment"),(FVector(Offset.X,Offset.Y,18)).GetSafeNormal());
+            Effect->SetVariableVec2(TEXT("User.Size"),FVector2D(12.f,48.f));
+            Effect->SetVariableLinearColor(TEXT("User.Color"),FLinearColor(.32f,.75f,1.f,.45f));
+            Effect->Activate(true);
+            Sprays.Add(Effect);
+        }
+    }
+    if(Sprays.IsEmpty())return;
+    const double Started=World->GetTimeSeconds();
+    auto Handle=MakeShared<FTimerHandle>();
+    World->GetTimerManager().SetTimer(*Handle,FTimerDelegate::CreateLambda(
+        [WeakWorld=TWeakObjectPtr<UWorld>(World),Sprays,Surface,Started,Handle]()
+        {
+            UWorld* ActiveWorld=WeakWorld.Get();if(!ActiveWorld)return;
+            const float T=FMath::Clamp(float((ActiveWorld->GetTimeSeconds()-Started)/.3),0.f,1.f);
+            for(int32 I=0;I<Sprays.Num();++I)if(auto* Effect=Sprays[I].Get())
+            {
+                const float Angle=float(I)*2.f*PI/5.f;
+                const FVector Radial(FMath::Cos(Angle),FMath::Sin(Angle),0);
+                const FVector Position=Surface+Radial*(6+50*T)+FVector(0,0,14+42*T-22*T*T);
+                Effect->SetWorldLocation(Position);
+                Effect->SetVariablePosition(TEXT("User.Position"),Position);
+                Effect->SetVariableVec2(TEXT("User.Size"),FVector2D(12-8*T,48-30*T));
+                if(T>=1.f)Effect->DestroyComponent();
+            }
+            if(T>=1.f)ActiveWorld->GetTimerManager().ClearTimer(*Handle);
+        }),.025f,true);
+}
+void UERShotEffects::SpawnWaterExplosion(UWorld* World, UNiagaraSystem* System, const FVector& Surface)
+{
+    if(!World || !System || !FApp::CanEverRender() || World->GetNetMode()==NM_DedicatedServer)return;
+    // A radial crown and central plume at the waterline. Presentation only:
+    // explosion authority and damage are unchanged.
+    TArray<TWeakObjectPtr<UNiagaraComponent>> Sprays;
+    for(int32 I=0;I<13;++I)
+    {
+        const bool Centre=I==12;
+        const float Angle=float(I)*2.f*PI/12.f;
+        const FVector Radial(FMath::Cos(Angle),FMath::Sin(Angle),0);
+        const FVector Origin=Surface+(Centre ? FVector(0,0,70):Radial*55+FVector(0,0,55));
+        if(auto* Effect=UNiagaraFunctionLibrary::SpawnSystemAtLocation(World,System,Origin,
+            FRotator::ZeroRotator,FVector::OneVector,true,false,ENCPoolMethod::None,false))
+        {
+            Effect->SetSystemFixedBounds(FBox(FVector(-350),FVector(350)));
+            Effect->SetVariablePosition(TEXT("User.Position"),Origin);
+            Effect->SetVariableVec3(TEXT("User.Alignment"),Centre ? FVector::UpVector:(Radial+FVector(0,0,1.6)).GetSafeNormal());
+            Effect->SetVariableVec2(TEXT("User.Size"),Centre ? FVector2D(48,160):FVector2D(22,105));
+            Effect->SetVariableLinearColor(TEXT("User.Color"),FLinearColor(.32f,.72f,1.f,.6f));
+            Effect->Activate(true);
+            Sprays.Add(Effect);
+        }
+    }
+    if(Sprays.IsEmpty())return;
+    const double Started=World->GetTimeSeconds();
+    auto Handle=MakeShared<FTimerHandle>();
+    World->GetTimerManager().SetTimer(*Handle,FTimerDelegate::CreateLambda(
+        [WeakWorld=TWeakObjectPtr<UWorld>(World),Sprays,Surface,Started,Handle]()
+        {
+            UWorld* ActiveWorld=WeakWorld.Get();if(!ActiveWorld)return;
+            const float T=FMath::Clamp(float((ActiveWorld->GetTimeSeconds()-Started)/.65),0.f,1.f);
+            for(int32 I=0;I<Sprays.Num();++I)if(auto* Effect=Sprays[I].Get())
+            {
+                const bool Centre=I==12;
+                const float Angle=float(I)*2.f*PI/12.f;
+                const FVector Radial(FMath::Cos(Angle),FMath::Sin(Angle),0);
+                const FVector Position=Surface+(Centre ? FVector(0,0,70+90*T-65*T*T)
+                    :Radial*(55+150*T)+FVector(0,0,55+95*T-45*T*T));
+                Effect->SetWorldLocation(Position);
+                Effect->SetVariablePosition(TEXT("User.Position"),Position);
+                Effect->SetVariableVec2(TEXT("User.Size"),Centre ? FVector2D(48-35*T,160+60*T-170*T*T)
+                    :FVector2D(22-13*T,105+100*T-160*T*T));
+                if(T>=1.f)Effect->DestroyComponent();
+            }
+            if(T>=1.f)ActiveWorld->GetTimerManager().ClearTimer(*Handle);
+        }),.025f,true);
+}
 bool UERShotEffects::ConfigureImpact(UNiagaraSystem* System, UMaterialInterface* Material)
 {
     // Both effects use a single emitter-source sprite; only size/material differ.

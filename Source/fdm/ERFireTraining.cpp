@@ -466,27 +466,58 @@ bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<F
         if(!Ok){Pieces.SetNum(First);L.Ladders.SetNum(FirstLadder);return false;}
         Occupied.Append(Added);return true;
     };
-    // Through-rooms in the interior, including the central band. Two offset
-    // doors and an optional internal return create cover without dead-end boxes.
+    // A pair of connected offices can replace an isolated through-room.
+    // Place the complete suite and reserve its route before furnishing the hall.
+    const uint32 InteriorPlan=HashCombineFast(uint32(Seed),0x4F464643u)%4;
+    bool PlacedOffices=false;
     int32 GroundRooms=0;int32 RoomRejects[6]={};
     const int32 RoomsWanted=FMath::Clamp(FMath::RoundToInt32(Area/650),2,16);
     const float RoomX0=XWL+180,RoomX1=XEL-180;
     for(int32 Try=0;Try<240 && GroundRooms<RoomsWanted;++Try)
     {
-        const float SX=Pick(500,850),SY=Pick(500,850);
-        if(RoomX1-RoomX0<SX+150 || HL<1650+SY)continue;
-        const float X=Pick(RoomX0+SX*.5f,RoomX1-SX*.5f);
-        // Every third candidate approaches the middle rather than the end courts.
-        const float Y=Try%3==0 ? -SY*.5f-150:Pick(-HL+1500+SY*.5f,-SY*.5f-150);
-        const float X0=X-SX*.5f,X1=X+SX*.5f,Y0=Y-SY*.5f,Y1=Y+SY*.5f;
-        const int32 First=Pieces.Num();const float DoorA=SY*.3f,DoorB=SY*.7f;
-        Timber(X0,Y0,true,SY,0,280,{{DoorA,140,0,220}});
-        Timber(X1-12,Y0,true,SY,0,280,{{DoorB,140,0,220}});
-        Timber(X0+12,Y0,false,SX-24,0,280,{{SX*.65f,160,100,200}});
-        Timber(X0+12,Y1-12,false,SX-24,0,280,{{SX*.35f,160,100,200}});
-        if(R.RandBool())Timber(X0+SX*.5f,Y0+12,true,SY*.3f,0,220,{});
+        const bool Offices=!Reference && InteriorPlan!=0 && !PlacedOffices && Try<100 && Try%2==0;
+        const bool AlongHall=!Reference && (InteriorPlan+uint32(Try/2))%2!=0;
+        const float SX=Offices ? Pick(900,1150):Pick(500,850);
+        const float SY=Offices ? Pick(600,800):Pick(500,850);
+        const float Width=AlongHall ? SY:SX,Depth=AlongHall ? SX:SY;
+        if(RoomX1-RoomX0<Width+150 || HL<1650+Depth)continue;
+        const float X=Pick(RoomX0+Width*.5f,RoomX1-Width*.5f);
+        const float Y=Try%3==0 ? -Depth*.5f-150:Pick(-HL+1500+Depth*.5f,-Depth*.5f-150);
+        const float X0=-SX*.5f,Y0=-SY*.5f;
+        auto WorldPoint=[&](float U,float V,float Z)
+        {
+            return AlongHall ? FVector(X+V,Y+U,Z):FVector(X+U,Y+V,Z);
+        };
+        auto Wall=[&](float U,float V,bool AlongV,float Span,float Height,TArray<FOpening> Openings)
+        {
+            const FVector Corner=WorldPoint(U,V,0);
+            Timber(Corner.X,Corner.Y,AlongV!=AlongHall,Span,0,Height,MoveTemp(Openings));
+        };
+        const float DoorA=SY*.3f,DoorB=SY*.7f;
+        const TArray<FVector> Route{
+            WorldPoint(X0-120,Y0+DoorA,100),WorldPoint(X0+150,Y0+DoorA,100),
+            WorldPoint(0,0,100),WorldPoint(-X0-150,Y0+DoorB,100),
+            WorldPoint(-X0+120,Y0+DoorB,100)};
+        if(Offices)
+        {
+            bool Clear=true;
+            for(const auto& Solid:Occupied)for(int32 I=1;I<Route.Num() && Clear;++I)
+                Clear=!Blocked(Route[I-1],Route[I],Solid,93) &&
+                    !Blocked(FVector(-Route[I-1].X,-Route[I-1].Y,Route[I-1].Z),
+                             FVector(-Route[I].X,-Route[I].Y,Route[I].Z),Solid,93);
+            if(!Clear)continue;
+        }
+        const int32 First=Pieces.Num();
+        Wall(X0,Y0,true,SY,280,{{DoorA,140,0,220}});
+        Wall(-X0-12,Y0,true,SY,280,{{DoorB,140,0,220}});
+        Wall(X0+12,Y0,false,SX-24,280,{{SX*.65f,160,100,200}});
+        Wall(X0+12,-Y0-12,false,SX-24,280,{{SX*.35f,160,100,200}});
+        if(Offices)
+            Wall(-6,Y0+12,true,SY-24,280,{{SY*.5f-12,160,0,220},{SY*.8f-12,100,100,200}});
+        else if(R.RandBool())
+            Wall(0,Y0+12,true,SY*.3f,220,{});
         if(!Accept(First,L.Ladders.Num(),110)){++RoomRejects[PlacementReject];continue;}
-        const TArray<FVector> Route{{X0-120,Y0+DoorA,100},{X0+150,Y0+DoorA,100},{X,Y,100},{X1-150,Y0+DoorB,100},{X1+120,Y0+DoorB,100}};
+        if(Offices){PlacedOffices=true;L.FeatureNames.Add(TEXT("OfficeCluster"));}
         L.RoomAccessRoutes.Add(Route);TArray<FVector> Paired;
         for(const auto& P:Route)Paired.Add({-P.X,-P.Y,P.Z});L.RoomAccessRoutes.Add(MoveTemp(Paired));
         for(const auto& P:Route)Reserve(P,{180,180,200});

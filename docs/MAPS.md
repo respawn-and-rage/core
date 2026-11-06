@@ -97,7 +97,7 @@ geometry, physics, calibration or damage, and their identity enters the digest.
 | Template | Palette | Character | Ground |
 | --- | --- | --- | --- |
 | Central Building | Urban | light concrete villa with clear glazing and steel upper decks | asphalt, grass or snow, from the seed |
-| Alleys | Stone | stone houses and perimeter, some pale brick houses | desert sand |
+| Alleys | Stone | lime-coloured brick houses and stone perimeter | desert sand |
 | Fire Training | Warehouse | concrete courts and through-rooms inside a closed procedural hall | dry light concrete |
 | Rooms | Tunnels | cast concrete shell, dry floor, timber cover | dry light concrete |
 | Village | Jungle | timber and corrugated sheet cladding | jungle ground |

@@ -8,7 +8,7 @@
 
 // Presentation only. Surface classification never changes material physics or HP.
 UENUM(BlueprintType)
-enum class EERFootstepSurface : uint8 { Hard, Wood, Metal, LightHard, Grass, Dirt, Gravel, Snow };
+enum class EERFootstepSurface : uint8 { Hard, Wood, Metal, LightHard, Grass, Dirt, Gravel, Snow, Water };
 
 UCLASS(BlueprintType)
 class FDM_API UEROneShotAudio : public UDataAsset
