@@ -461,14 +461,30 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
     }
     // Small, varied cover groups; sample the north half and mirror every member.
     // Rear entries stay outside all return walls, even in the pocket profile.
-    const int32 CoverBands=2+int32(Radius>=4200 && (HashCombineFast(uint32(Choice),0x45585452u)&1u)!=0);
-    for(int32 BandIndex=0;BandIndex<CoverBands;++BandIndex)for(float Sign:{-1.f,1.f})
+    const int32 OriginalBands=2+int32(Radius>=4200 && (HashCombineFast(uint32(Choice),0x45585452u)&1u)!=0);
+    TArray<FVector2D> CoverBands;
+    for(int32 BandIndex=0;BandIndex<OriginalBands;++BandIndex)
     {
-        if(Waterfront && !WaterfrontCover)continue;
         const float XFraction=WaterfrontCover && BandIndex==0 ? .18f:BandIndex==2 ? .25f:.55f+BandIndex*.20f;
         const float YFraction=BandIndex==2 ? .75f:.55f-BandIndex*.35f;
-        const FVector2D P(Sign*RadiusX*XFraction+(WaterfrontCover && BandIndex==0 ? 0.f:Geometry.RandRange(-4,4)*10.f),
-            WaterfrontCover && BandIndex==0 ? -RadiusY+700.f:-RadiusY*YFraction+Geometry.RandRange(-4,4)*10.f);
+        CoverBands.Add({RadiusX*XFraction,WaterfrontCover && BandIndex==0 ? -RadiusY+700.f:-RadiusY*YFraction});
+    }
+    // Large arenas add physically sized groups along their approaches on a 16m grid.
+    // Exclusions can leave gaps; exposure metrics read the actual accepted coverage.
+    if(T.SizingTeamSize>=4)for(float CoverY=-RadiusY+1400;CoverY<=-1000;CoverY+=1600)
+        for(float CoverX=1000;CoverX<RadiusX-900;CoverX+=1600)CoverBands.Add({CoverX,CoverY});
+    const int32 PairBudget=FMath::Clamp(FMath::CeilToInt32(PI*Radius*Radius/10000000.f),4,24);
+    const float ApproachScreenY=FMath::Min(-RadiusY+(WaterfrontCover ? 1100.f:700.f),-D*.5f-180);
+    const float ApproachDoorX=BuildingX+OuterMin-120;
+    const TArray<FVector2D> ClearApproach{{0,ApproachScreenY-100},{-650,ApproachScreenY-100},{-650,ApproachScreenY+100},
+        {ApproachDoorX,-D*.5f-180},{ApproachDoorX,DoorY}};
+    TArray<FVector2D> PlacedCover;int32 CoverPairs=0;
+    for(int32 BandIndex=0;BandIndex<CoverBands.Num() && CoverPairs<PairBudget;++BandIndex)for(float Sign:{-1.f,1.f})
+    {
+        if(CoverPairs>=PairBudget)break;
+        if(Waterfront && !WaterfrontCover)continue;
+        const FVector2D P(Sign*CoverBands[BandIndex].X+(WaterfrontCover && BandIndex==0 ? 0.f:Geometry.RandRange(-4,4)*10.f),
+            CoverBands[BandIndex].Y+(WaterfrontCover && BandIndex==0 ? 0.f:Geometry.RandRange(-4,4)*10.f));
         const float OutsideX=FMath::Abs(P.X-BuildingX)-W*.5f,OutsideY=FMath::Abs(P.Y)-D*.5f;
         const float PadHalf=450+Radius*.025f;
         // Keep the pad's terrain blend clear of the straight flank approach.
@@ -479,7 +495,12 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
         if(Pools && FMath::Abs(P.X-PoolCenter.X)<850 && FMath::Abs(P.Y-PoolCenter.Y)<1000)continue;
         if(Waterfront && P.X<WaterfrontShoreX+450 && FMath::Abs(P.Y)<WaterfrontMaxY+450)continue;
         bool Clear=true;for(const auto& S:L.SecondaryStructures)Clear&=FMath::Abs(P.X-S.Frame.GetLocation().X)>S.Size.X*.5+650 || FMath::Abs(P.Y-S.Frame.GetLocation().Y)>S.Size.Y*.5+650;
+        for(const auto& Other:PlacedCover)Clear&=FVector2D::Distance(P,Other)>2*PadHalf+100;
+        const FBox CoverBounds(FVector(P-FVector2D(400),-1000),FVector(P+FVector2D(400),2000));
+        for(int32 I=1;I<ClearApproach.Num();++I)
+            Clear&=!FMath::LineBoxIntersection(CoverBounds,FVector(ClearApproach[I-1],100),FVector(ClearApproach[I],100),FVector(ClearApproach[I]-ClearApproach[I-1],0));
         if(!Clear)continue;
+        PlacedCover.Add(P);++CoverPairs;
         const float H=CentralGroundHeight(L,P);
         for(float PairSign:{-1.f,1.f})L.TerrainPads.Add(FBox(FVector(P.X,PairSign*P.Y,H)-FVector(PadHalf,PadHalf,0),FVector(P.X,PairSign*P.Y,H)+FVector(PadHalf,PadHalf,0)));
         const int32 Kind=int32(HashCombineFast(uint32(Choice),uint32(BandIndex*2+(Sign>0 ? 1:0))+0x434f5645u)%5);

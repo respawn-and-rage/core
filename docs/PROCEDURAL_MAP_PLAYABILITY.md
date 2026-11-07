@@ -23,7 +23,10 @@ In any non-Shipping run, `-ERMapPlayability=ReportOnly` analyses each map the au
 Without that flag no analysis code runs, and in Shipping `ERPlayability::Mode()` is always `Off`.
 Rollback is removing the flag. Output lands in `Saved/Testing/MapPlayability/`: one JSON per stage,
 `<Archetype>-<N>v<N>-seed<Seed>-<stage>.json`, plus batch summaries `layout-summary.csv` and
-`physical-summary.csv`. Each analysis logs one `ER_MAP_PLAYABILITY_LIVE` line.
+`physical-summary.csv`. Version 4 reports include `evaluation_complete` and `unevaluated_metrics`.
+Any unevaluated metric makes the overall result at least `warn`; `fail` takes precedence. An overall
+`pass` requires every metric to be evaluated and passing, and still does not establish human balance.
+Each analysis logs one `ER_MAP_PLAYABILITY_LIVE` line, including `evaluation=partial|complete`.
 [Example report](references/map-playability-report.example.json).
 
 The overlay draws the graph in blue, chokes in magenta, spawn sight lines dashed in red.
@@ -35,7 +38,8 @@ The overlay draws the graph in blue, chokes in magenta, spawn sight lines dashed
 | `layout` | After `ERProcedural::Build`, before the cell world commits | `FERProceduralLayout`, panels included | Topology, sight against known solids |
 | `physical` | `OnGenerationFinished`, collision complete | The real world | Capsule sweep of every walking edge, real sight and shot traces |
 
-The physical stage marks edges confirmed or blocked, then reevaluates the topology. Traces never run
+The physical stage sweeps the complete measured polyline, including node-to-route connectors,
+marks edges confirmed or blocked, then reevaluates the topology. Traces never run
 at the layout stage: no geometry exists yet. Only the authority analyses, and clients are unaffected.
 
 The layout stage knows boxes, cell panels with their holes, and Rooms shell faces. Hollow house
@@ -71,11 +75,21 @@ scoring applies; the rule does not make cover indestructible.
 | Alleys | `routes` | Patrol, district and underpass routes; base zone around the starts | Evaluated |
 | Central Building | `routes` | Patrol, crossing, stairs | `not_evaluated`: open yard |
 | Village | `routes` | Reserved exits, passages, bypasses, stairs | `not_evaluated`: open field |
+| Town | `routes` | Street ring, shops, galleries, both spawn bypasses | `not_evaluated`: free movement beside the recorded streets |
 
 Routes that cross are cut at the crossing. Loose ends and starts join nearby routes when a standing
 pawn fits against known solids. Those joins are unconfirmed until swept, and a join may never cross
 a bounded base zone: bases are left through validated routes only. Stairs and ladders are not swept:
 each template's pawn probes prove them.
+Rooms floor-centre metadata is raised to the same pawn-centre height as its recorded routes.
+Secondary spawn pockets retain their authored exit polyline. If it ends inside a room instead
+of on a corridor link, a connector to the room centre must clear both solid collision and shell walls;
+the physical stage still confirms that connector.
+On Fire Training and Village's continuous primary floor, the bounded connector search also tries
+route endpoints and two orthogonal detours around known collision, preserving the entire polyline.
+It can search up to twice the normal link radius on that floor, and can join ground-level ladder feet.
+This extension does not create walks between elevated landings, across graded terrain or underpasses.
+Duplicate recorded routes share the same search budget. Unknown mesh collision still needs the physical stage.
 
 Missing metadata reads `not_evaluated` with a reason, never `pass`. An `exact` graph that loses a
 zone fails; a `routes` graph only warns, because open ground may join what metadata cannot. Fire
@@ -90,8 +104,12 @@ Training's isolated nodes are ladders onto cargo tops, dead ends far from any re
 | `INITIAL_SPAWN_LOS` | Opposing start pairs with a line, eye to head, chest and legs, both ways | Active |
 | `ROUTE_DIVERSITY` | Cheapest walk between bases, then the cheapest avoiding its nodes, and their ratio | Active |
 | `DOMINANT_VANTAGE` | Raised nodes against base exits: the largest share of one team's exits a single node sees | Active |
-| `ROUTE_EXPOSURE` | Points along the direct walk seen from base exits and raised nodes, and the longest open run | Active |
-| `COVER_ACCESS` | | Planned, `not_evaluated` |
+| `ROUTE_EXPOSURE` | Points along the direct walk seen from raised positions and ground side routes, and the longest open run | Active |
+| `COVER_ACCESS` | Exposed route samples with a clear direct approach to an authored hiding site that blocks sampled threats, including elevated fire | Active where hiding-site metadata exists |
+
+Central Building and Village provide authored hiding sites. Alleys, Town, Fire Training and Rooms
+do not classify their building corners or incidental cover this way, so `COVER_ACCESS` remains
+`not_evaluated` there at both stages. This is missing coverage, not evidence that those maps lack cover.
 
 Sight and shots stay separate: `visible_pairs` traces `ECC_Visibility`, `open_shot_pairs` the
 Projectile channel. A blocked shot can still penetrate, so neither proves ballistic cover. Pawn
@@ -104,8 +122,20 @@ counts chokes inside the base, which is how a spawn room with one door surfaces 
 `FERPlayabilityPolicy` carries only measuring parameters and the proposed minimum of two independent
 paths. Initial spawn exposure is a hard generation failure on a fresh gameplay map. Other warnings
 are findings to read; optional tactical preferences live in the selection profiles. Route sight
-is bounded by `MaxVantages`, `MaxExits`, `MaxObservers` and `MaxRouteSamples`. With unknown solids it
-overstates a lot at the layout stage: compare it at the physical stage, which uses `ECC_Visibility`.
+is bounded by `MaxVantages`, `MaxExits`, `MaxObservers` and `MaxRouteSamples`. Observer selection spreads
+positions over the map and keeps both members of a recorded symmetry pair within the budget. At least
+half the exposure budget is available to ground side routes; samples on the direct route itself are
+not counted as enemy observation posts. With unknown solids it
+overstates a lot at the layout stage: exposure remains `not_evaluated` with its numeric upper bound,
+so candidate selection cannot reward that uncertain value. The physical stage uses `ECC_Visibility`.
+
+`COVER_ACCESS` examines at most four nearby authored sites per route sample, within 20m. It reports
+clear approaches, hiding sites that screen the threats seeing that sample, the longest successful
+approach, and sites visible from sampled elevated positions. Both the sample-to-entry and entry-to-hide
+segments use the hiding site's authored capsule height, preserving floor clearance when crouching.
+The approach is a direct collision check, not a navigation path or a guarantee of floor support. Incidental cover and buildings without
+hiding-site metadata are not inferred. No sites or observers means `not_evaluated`, and unknown
+layout solids defer the verdict to the physical stage. The metrics have no calibrated balance threshold.
 
 ## Units and determinism
 
@@ -118,7 +148,8 @@ iteration. Node ids are stable only within one layout: compare `source` across c
 
 ## Not covered
 
-- Graph edges carry length and width, not time: gameplay speeds are not read yet.
+- Graph edges carry polyline length and width, not time: gameplay speeds are not read yet.
+  Distance and sight samples follow the recorded bends in both travel directions.
 - Routes through open ground can underestimate alternatives. Central Building and Village keep their
   counts in the report, without a verdict.
 - Selection reads the layout stage: real collision does not exist yet for a candidate.
@@ -153,8 +184,8 @@ only PCGEx contract read is `PCGEx/VData` and `PCGEx/EData`, inside the bake.
 **Why not at runtime.** `ERProcedural::Build` is synchronous and every peer repeats it from the seed,
 while PCG advances over ticks. The bake needs a bounded pump, and input assets must already be
 loaded. Inside the automation tick the graph did not finish in 120s. Running it per peer would also
-put the map's agreement on an unverified re-execution. No dedicated server target exists to test
-PCG there, so graph execution on a server is unproven.
+put the map's agreement on an unverified re-execution. Runtime execution of this authoring graph
+on a dedicated server is unverified.
 
 A variant may keep a base-to-centre bend, a central crossing and rungs to the lanes. `BuildRooms`
 rejects a corridor that is steeper than 1:2 or that touches another volume. It then tries the plan
@@ -212,7 +243,8 @@ Spawn occlusion applies to all archetypes, even when selection is disabled or ha
 candidate. The common generator rejects a plan that depends only on unknown art or terrain
 for cover. Real-collision validation remains mandatory before gameplay readiness.
 
-Each range met adds a point, and spawn sight outweighs the others together: no line on the layout
+Each range met by an evaluated metric adds a point; `not_evaluated` values never earn preferences.
+Spawn sight outweighs the others together: no line on the layout
 means no line in real collision. Ranges never rescue a broken rule. The plain seed keeps any tie, so a
 map moves only for a reason, and the seed breaks other ties. With no tactically clean candidate, a built layout may be a `fallback=1` only if its initial
 spawn occlusion passed. No built safe candidate means generation fails. No candidate is ever regenerated during a match.

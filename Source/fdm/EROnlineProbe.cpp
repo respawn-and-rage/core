@@ -41,7 +41,7 @@ void UEROnlineProbe::FindComplete(bool Success)
         Result.Session.SessionSettings.Get(FName(TEXT("RR_HOST")), HostName);
         Check(HostName == TEXT("EOSProbe"), TEXT("guest_nickname_advertised_without_epic_profile"));
         Check(Sessions->GetResolvedConnectString(Result, NAME_GamePort, Address) && Address.StartsWith(TEXT("[EOS:")), TEXT("service_search_resolves_p2p_endpoint"));
-        Check(Version == CastChecked<UERGameInstance>(GetGameInstance())->BuildVersion, TEXT("service_search_preserves_game_version"));
+        Check(Version == CastChecked<UERGameInstance>(GetGameInstance())->GetNetworkBuildVersion(), TEXT("service_search_preserves_game_version"));
         bFound = true;
         break;
     }
@@ -167,7 +167,7 @@ bool UEROnlineProbe::Tick(float Delta)
             UEROnline::SetDiscoveryFilter(*Query);
             Query->bIsLanQuery = false; Query->MaxSearchResults = 100;
             Query->QuerySettings.Set(FName(TEXT("RR_GAME")), FString(TEXT("RespawnAndRage")), EOnlineComparisonOp::Equals);
-            Query->QuerySettings.Set(FName(TEXT("RR_VERSION")), GI->BuildVersion, EOnlineComparisonOp::Equals);
+            Query->QuerySettings.Set(FName(TEXT("RR_VERSION")), GI->GetNetworkBuildVersion(), EOnlineComparisonOp::Equals);
             FindHandle = Sessions->AddOnFindSessionsCompleteDelegate_Handle(FOnFindSessionsCompleteDelegate::CreateUObject(this, &UEROnlineProbe::FindComplete));
             bSearchRunning = true;
             if (!Sessions->FindSessions(0, Query.ToSharedRef()) && bSearchRunning)

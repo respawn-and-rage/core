@@ -67,16 +67,20 @@ CS2 seeds or spray paths: never claim CS2 parity.
   smaller than some clothing and boots; the tolerance trades fewer visible misses for a small
   margin outside the figure. Melee retains exact current-time body traces.
   `UERPostureMesh` pushes its procedural pose to the physics bodies and records server poses.
-  Remote bullet queries interpolate this history using a server estimate of RTT/2, capped at 200ms.
+  Remote bullet queries interpolate this history using a server estimate of RTT/2 plus the
+  elapsed server time since the last accepted movement view, sharing a 200ms total cap.
   Local shots use current bodies. No client timestamp, aim direction or hit result is trusted.
-  This conservative estimate does not reconstruct replication/interpolation delay, jitter,
-  animation phase or movement-packet timing exactly.
+  The movement timestamp passes the engine's validation before its view or trigger is consumed;
+  the extra view age uses the server's receipt clock. This estimate does not reconstruct
+  replication/interpolation delay, jitter or animation phase exactly.
   Wounds map the historical contact back onto the current bone.
   Queries transform rays into each body's current frame without moving live bodies. History
   resets across mesh changes, death and large teleports; missing history falls back to current
-  bodies. Cover is tested in its current state, including the actual edge contact point, and
-  penetration retains its shared HP budget. A remote trigger runs after that frame's moves and
-  the owner sends its move at once, so the shot uses the received view. Range attenuation
+  bodies. A bounded ring retains pose allocations, and a synchronous cartridge shares its target
+  list and interpolated poses across view, pellet and penetration queries. Alive state and current
+  cover are rechecked for each ray, including the actual edge contact point; penetration retains
+  its shared HP budget. A remote trigger runs after its accepted move and its transforms are
+  flushed, so the shot uses that move's view. Range attenuation
   `damage * RangeModifier^(distance_cm/1270)`. Hit zones on skeletal bodies: head 4
   (deagle 3.9), stomach 1.25, chest/arms 1, legs .75. Fractional damage is preserved.
 - Armor: `ArmorRatio/2`, consuming half the prevented damage. Legs bypass armor; head uses
@@ -131,6 +135,21 @@ queries do not change shot direction or authoritative muzzle obstruction checks.
 
 ## FPS presentation
 
+Player trigger intent travels with saved movement: a persistent press counter and held state
+recover a lost press/release and preserve a tap whose press and release occur in one frame.
+The press also captures its inventory slot and server selection revision. A delayed press cannot
+fire a different weapon or survive switching away and back; rejected presses are still consumed.
+Move combining preserves input edges, important moves are retransmitted, and accepted counters
+ignore duplicates and stale sequences. Bots and development callers retain authority RPC entry points.
+
+The owning client immediately predicts bullet sound, muzzle flash and firing animation, bounded by
+known ammo and cooldown. It does not predict ammo changes, tracers, smoke cuts, hits, damage or
+worksheet recoil. A press/shot identity deduplicates the accepted multicast and an owner-only
+replicated acknowledgement; this acknowledgement can recover the last presentation when a multicast
+is lost. Automatic acknowledgements may coalesce. Rejection, release, reload, weapon switching,
+death or pending map readiness stops ongoing prediction. A rejected prediction can already have
+played a cosmetic event; authority remains the source of actual shots.
+
 The rig lives in `Characters/FirstPerson`; skin forearms come from `Teams/{Alpha,Omega}/
 FirstPerson`. Component transform `(-11.2263,1.4908,-159.9167)`, yaw -90, scale 1. Grip data lives
 in project-owned weapon data and poses, never edited in source meshes.
@@ -156,5 +175,8 @@ Always `test-reference-weapons.py` (`--render` for viewmodels), then as relevant
 `test-arsenal.py`, `test-scopes.py --render`, `test-world-poses.py`, `test-network.py --shot-feedback`,
 `test-hit-fidelity.py` (rendered figure against hit bodies; `--lag 0 25 50` for two-peer shot timing).
 Native: `EclipseRecoil.Weapons.ReferenceBallistics`, `EclipseRecoil.Weapons.ShotHistory`. Saved assets: `verify_sketchfab_weapons.py`.
+Transport: `EclipseRecoil.Network.FireInput`, `EclipseRecoil.Weapons.ShotContext`,
+`test-hit-fidelity.py --fire-input --lag 0 50 100`, and
+`test-hit-fidelity.py --fire-input --lag 50 --jitter 20 --loss 5 --client-fps 20`.
 Use `test-world-poses.py --prone --wall` for elbow and full weapon bounds against
 a collision floor and thin cover on both peers; `EclipseRecoil.Movement.BodyClearance` covers thin walls.

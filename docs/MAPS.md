@@ -1,6 +1,7 @@
 # Maps
 
-`ERMapCatalog` is the single menu, travel and rotation catalog. All maps cook through
+`ERMapCatalog` is the single menu, travel, rotation and rotation-settings catalog. Only production
+entries expose rotation toggles; a Town-only pool remains Town-only. All maps cook through
 `MapsToCook` in `Config/DefaultGame.ini`.
 
 | ID | Level | Recipe | Rotation |

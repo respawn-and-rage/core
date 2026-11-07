@@ -96,7 +96,14 @@ bool FERRoomsLayoutTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("more rooms means smaller rooms"),Areas[6]>Areas[8] && Areas[8]>Areas[10]);
     const int32 Before=L.RoomShell.Num();T->Rooms.CornerCut=NAN;
     TestFalse(TEXT("invalid dimensions rejected"),ERProcedural::Build(C,B,L));TestEqual(TEXT("invalid recipe preserves previous layout"),L.RoomShell.Num(),Before);
-    TestTrue(TEXT("Rooms in menu rotation"),ERMaps::Rotation().Contains(FName(TEXT("/Game/EclipseRecoil/Maps/L_Rooms"))));
+    const FERMapCatalogEntry* RoomsEntry=nullptr;
+    for(const auto& Entry:ERMaps::All())if(FName(Entry.Id)==TEXT("rooms")){RoomsEntry=&Entry;break;}
+    if(TestNotNull(TEXT("Rooms remains in the offline map catalog"),RoomsEntry))
+    {
+        TestTrue(TEXT("Rooms remains available in offline menu labels"),ERMaps::Labels().Contains(FString(RoomsEntry->Label)));
+        TestFalse(TEXT("Rooms is excluded from hosted rotation"),RoomsEntry->InRotation);
+        TestFalse(TEXT("Rooms is absent from the actual rotation pool"),ERMaps::Rotation().Contains(FName(RoomsEntry->Package)));
+    }
     AddInfo(FString::Printf(TEXT("ER_ROOMS_LAYOUT seeds=516 counts=6,8,10 themes=3 result=%s"),HasAnyErrors() ? TEXT("FAIL"):TEXT("PASS")));return true;
 }
 

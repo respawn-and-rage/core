@@ -6,6 +6,7 @@
 #include "ERBlockCombat.h"
 #include "ERBlockProfile.h"
 #include "ERCellSupport.h"
+#include "ERMeshCells.h"
 #include "ERCellWorld.h"
 #include "ERProceduralConfig.h"
 #include "ERBlockRoom.generated.h"
@@ -17,7 +18,7 @@ struct FERBlockCollapseSettings
     UPROPERTY(EditAnywhere, BlueprintReadWrite) bool Enabled=true;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) bool GroundAnchors=true;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) float GroundZ=0;
-    // Kept for saved maps; the cell support graph is evaluated whole per check.
+    // Work units are 64 graph/cell operations; the time budget also applies.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="1",ClampMax="16384")) int32 WorkPerStep=4096;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0.01",ClampMax="4")) float GraphTimeMs=1.5;
     // Unsupported components detached per timer step.
@@ -28,7 +29,8 @@ struct FERBlockCollapseSettings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0.1",ClampMax="20")) float DebrisSettleAfter=2;
 };
 
-// Protocol 59: Central Building waterfront basin and shore layout.
+// Protocol 61: permanent Alley stair foundations and terrain-matched underpass entries.
+// Protocol 60: scaled Central flank cover and wider paired Town exits.
 // Protocol 58: villa table pieces and stair glass guards use destructible cells.
 // Protocol 57: glass guards follow the Central Building villa stair treads.
 // Protocol 56: seeded approach direction for the Central Building villa stair.
@@ -39,12 +41,13 @@ struct FERBlockCollapseSettings
 // Protocol 49: compact Central Building villas and paired pools.
 // Protocol 44: square office ceiling lights and tree-free Village. Protocol 43: connected Town central galleries. Protocol 42: irregular Town parcels and polygonal inaccessible ground. Protocol 41: urban Town loop and ground-floor shops. Protocol 40: circular Central Building ground railing passage. Protocol 39: longitudinal Village terrain. Protocol 38: dense longitudinal Fire Training and bent high routes. Protocol 37: concrete Fire Training shell. Protocol 36: fully procedural closed Fire Training. Protocol 35: rear cover firing steps. Protocol 34: varied circular cover groups. Protocol 33: varied circular Central Building geometry and crossings. Protocol 32: paired seeded spawn zones. Protocol 31: thin brick Alleys towers. Protocol 30: irregular 3v3 Alleys streets and lots. Protocol 29: dense 3v3 Alleys core. Protocol 28: 750m²/player and Rooms primary-floor sizing. Protocol 27: mandatory initial spawn occlusion. Protocol 26: circular graded Central Building and reflected template layouts. Protocol 25: Alleys roof links, lateral wall access and firing slits. Protocol 24: Central Building residential windows, room wings and accessible balconies. Protocol 23: no Village piece stands unsupported on a fresh map. Protocol 22: Village back gallery rail rests on the deck. Protocol 21: authority-chosen map candidate in the descriptor. Protocol 20: optional baked Rooms macro graph in the descriptor. Protocol 19:per-template palettes and Stone alley houses; optional hall passage and varied Rooms hall shapes and diagonal corner bases with four through-rooms, longitudinal Fire Training and distributed Village ground cover and variable Rooms/Village graphs at500m²/player density; expected team size plus material-rule snapshot and bounded compressed skin masks; 5cm cells with complete shard-payload witnesses. BlockCount holds the cell count, PageVersions the
 // versions of the chunk-mask shards (AERCellNetShard).
+namespace ERCellProtocol { inline constexpr uint32 Version=61; }
 USTRUCT()
 struct FERBlockNetworkDescriptor
 {
     GENERATED_BODY()
     UPROPERTY() uint32 Epoch=0;
-    UPROPERTY() uint32 Protocol=59;
+    UPROPERTY() uint32 Protocol=ERCellProtocol::Version;
     UPROPERTY() uint32 LayoutDigest=0;
     UPROPERTY() uint32 Sequence=0;
     UPROPERTY() int32 BlockCount=0;
@@ -68,6 +71,17 @@ struct FERCellDebris
 
 // Destructible map made of logical 5cm cells: one dynamic mesh (visible faces
 // only) and one aggregate-box body per chunk, rebuilt for dirty chunks only.
+struct FERCellSyncStatus
+{
+    // RecoveryId is the active checkpoint, or the last completed id when idle.
+    uint32 Epoch=0,TargetSequence=0,AppliedSequence=0,RecoveryId=0;
+    uint64 ProgressSerial=0;
+    int32 ExpectedPages=0,VerifiedPages=0;
+    bool Ready=false,Error=false,Recovering=false;
+    double LastAppliedAgeSeconds=0;
+    float LastApplyMs=0;
+};
+
 UCLASS(Blueprintable)
 class FDM_API AERBlockRoom : public AActor
 {
@@ -136,8 +150,8 @@ public:
     // Replication and loading gate.
     bool CanMutateBlocks() const;
     bool IsStandaloneLab() const;
-    bool IsMapReady() const { return HasAuthority() ? bGenerationValid:bMapReady; }
-    bool IsSnapshotCurrent() const { return HasAuthority() ? bGenerationValid:(bMapReady && AppliedSequence==Network.Sequence); }
+    bool IsMapReady() const { return HasAuthority() ? bGenerationValid:(bMapReady && !bNetworkError); }
+    bool IsSnapshotCurrent() const { return IsMapReady() && (HasAuthority() || AppliedSequence==Network.Sequence); }
     uint32 GetMapEpoch() const { return Network.Epoch; }
     uint32 GetMapSequence() const { return Network.Sequence; }
     uint32 GetAppliedMapSequence() const {return AppliedSequence;}
@@ -145,6 +159,10 @@ public:
     uint32 GetStateDigest() const;
     uint32 GetLayoutDigest() const;
     void ReceiveCellShard(class AERCellNetShard* Shard);
+    void ReceiveCellRecovery(class AERCellRecoveryManifest* Manifest);
+    bool StartCellRecovery(class AERPlayerController* Player,uint32 Epoch,FString& Error);
+    bool AcknowledgeCellRecovery(class AERPlayerController* Player,uint32 RecoveryId);
+    FERCellSyncStatus GetCellSyncStatus() const;
 
     // Diagnostics.
     FERBlockOperationProfile GenerationProfile, UpdateProfile;
@@ -168,16 +186,34 @@ protected:
     bool BuildCellWorld(const TArray<FERCellPanelDesc>& Panels);
 private:
     friend class FERCellNetTransactionTest;
+    friend class FERCellRecoveryTest;
     FERCellWorld CellWorld;
     FERCellSupport Support;
     UPROPERTY() TArray<TObjectPtr<class UDynamicMeshComponent>> CellMeshes;
     TMap<const UPrimitiveComponent*, int32> CellComponentChunks;
     UPROPERTY() TMap<int32,TObjectPtr<class UDynamicMeshComponent>> SkinMeshes;
     TMap<const UPrimitiveComponent*,int32> SkinComponentPanels;
+    TMap<int32,ERMeshCells::FCache> SkinClipCaches;
     TSet<int32> DirtySkinPanels;
     TArray<int32> ChunkQuads, ChunkBoxes;
     TArray<TWeakObjectPtr<class AERCellNetShard>> AuthorityShards;
     TMap<int32, TWeakObjectPtr<class AERCellNetShard>> ReceivedShards;
+    struct FRecoveryTransfer
+    {
+        TWeakObjectPtr<class AERPlayerController> Player;
+        uint32 Id=0;double ExpiresAt=0;SIZE_T Bytes=0;
+        TArray<TWeakObjectPtr<AActor>> Actors;
+    };
+    TArray<FRecoveryTransfer> RecoveryTransfers;
+    TWeakObjectPtr<class AERCellRecoveryManifest> RecoveryManifest;
+    TMap<uint64,TWeakObjectPtr<class AERCellNetShard>> RecoveryShards;
+    TMap<uint64,uint32> VerifiedPayloadVersions;
+    uint32 NextRecoveryId=1,CompletedRecoveryId=0;
+    uint64 SyncProgressSerial=0;
+    int32 SyncExpectedPages=0,SyncVerifiedPages=0;
+    double LastCellApplyAt=0,SyncStartedAt=0;
+    float LastCellApplyMs=0;
+    FTimerHandle RecoveryCleanupTimer;
     TArray<uint32> AppliedChunkRevisions, AppliedPageVersions;
     UPROPERTY(ReplicatedUsing=OnRep_Network) FERBlockNetworkDescriptor Network;
     uint32 BuiltEpoch=0,AppliedSequence=0;
@@ -200,6 +236,12 @@ private:
     void PublishCellGeneration();
     void PublishCellChanges(const TArray<int32>& Chunks);
     void TryApplyCellNetwork();
+    void TryApplyCellRecovery();
+    bool ApplyCellSnapshot(const FERBlockNetworkDescriptor& Descriptor,const TMap<int32,TWeakObjectPtr<class AERCellNetShard>>& Pages,bool Recovery,const TArray<struct FERCellShardHeader>* RecoveryHeaders=nullptr);
+    void RecordVerifiedPayload(const class AERCellNetShard* Shard);
+    void ClearCellRecoveries();
+    void CleanupCellRecoveries();
+    void FailCellSynchronization(const TCHAR* Reason);
     bool OnRepCellDescriptor();
     UFUNCTION() void OnRep_Network();
     void SetMapCollision(bool Enabled);

@@ -56,7 +56,7 @@ else:
     table('layout-summary.csv')
     table('physical-summary.csv')
     # The flag reaches the real map path: same seeds must give the same geometry digests.
-    for path in reports.glob('*.json'):
+    for path in reports.glob('*-physical.json'):
         path.unlink()
     live, on = run('report-only', 'EclipseRecoil.Maps.Playability.Physics', '-ERMapPlayability=ReportOnly')
     good &= live
@@ -70,5 +70,8 @@ else:
     for path in written:
         data = json.loads(path.read_text())
         scenarios = {'Rooms': 2, 'CentralBuilding': 4}.get(data['archetype'], 3)
-        good &= data['report_version'] == 3 and len(data['metrics']) == 7 and len(data['stress']) == scenarios
+        unevaluated = sum(metric['status'] == 'not_evaluated' for metric in data['metrics'])
+        good &= data['report_version'] == 4 and len(data['metrics']) == 7 and len(data['stress']) == scenarios
+        good &= data['unevaluated_metrics'] == unevaluated and data['evaluation_complete'] == (unevaluated == 0)
+        good &= not (unevaluated and data['overall'] == 'pass')
 raise SystemExit(0 if good else 1)

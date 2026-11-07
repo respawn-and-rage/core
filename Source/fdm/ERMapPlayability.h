@@ -39,10 +39,12 @@ struct FERTacticalGraph
     TArray<FERTacticalNode> Nodes;
     TArray<FERTacticalEdge> Edges;
     EERGraphCoverage Coverage=EERGraphCoverage::None;
+    EERTemplateSymmetry Symmetry=EERTemplateSymmetry::None;
     // True when walls really bound the base, so counted exits mean something.
     bool bExitsBounded=false;
     FString Note;
     int32 AddEdge(int32 A,int32 B,EERTacticalMove Move,const FString& Source,bool Confirmed,float Width=0);
+    void SetPath(int32 Edge,TArray<FVector> Path);
 };
 
 // Damage states a policy reads. Each needs something that can really break on that archetype.
@@ -59,6 +61,8 @@ struct FERPlayabilityPolicy
     // Bounded sight reading of routes: rays stay under MaxVantages*2*MaxExits+MaxObservers*MaxRouteSamples.
     float VantageHeight=200,RouteStep=400;
     int32 MaxVantages=12,MaxExits=12,MaxObservers=16,MaxRouteSamples=24;
+    float CoverReach=2000; // Direct walking approach to an authored hiding site, not navigation distance.
+    int32 MaxCoverCandidates=4; // Nearest sites examined per route sample.
     EERStressScenario Stress=EERStressScenario::All;
 };
 
@@ -104,11 +108,12 @@ struct FERPlayabilityReport
     FERPlayabilityMetric* Find(const TCHAR* Code);
     const FERPlayabilityMetric* Find(const TCHAR* Code) const;
     EERPlayabilityStatus Overall() const;
+    int32 UnevaluatedMetrics() const;
 };
 
 namespace ERPlayability
 {
-    constexpr int32 ReportVersion=3;
+    constexpr int32 ReportVersion=4;
     // -ERMapPlayability=ReportOnly on the authority; always Off in Shipping.
     EERPlayabilityMode Mode();
     FERPlayabilityPolicy PolicyFor(EERMapArchetype Archetype,int32 ExpectedTeamSize);
@@ -126,6 +131,10 @@ namespace ERPlayability
     float PathLength(const FERTacticalGraph& Graph,const TArray<int32>& From,const TArray<int32>& To);
     // Next cheapest way between the sets once the first path's nodes outside them are gone. -1: none.
     float LateralPathLength(const FERTacticalGraph& Graph,const TArray<int32>& From,const TArray<int32>& To);
+    // Samples follow the same edge polylines as collision, including bends and reverse travel.
+    TArray<FVector> SampleRoute(const FERTacticalGraph& Graph,const TArray<int32>& Path,const FERPlayabilityPolicy& Policy,float& Step);
+    // Spatially distributed samples retain both members of a recorded symmetry pair.
+    TArray<int32> SelectObservers(const FERTacticalGraph& Graph,const TArray<int32>& Candidates,int32 Limit);
 
     FERTacticalGraph BuildGraph(const FERProceduralLayout& Layout,EERMapArchetype Archetype,const FERPlayabilityPolicy& Policy);
     // Fills the topology metrics of a report whose graph is already set.

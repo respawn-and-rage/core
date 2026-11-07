@@ -49,7 +49,7 @@ def launch(role, url, render=False):
 def read(role):
     return paths[role].read_text(errors='replace')
 def wait(marker):
-    deadline = time.monotonic()+150
+    deadline = time.monotonic()+300
     while marker not in read('host'):
         if children[0].poll() is not None or time.monotonic() > deadline:
             raise RuntimeError('Host stopped or timed out before '+marker)
@@ -63,9 +63,12 @@ try:
         launch('initial', '127.0.0.1:17979?Name=Initial')
         wait('ER_TEMPLATE_STATE phase=2 ')
         launch('late', '127.0.0.1:17979?Name=Late')
-    host.wait(timeout=240)
+    host.wait(timeout=300+args.team_size*10)
     text = read('host')
     passed = host.returncode == 0 and 'ER_TOWN_COMPLETE result=PASS' in text and 'ER_TEMPLATE_PROBE_FAIL' not in text
+    passed &= 'ER_TEMPLATE_PROBE_PASS town_pawn_walked_all_primary_spawn_exits' in text
+    passed &= len(re.findall(r'ER_TOWN_WALK_END kind=spawn_exit path=\d+ result=PASS', text)) == 4
+    passed &= 'ER_TEMPLATE_PROBE_PASS town_regenerate_different_seed_restores_cells' in text
     states = {int(a): int(b) for a, b in re.findall(r'ER_TEMPLATE_STATE phase=(\d+) digest=(\d+)', text)}
     if args.network:
         for role, phases in [('initial', [1, 2, 3]), ('late', [2, 3])]:

@@ -224,8 +224,16 @@ void AERIndustrialMapProbe::Tick(float Delta)
         const auto SpawnPoint=C->GetActorLocation();
         const float SpawnGround=Map->GetLayout().CircularArena ? ERProcedural::CentralGroundHeight(Map->GetLayout(),FVector2D(SpawnPoint)):0;
         Check(SpawnPoint.Z-SpawnGround>90 && SpawnPoint.Z-SpawnGround<102,TEXT("actual_spawn_supported"));
-        DamageTime=FMath::Max(Network ? 35.f:20.f,8+Map->GetLayout().StairRoutes.Num()*3.5f+Map->GetLayout().WallAccessFlights.Num()*2.5f);
-        for(const auto& Desc:Map->GetLayout().Ladders)DamageTime+=Desc.Height/144.f+2.f;
+        DamageTime=Elapsed+8+Map->GetLayout().StairRoutes.Num()*4.5f+Map->GetLayout().WallAccessFlights.Num()*2.5f;
+        for(const auto& Desc:Map->GetLayout().Ladders)DamageTime+=Desc.Height/144.f+4.f;
+        Check(!Map->GetLayout().CrossingRoutes.IsEmpty(),TEXT("recorded_crossing_routes_present"));
+        for(const auto& Path:Map->GetLayout().CrossingRoutes)
+        {
+            double PathLength=0;for(int32 I=1;I<Path.Num();++I)PathLength+=FVector::Dist2D(Path[I-1],Path[I]);
+            DamageTime+=FMath::Clamp(float(8+PathLength/180),12.f,120.f);
+        }
+        DamageTime=FMath::Max(DamageTime,Network ? 35.f:20.f);
+        UE_LOG(LogTemp,Display,TEXT("ER_INDUSTRIAL_TRAVERSAL stairs=%d ladders=%d crossings=%d"),Map->GetLayout().StairRoutes.Num(),Map->GetLayout().Ladders.Num(),Map->GetLayout().CrossingRoutes.Num());
         Capture(Map);Publish(1,Map);
     }
     if(Phase==1 && Elapsed<DamageAt)
@@ -294,11 +302,50 @@ void AERIndustrialMapProbe::Tick(float Delta)
                 Check(false,TEXT("generated_ladder_timeout"));++LadderIndex;LadderClimbing=false;
             }
         }
+        else if(CrossingIndex<Map->GetLayout().CrossingRoutes.Num())
+        {
+            const auto& Path=Map->GetLayout().CrossingRoutes[CrossingIndex];
+            if(Path.Num()<2){Check(false,TEXT("recorded_crossing_path_missing"));++CrossingIndex;return;}
+            if(!CrossingWalking)
+            {
+                double PathLength=0;for(int32 I=1;I<Path.Num();++I)PathLength+=FVector::Dist2D(Path[I-1],Path[I]);
+                CrossingBudget=FMath::Clamp(float(8+PathLength/180),12.f,120.f);CrossingStarted=Elapsed;
+                C->TeleportTo(Path[0],FRotator::ZeroRotator,false,true);C->GetCharacterMovement()->StopMovementImmediately();
+                C->GetCharacterMovement()->SetMovementMode(MOVE_Walking);CrossingPoint=1;CrossingWalking=true;
+                UE_LOG(LogTemp,Display,TEXT("ER_INDUSTRIAL_CROSSING_BEGIN path=%d points=%d budget=%.1f"),CrossingIndex,Path.Num(),CrossingBudget);
+            }
+            while(CrossingPoint<Path.Num() && FVector::Dist2D(C->GetActorLocation(),Path[CrossingPoint])<18 && FMath::Abs(C->GetActorLocation().Z-Path[CrossingPoint].Z)<45)++CrossingPoint;
+            if(CrossingPoint<Path.Num())
+            {
+                const FVector ToPoint=Path[CrossingPoint]-C->GetActorLocation();
+                PC->SetControlRotation(FRotator(0,ToPoint.Rotation().Yaw,0));
+                // Dense terrain samples are not stopping points. Slow down
+                // at turns and endpoints while still visiting every waypoint.
+                const bool ContinuesStraight=CrossingPoint+1<Path.Num() && FVector::DotProduct(ToPoint.GetSafeNormal2D(),(Path[CrossingPoint+1]-Path[CrossingPoint]).GetSafeNormal2D())>.95;
+                C->AddMovementInput(ToPoint.GetSafeNormal2D(),ContinuesStraight ? 1.f:FMath::Clamp(float(ToPoint.Size2D()/100),.2f,1.f));
+            }
+            else
+            {
+                const bool Grounded=C->GetCharacterMovement()->IsMovingOnGround();
+                Check(Grounded,TEXT("actual_pawn_walked_recorded_crossing"));
+                UE_LOG(LogTemp,Display,TEXT("ER_INDUSTRIAL_CROSSING_END path=%d result=%s"),CrossingIndex,Grounded ? TEXT("PASS"):TEXT("FAIL"));
+                if(Grounded)++CrossingsWalked;
+                C->GetCharacterMovement()->StopMovementImmediately();++CrossingIndex;CrossingWalking=false;
+            }
+            if(CrossingWalking && Elapsed-CrossingStarted>CrossingBudget)
+            {
+                UE_LOG(LogTemp,Warning,TEXT("ER_INDUSTRIAL_CROSSING_TIMEOUT path=%d point=%d position=%s goal=%s"),CrossingIndex,CrossingPoint,*C->GetActorLocation().ToString(),*Path[CrossingPoint].ToString());
+                Check(false,TEXT("recorded_crossing_timeout"));C->GetCharacterMovement()->StopMovementImmediately();++CrossingIndex;CrossingWalking=false;
+            }
+        }
+        if(Flight==Map->GetLayout().StairRoutes.Num() && LadderIndex==Map->GetLayout().Ladders.Num() && CrossingIndex==Map->GetLayout().CrossingRoutes.Num())
+            DamageTime=FMath::Min(DamageTime,FMath::Max(Elapsed+.05f,Network ? 35.f:20.f));
     }
     if(Phase==1 && Elapsed>=DamageAt)
     {
-        Check(Flight==Map->GetLayout().StairRoutes.Num(),TEXT("all_floors_both_stairs_walked"));
-        Check(LadderIndex==Map->GetLayout().Ladders.Num(),TEXT("all_generated_ladders_climbed"));
+        Check(Flight==Map->GetLayout().StairRoutes.Num(),TEXT("all_recorded_stair_routes_attempted"));
+        Check(LadderIndex==Map->GetLayout().Ladders.Num(),TEXT("all_recorded_ladders_attempted"));
+        Check(CrossingsWalked==Map->GetLayout().CrossingRoutes.Num() && CrossingsWalked>0,TEXT("all_recorded_crossings_walked"));
         // An actual authorized rifle shot after reducing a local band to 1HP.
         float WallX=Map->GetLayout().CentralBuildingCenter.X-Map->GetLayout().CentralBuildingSize.X*.5;
         const float ShotY=Map->GetLayout().CircularArena ? 60.f:200.f;

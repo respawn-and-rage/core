@@ -291,7 +291,7 @@ bool AERWeapon::CanFight() const
 {
     const auto* Character = Cast<AERCharacter>(GetOwner());
     const auto* Mode = GetWorld()->GetAuthGameMode<AERGameMode>();
-    return HasAuthority() && Character && !Character->Health->bDead && Character->Weapon == this && !Character->IsWeaponStowed() && Mode && Mode->IsMatchInProgress();
+    return HasAuthority() && Character && Character->bNetworkReady && !Character->Health->bDead && Character->Weapon == this && !Character->IsWeaponStowed() && Mode && Mode->IsMatchInProgress();
 }
 bool AERWeapon::IsHandGrenade(EERPayload Kind)
 { return Kind==EERPayload::HE || Kind==EERPayload::Smoke || Kind==EERPayload::Stun; }
@@ -471,20 +471,24 @@ void AERWeapon::TryFire()
         for(TActorIterator<AERCharacter> It(GetWorld());It;++It)if(*It!=Character)
         {
             const double QueryTime=ERShotTrace::BulletTime(Character);
+            const uint32 AuditShot=Character->FireAcknowledgement.Sequence>0 ? uint32(Character->FireAcknowledgement.Sequence-1):AuthorizedShotCount;
             FVector Historical=It->GetMesh()->GetBoneLocation(TEXT("spine_03"));TArray<FTransform> Pose;
             if(const auto* Posture=Cast<UERPostureMesh>(It->GetMesh()))Posture->ShotHistory.Sample(QueryTime,Pose,&Historical);
-            UE_LOG(LogTemp,Display,TEXT("ER_HIT_LAG_SERVER shot=%u target=%s yaw=%.3f"),AuthorizedShotCount,*It->GetMesh()->GetBoneLocation(TEXT("spine_03")).ToCompactString(),Aim.Yaw);
-            UE_LOG(LogTemp,Display,TEXT("ER_HIT_LAG_REWOUND shot=%u target=%s yaw=%.3f rewind_ms=%.1f"),AuthorizedShotCount,*Historical.ToCompactString(),Aim.Yaw,(Now-QueryTime)*1000);
+            UE_LOG(LogTemp,Display,TEXT("ER_HIT_LAG_SERVER shot=%u target=%s yaw=%.3f"),AuditShot,*It->GetMesh()->GetBoneLocation(TEXT("spine_03")).ToCompactString(),Aim.Yaw);
+            UE_LOG(LogTemp,Display,TEXT("ER_HIT_LAG_REWOUND shot=%u target=%s yaw=%.3f rewind_ms=%.1f"),AuditShot,*Historical.ToCompactString(),Aim.Yaw,(Now-QueryTime)*1000);
         }
 #endif
     // Camera height is explicit: no animated socket is required for authoritative collision.
     Eye = Character->Camera->GetComponentLocation();
     FCollisionQueryParams Params(SCENE_QUERY_STAT(ERRifle), false, Character); Params.AddIgnoredActor(this);
     const double ShotTime=Tuned()->Payload==EERPayload::Bullet ? ERShotTrace::BulletTime(Character):-1;
+    TOptional<ERShotTrace::FContext> ShotContext;
+    if(Tuned()->Payload==EERPayload::Bullet && Tuned()->bUseBodyHitZones)ShotContext.Emplace(GetWorld(),Params,ShotTime);
+    auto* Context=ShotContext.IsSet() ? &ShotContext.GetValue():nullptr;
     FHitResult ViewHit;
     const FVector Far = Eye + Aim.Vector() * FMath::Max(1.f, Tuned()->HitscanRange);
     const bool bViewHit = Tuned()->Payload == EERPayload::Bullet && Tuned()->bUseBodyHitZones ?
-        ERShotTrace::Pellet(GetWorld(), ViewHit, Eye, Far, Params, ShotTime) :
+        ERShotTrace::Pellet(GetWorld(),ViewHit,Eye,Far,Params,ShotTime,Context) :
         GetWorld()->LineTraceSingleByChannel(ViewHit, Eye, Far, ECC_GameTraceChannel1, Params);
     const FVector Target = bViewHit ? ViewHit.ImpactPoint : Far;
     FVector IntendedMuzzle = Eye + Aim.RotateVector(FVector(45, 12, -12));
@@ -574,7 +578,7 @@ void AERWeapon::TryFire()
                 (Pellet == 0 ? LastShotDirection : ShotRandom.VRandCone(LastShotAimDirection, FMath::DegreesToRadians(LastShotSpreadDegrees)));
             FHitResult Hit = MuzzleHit;
             const FVector TraceEnd = PelletStart + Direction * FMath::Max(1.f, Tuned()->HitscanRange);
-            const bool bHit = PelletBlocked || (Tuned()->bUseBodyHitZones ? ERShotTrace::Pellet(GetWorld(),Hit,PelletStart,TraceEnd,Params,ShotTime) :
+            const bool bHit = PelletBlocked || (Tuned()->bUseBodyHitZones ? ERShotTrace::Pellet(GetWorld(),Hit,PelletStart,TraceEnd,Params,ShotTime,Context) :
                 GetWorld()->LineTraceSingleByChannel(Hit, IntendedMuzzle, TraceEnd, ECC_GameTraceChannel1, Params));
             ++LastShotTraceCount;
             FVector PelletEnd=bHit ? Hit.ImpactPoint : TraceEnd;
@@ -590,7 +594,7 @@ void AERWeapon::TryFire()
                 if (!bBlocked && Room && Room->CanMutateBlocks())
                 {
                     const auto Shot = ERBlockCombat::ContinueShot(GetWorld(), Hit, IntendedMuzzle, Direction, Tuned()->HitscanRange,
-                        Tuned()->Damage, Tuned()->BlockShot, Params, Character->Controller, this);
+                        Tuned()->Damage,Tuned()->BlockShot,Params,Character->Controller,this,Context);
                     LastShotTraceCount += Shot.ExtraTraces;
                     PelletEnd=Shot.End;
                     if (Pellet == 0) LastShotTraceEnd = FeedbackEnd = Shot.End;

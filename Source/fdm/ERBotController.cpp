@@ -56,7 +56,7 @@ void AERBotController::OnPossess(APawn* PossessedPawn)
 bool AERBotController::HasSight(AERCharacter* Other) const
 {
     const auto* BotCharacter = Cast<AERCharacter>(GetPawn());
-    if (!BotCharacter || !Other || Other == BotCharacter || Other->Health->bDead) return false;
+    if (!BotCharacter || !Other || Other == BotCharacter || Other->Health->bDead || !Other->bNetworkReady) return false;
     const auto* SelfState = GetPlayerState<AERPlayerState>();
     const auto* OtherState = Other->GetPlayerState<AERPlayerState>();
     if (!SelfState || !OtherState || OtherState->Team == EERTeam::None || SelfState->Team == OtherState->Team) return false;

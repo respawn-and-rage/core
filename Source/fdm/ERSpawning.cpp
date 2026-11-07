@@ -147,8 +147,11 @@ AERTeamPlayerStart* AERGameMode::ChooseScoredStart(EERTeam Team, const TArray<AE
 #if !UE_BUILD_SHIPPING
     if (FParse::Param(FCommandLine::Get(), TEXT("ERSpawnAudit")))
     {
-        int32 Exposed = 0; for (const auto& C : Candidates) Exposed += C.Seen > 0;
-        UE_LOG(LogTemp, Display, TEXT("ER_SPAWN_CHOICE team=%d candidates=%d exposed=%d enemies=%d traces=%d chosen_seen=%d risk=%.0f"), Side, Candidates.Num(), Exposed, Threats.Num(), Traces, Candidates[Choice].Seen, Candidates[Choice].Risk);
+        int32 Exposed=0,Incomplete=0;
+        for(const auto& C:Candidates){Exposed+=C.Seen>0;Incomplete+=C.Unknown>0;}
+        UE_LOG(LogTemp,Display,TEXT("ER_SPAWN_CHOICE team=%d candidates=%d exposed=%d enemies=%d traces=%d chosen_seen=%d risk=%.0f incomplete=%d chosen_unknown=%d budget_hit=%d"),
+            Side,Candidates.Num(),Exposed,Threats.Num(),Traces,Candidates[Choice].Seen,Candidates[Choice].Risk,Incomplete,Candidates[Choice].Unknown,
+            Incomplete>0 && Traces>=Tuning.MaxTraces);
     }
 #endif
     return Start;

@@ -1,6 +1,7 @@
 #include "ERRecon.h"
 #include "Misc/AutomationTest.h"
 #include "ERSmokeCloud.h"
+#include "ERBlockRoom.h"
 #include "Engine/World.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -53,14 +54,94 @@ bool FERReconSmokeTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("Ray misses cloud"),Smoke->ReconOpticalDepth(FVector(-1000,600,170),FVector(1000,600,170)),0.f);
     Smoke->StartedAtServerTime=0;
     TestEqual(TEXT("No instant opaque box before growth"),Smoke->ReconOpticalDepth(Left,Right),0.f);
-    Smoke->StartedAtServerTime=-11.99;
+    Smoke->StartedAtServerTime=-Smoke->Duration+.01;
     TestTrue(TEXT("Faded cloud no longer blocks"),Smoke->ReconOpticalDepth(Left,Right)<1);
-    Smoke->StartedAtServerTime=-12.1;
+    Smoke->StartedAtServerTime=-Smoke->Duration-.1;
     TestEqual(TEXT("Expired cloud is transparent"),Smoke->ReconOpticalDepth(Left,Right),0.f);
     Smoke->StartedAtServerTime=-3;
     Smoke->AddShot(FVector(0,0,40),FVector(0,0,160),400,12);
     TestTrue(TEXT("Blast pocket restores player sight"),Smoke->ReconOpticalDepth(Left,Right)<1);
     World->DestroyWorld(false);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERReconSmokeInvalidationTest,"EclipseRecoil.Recon.SmokeLocalInvalidation",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FERReconSmokeInvalidationTest::RunTest(const FString& Parameters)
+{
+    UWorld::InitializationValues Values;
+    Values.AllowAudioPlayback(false).CreateNavigation(false).CreateAISystem(false).CreateFXSystem(false).EnableTraceCollision(true);
+    auto* World=UWorld::CreateWorld(EWorldType::Game,false,NAME_None,nullptr,true,ERHIFeatureLevel::Num,&Values);
+    if(!TestNotNull(TEXT("Containment test world"),World))return false;
+    const auto SpawnRoom=[&](FVector Position)
+    {
+        FActorSpawnParameters Params;Params.bDeferConstruction=true;
+        auto* Room=World->SpawnActor<AERBlockRoom>(Position,FRotator::ZeroRotator,Params);
+        Room->FinishSpawning(FTransform(Position));TestTrue(TEXT("Room generates"),Room->Regenerate());return Room;
+    };
+    auto* Near=SpawnRoom(FVector::ZeroVector);
+    auto* Far=SpawnRoom(FVector(100000,0,0));
+    auto* Smoke=World->SpawnActor<AERSmokeCloud>();
+    const FERCellId Cell{0,0,0,0};
+    Smoke->VolumeOrigin=Near->GetActorTransform().TransformPosition(Near->GetCellWorld().GetCellCenter(Cell));
+    Smoke->RebuildContainment();
+    TestTrue(TEXT("First poll establishes room/chunk baseline"),Smoke->PollGeometryChanges());
+    TestFalse(TEXT("Unchanged world does not rebuild"),Smoke->PollGeometryChanges());
+    const int32 ChunkCount=Near->GetCellWorld().GetChunks().Num();
+    const uint32 OldLayout=Near->GetCellWorld().GetLayoutDigest();
+    Near->Config.Height-=5;
+    TestTrue(TEXT("Pristine offline room regenerates"),Near->Regenerate());
+    TestEqual(TEXT("Layout change retains chunk count"),Near->GetCellWorld().GetChunks().Num(),ChunkCount);
+    TestTrue(TEXT("Layout changed without a network epoch"),Near->GetCellWorld().GetLayoutDigest()!=OldLayout);
+    TestTrue(TEXT("Pristine same-size layout invalidates local watch"),Smoke->PollGeometryChanges());
+    TestFalse(TEXT("New layout baseline remains stable"),Smoke->PollGeometryChanges());
+    TMap<FERCellId,float> Damage;Damage.Add(Cell,TNumericLimits<float>::Max());
+    TestTrue(TEXT("Distant fixture cell is alive"),Far->GetCellWorld().IsAlive(Cell));
+    TestEqual(TEXT("Distant cell removed"),Far->ApplyCellBatch(Damage).Destroyed,1);
+    TestFalse(TEXT("Distant destruction does not invalidate containment"),Smoke->PollGeometryChanges());
+    TestTrue(TEXT("Local fixture cell is alive"),Near->GetCellWorld().IsAlive(Cell));
+    TestEqual(TEXT("Local cell removed"),Near->ApplyCellBatch(Damage).Destroyed,1);
+    TestTrue(TEXT("Local destroyed cell invalidates containment"),Smoke->PollGeometryChanges());
+    TestFalse(TEXT("Local revision is consumed once"),Smoke->PollGeometryChanges());
+    Near->Regenerate();
+    TestTrue(TEXT("Regeneration invalidates local watch"),Smoke->PollGeometryChanges());
+    World->DestroyWorld(false);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERMinimapFogGeometryTest,"EclipseRecoil.Recon.MinimapFogGeometry",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FERMinimapFogGeometryTest::RunTest(const FString& Parameters)
+{
+    FERMinimapFog Geometry;FRandomStream Random(733);
+    for(int32 Pattern=0;Pattern<3;++Pattern)
+    {
+        TArray<uint8> Bits;Bits.Init(0,ERRecon::FogBytes);
+        for(int32 I=0;I<4096;++I)if(Pattern==0 || (Pattern==1 && Random.FRand()<.65))ERRecon::Explore(Bits,I);
+        Geometry.Update(Bits);
+        for(double Scale:{.25,1.,4.})for(const FVector2D& Origin:{FVector2D::ZeroVector,FVector2D(.18,-.31)})
+        {
+            TArray<int32> Coverage;Coverage.Init(0,4096);int32 Quads=0;
+            Geometry.Visit(Origin,Scale,.97,[&](int32 X,int32 Y,int32 Size)
+            {
+                ++Quads;
+                for(int32 YY=Y;YY<Y+Size;++YY)for(int32 XX=X;XX<X+Size;++XX)++Coverage[YY*64+XX];
+            });
+            bool NoLeak=true,NoOverlap=true,Complete=true;
+            for(int32 Y=0;Y<64;++Y)for(int32 X=0;X<64;++X)
+            {
+                const int32 I=Y*64+X;const bool Seen=ERRecon::IsExplored(Bits,I);
+                const FVector2D Lo=(FVector2D(double(X)/64-.5,double(Y)/64-.5)-Origin)*(2*Scale);
+                const FVector2D Hi=Lo+FVector2D(2*Scale/64);
+                const FVector2D Nearest(FMath::Clamp(0.,Lo.X,Hi.X),FMath::Clamp(0.,Lo.Y,Hi.Y));
+                NoLeak&=Coverage[I]==0 || Seen;NoOverlap&=Coverage[I]<=1;
+                if(Seen && Nearest.SizeSquared()<=1.000001)Complete&=Coverage[I]==1;
+            }
+            TestTrue(TEXT("Merged quads never reveal unexplored cells"),NoLeak);
+            TestTrue(TEXT("Merged quads never overlap"),NoOverlap);
+            TestTrue(TEXT("All visible explored cells remain covered"),Complete);
+            if(Pattern==0 && Scale==.25)TestEqual(TEXT("Fully explored interior reduces 4096 cells to one quad"),Quads,1);
+            if(Pattern==2)TestEqual(TEXT("Clearing fog leaves no geometry from prior mask"),Quads,0);
+        }
+    }
     return true;
 }
 #endif

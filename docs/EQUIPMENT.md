@@ -44,6 +44,9 @@ catalog, and Apply affects the next spawn only. `?ERLegacyArsenal=1` and
   radius, 4m height, 16×16×8 connected containment grid, four clouds. Team-tinted from a
   snapshot taken at arming. Bullets cut temporary wakes (2s recovery), moving ordnance
   smaller ones, blasts clear 400cm until expiry. Never changes aim, damage or bots.
+  Containment watches collision chunk revisions intersecting the cloud bounds, including a
+  conservative sweep margin. Distant damage does not rebuild the grid; local destruction,
+  regeneration and room transforms invalidate it.
 
 ## Claymore
 

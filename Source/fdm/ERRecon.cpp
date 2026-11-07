@@ -20,6 +20,7 @@
 #include "GlobalRenderResources.h"
 #include "Net/UnrealNetwork.h"
 #include "Misc/App.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 namespace
 {
@@ -406,16 +407,22 @@ bool AERReconDirector::SightClear(const FVector& Eye, const FVector& Target, con
 }
 void AERReconDirector::UpdateVisibility()
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(ERRecon_Visibility);
     struct FObserver { FVector Eye, Forward; bool Drone=false; };
-    TArray<AERCharacter*,TInlineAllocator<24>> Players;
+    struct FPlayerSample { AERCharacter* Character; FVector Head; FERReconContact Contact; };
+    TArray<FPlayerSample,TInlineAllocator<24>> Players;
     TArray<FObserver> Observers[2];
+    const float PlayerAngle=ERServer::Get(GetWorld(),"Recon.PlayerAngle");
+    const float PlayerRange=SightRange(false),DroneRange=SightRange(true);
     for (TActorIterator<AERCharacter> It(GetWorld()); It; ++It)
     {
         const auto* PS = It->GetPlayerState<AERPlayerState>();
-        if (!PS || PS->Team == EERTeam::None || It->Health->bDead) continue;
+        if (!PS || PS->Team == EERTeam::None || It->Health->bDead || !It->bNetworkReady) continue;
         FVector Eye; FRotator Aim; It->GetActorEyesViewPoint(Eye,Aim);
         Eye=It->Camera->GetComponentLocation();
-        Observers[TeamIndex(PS->Team)].Add({Eye,Aim.Vector(),false}); Players.Add(*It);
+        Observers[TeamIndex(PS->Team)].Add({Eye,Aim.Vector(),false});
+        FERReconContact Contact;Contact.Position=It->GetActorLocation();Contact.Yaw=Aim.Yaw;Contact.Team=PS->Team;
+        Players.Add({*It,Eye,Contact});
     }
     const auto Query = SightQuery();
     TArray<AERSmokeCloud*> Clouds;
@@ -437,12 +444,34 @@ void AERReconDirector::UpdateVisibility()
                 // can reveal an upper storey from their own elevation; no ray
                 // bypasses a roof/wall to spot a person beneath it.
                 const FVector Target(Ground.X,Ground.Y,Source.Drone ? SurfaceHeights[Cell] : Source.Eye.Z-25);
-                if (!ERRecon::InSightCone(Source.Eye,Source.Forward,Target,SightRange(Source.Drone),Source.Drone,ERServer::Get(GetWorld(),"Recon.PlayerAngle"))) continue;
+                if (!ERRecon::InSightCone(Source.Eye,Source.Forward,Target,Source.Drone ? DroneRange:PlayerRange,Source.Drone,PlayerAngle)) continue;
                 --TraceBudget;
                 if (SightClear(Source.Eye,Target,Query,Clouds)) { ERRecon::Explore(Teams[Index].Explored,Cell); break; }
             }
         }
     }
+    // Sight depends on the team, never on the receiving controller. Keep one
+    // observation per team/target; personalize only the self marker afterwards.
+    TBitArray<> VisiblePlayers[2];
+    for(auto& Visible:VisiblePlayers)Visible.Init(false,Players.Num());
+    for(int32 Index=0;Index<2;++Index)
+        for(int32 PlayerIndex=0;PlayerIndex<Players.Num();++PlayerIndex)
+        {
+            const auto& Sample=Players[PlayerIndex];
+            bool Visible=false;
+            for(const auto& Source:Observers[Index])
+            {
+                for(const FVector& Target:{Sample.Head,FVector(Sample.Contact.Position)})
+                    if(ERRecon::InSightCone(Source.Eye,Source.Forward,Target,Source.Drone ? DroneRange:PlayerRange,Source.Drone,PlayerAngle) &&
+                        SightClear(Source.Eye,Target,Query,Clouds)){Visible=true;break;}
+                if(Visible)break;
+            }
+            if(Visible)
+            {
+                VisiblePlayers[Index][PlayerIndex]=true;
+                ERRecon::Explore(Teams[Index].Explored,WorldCell(Sample.Contact.Position));
+            }
+        }
     const double Now = ServerTime(GetWorld());
     for (FConstPlayerControllerIterator It=GetWorld()->GetPlayerControllerIterator(); It; ++It)
     {
@@ -455,23 +484,12 @@ void AERReconDirector::UpdateVisibility()
             const int32 Index=TeamIndex(PS->Team);
             Snapshot.Explored=Teams[Index].Explored;
             Snapshot.Remaining=Remaining(PS->Team); Snapshot.Airborne=Teams[Index].Drone.IsValid(); Snapshot.NextLaunch=Teams[Index].NextLaunch;
-            for (auto* Player : Players)
+            for(int32 PlayerIndex=0;PlayerIndex<Players.Num();++PlayerIndex)
             {
-                const bool Self = Player == PC->GetPawn();
-                bool Visible = Self;
-                FVector Head; FRotator Aim; Player->GetActorEyesViewPoint(Head,Aim);
-                Head=Player->Camera->GetComponentLocation();
-                for (const auto& Source : Observers[Index])
-                {
-                    if (Visible) break;
-                    // Two samples allow partial cover; both still use real cover queries.
-                    for (const FVector Target : {Head,Player->GetActorLocation()})
-                        if (ERRecon::InSightCone(Source.Eye,Source.Forward,Target,SightRange(Source.Drone),Source.Drone,ERServer::Get(GetWorld(),"Recon.PlayerAngle")) &&
-                            SightClear(Source.Eye,Target,Query,Clouds)) { Visible=true; break; }
-                }
-                if (!Visible) continue;
-                FERReconContact Contact; Contact.Position=Player->GetActorLocation(); Contact.Yaw=Aim.Yaw;
-                Contact.Team=Player->GetPlayerState<AERPlayerState>()->Team; Contact.Self=Self;
+                const auto& Sample=Players[PlayerIndex];
+                const bool Self=Sample.Character==PC->GetPawn();
+                if(!Self && !VisiblePlayers[Index][PlayerIndex])continue;
+                FERReconContact Contact=Sample.Contact;Contact.Self=Self;
                 Snapshot.Contacts.Add(Contact);
                 // A visible person always occupies a revealed map cell.
                 ERRecon::Explore(Teams[Index].Explored,WorldCell(Contact.Position));

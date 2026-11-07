@@ -46,6 +46,14 @@ bool FERServerRulesTest::RunTest(const FString&)
     TestEqual(TEXT("Cannot disable every production map"),ERMaps::Rotation(&R).Num(),1);
     TestEqual(TEXT("Single-map pool keeps that map available to lobby"),ERMaps::LobbyLeaders(TArray<int32>{2,5},&R),TArray<int32>{0});
     TestFalse(TEXT("Depot never enters the server pool"),ERMaps::Enabled(1,&R));
+    {
+        FERServerRules TownOnly;
+        for(const auto& Entry:ERMaps::All())if(Entry.InRotation)
+            TownOnly.Set(FName(*(FString(TEXT("Map."))+Entry.Id)),FString(Entry.Id)==TEXT("town") ? 1.f:0.f);
+        TownOnly.Normalize();
+        TestEqual(TEXT("Town can be the only rotation map"),ERMaps::Rotation(&TownOnly),TArray<FName>{FName(TEXT("/Game/EclipseRecoil/Maps/L_Town"))});
+        TestEqual(TEXT("Town-only rules do not enable Central Building"),TownOnly.Get("Map.central_building"),0.f);
+    }
     TestEqual(TEXT("Standard still needs strict majority"),ERLobby::RequiredReady(16),9);
     TestEqual(TEXT("Unanimity uses every human"),ERLobby::RequiredReady(16,100),16);
     const FString File=FPaths::ProjectSavedDir()/TEXT("Testing/ServerRules-Roundtrip.ini");

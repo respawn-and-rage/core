@@ -16,7 +16,12 @@ face neighbours rebuild mesh and collision together.
   "destroyed"). Each axis holds `round(L/5cm)` equal cells (`FERCellWorld::FitCell`): pieces
   keep their exact volume, because truncating leaves see-through slits.
 - Skinned structures use `UERDestructibleMesh`: original triangles clipped at destroyed
-  cells, hollow triangle collision, one body per building.
+  cells, hollow triangle collision, one body per building. `ERMeshCells::FCache` indexes
+  source triangles by chunk and retains clipped triangles, cuts and fracture faces.
+  Intact skins allocate no clipping cache; the first damage creates their index lazily.
+  Only changed chunks and their face neighbours invalidate cached work. Triangle order,
+  UVs and collision remain identical to a full rebuild; cache budgets fall back to that
+  full rebuild. Mesh upload and collision commit remain synchronous and atomic.
 - `FDynamicMesh3` conventions: front faces satisfy `GetTriNormal == normal`, one overlay
   element per vertex, right-handed UV frames. `nullrhi` cannot see errors here.
 - Resolve cells from the impact point, never `Hit.Item`.
@@ -64,8 +69,13 @@ several; concrete and stone resist by design. Never claim a fixed grenade count 
 from anchors (`bAnchorBottom`, also up to `AnchorHeight`; `bAnchored`, indestructible, ground
 rows). This is connectivity, not load simulation. Ordinary upper decks are never permanently anchored.
 
-Evaluation runs on the 50ms timer, never inside a blast snapshot, with bounded removals
-per step (32768 cells). Damage starts it, so a fresh map is never checked: anything built
+Evaluation runs on the 50ms timer, never inside a blast snapshot. Relabelling, contact
+refresh, union-find, collection and canonical sorting resume under `WorkPerStep` and
+`GraphTimeMs`; time checks are cooperative, so one small operation or allocation may
+cross the time budget. A check retains one immutable alive-mask snapshot using copy-on-write
+chunks, without copying art or HP. New damage is included in the next check; regeneration
+cancels pending work. Only complete results reach the bounded removal step (32768 cells).
+Damage starts it, so a fresh map is never checked: anything built
 without support stands until the first damage anywhere, then falls. Each detached component
 spawns one cosmetic debris cube (8 per step, 64 global) with no player, projectile or query
 collision. Regeneration and EndPlay clear all owned effects: 128 decals and bounded Niagara.
@@ -74,11 +84,33 @@ collision. Regeneration and EndPlay clear all owned effects: 128 decals and boun
 
 Only the server mutates (`CanMutateBlocks`). No client cell-damage RPC exists.
 
-Protocol is `AERBlockRoom::Protocol`, bumped for any geometry policy change. A descriptor carries cell settings, layout digest, material rules and shard manifest.
+`ERCellProtocol::Version` is the shared descriptor/validator protocol, bumped for any geometry policy change. A descriptor carries cell settings, layout digest, material rules and shard manifest.
 `AERCellNetShard` fast arrays hold RLE alive masks for modified chunks only; shell masks may
 use bounded zlib frames. HP never leaves the server. Shard headers carry payload count and
 digest; clients apply a transaction only when the whole manifest matches, and fail closed.
 Initial movement waits for complete collision through an owned acknowledgment.
+The server finalizes each dirty shard's digest once per damage batch. Client mask changes
+use wordwise differences and one dirty-chunk set/sort for the whole transaction.
+Successful payload verification is cached by header and FastArray revision; incomplete
+payloads never become valid merely because their header arrived.
+
+`ERCellRecovery` delivers an immutable checkpoint to one owner when live deltas cannot
+catch up. Its descriptor and per-page witnesses stay fixed while the live map advances.
+Only modified chunks travel; empty pages are proved by the checkpoint manifest. A complete
+checkpoint can advance the last applied sequence without waiting for the newest live
+manifest, then normal deltas resume. Older checkpoints never roll a client back, and
+same-epoch masks cannot resurrect removed cells. Payload errors close both readiness and
+collision until a valid checkpoint repairs the state. A checkpoint overtaken by live state
+is acknowledged and discarded; it never clears a subsequent payload error, allowing a
+bounded retry to request a newer repair.
+
+Recovery allows one checkpoint per player, up to 32 MiB per checkpoint, 128 MiB per map
+and 64 concurrent players; allocation failures and budget exhaustion reject the request
+with a reason. Owner-only actors have lower network priority than ordinary gameplay and
+expire after 180s, or are destroyed by an owner-matching acknowledgment or map regeneration.
+Progress counts verified payload versions and commits, not merely newer live sequence
+numbers. `GetCellSyncStatus` exposes completion age, progress and apply CPU time to the
+controller; entry gates and timeout policy are in [GAMEPLAY.md](GAMEPLAY.md).
 
 Layout digests include template identity, fixed geometry, mesh collision, spawns, surfaces
 and attempt index. Guards: 8M cells, or 96M occupied / 512M slots for skinned layouts.
@@ -90,4 +122,14 @@ through Unreal into the private maps mount.
 
 ## Verify
 
-Native: `EclipseRecoil.Destruction.*`.
+Native: `EclipseRecoil.Destruction.*`. `Cells.BudgetedSupport` compares sliced checks
+against the synchronous reference, including damage during a retained snapshot;
+`Cells.IncrementalSkin` compares every vertex, triangle, material, normal and UV against
+full reconstruction; `Cells.BatchedDirtyMasks` covers border and partial-word deltas.
+`Cells.RecoveryCheckpoint` covers immutable owner-only snapshots while live state advances,
+header-before-payload and checkpoint-before-descriptor delivery, failure/recovery, no rollback, byte limits and acknowledgment
+ownership/expiry. Physical network latency and bandwidth still require multi-process runs.
+The development-only `-ERCellRecoveryProbe` client flag retains the initial live baseline
+and requires the first update through owner-only checkpoint channels; normal live applies
+resume after that checkpoint. Recovery logs distinguish a committed payload from an
+already-current or obsolete checkpoint acknowledgment.

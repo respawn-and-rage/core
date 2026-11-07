@@ -4,6 +4,7 @@
 #include "ERCellMesher.h"
 #include "ERMeshCells.h"
 #include "ERCellNetShard.h"
+#include "ERCellRecovery.h"
 #include "ERPlayerController.h"
 #include "ERProceduralMap.h"
 #include "Components/DynamicMeshComponent.h"
@@ -16,6 +17,8 @@
 #include "Sound/SoundAttenuation.h"
 #include "Sound/SoundBase.h"
 #include "Misc/Crc.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 
@@ -32,7 +35,7 @@ void AERBlockRoom::ClearCells()
     }
     for(auto& Entry:SkinMeshes)if(auto* Mesh=Entry.Value.Get())
     {RemoveInstanceComponent(Mesh);Mesh->DestroyComponent();Mesh->Rename(*MakeUniqueObjectName(this,UDynamicMeshComponent::StaticClass(),TEXT("DeadSkin")).ToString(),nullptr,REN_DontCreateRedirectors|REN_NonTransactional);}
-    SkinMeshes.Reset();SkinComponentPanels.Reset();DirtySkinPanels.Reset();
+    SkinMeshes.Reset();SkinComponentPanels.Reset();SkinClipCaches.Reset();DirtySkinPanels.Reset();
     CellMeshes.Reset(); CellComponentChunks.Reset(); ChunkQuads.Reset(); ChunkBoxes.Reset(); AppliedChunkRevisions.Reset();
 }
 
@@ -152,7 +155,8 @@ void AERBlockRoom::FlushSkinMeshes()
             Mesh->SetMaterial(0,P.Surface ? P.Surface:MaterialCatalog->Find(P.Material)->Surface.Get());Mesh->SetMaterial(1,P.InteriorSurface ? P.InteriorSurface:MaterialCatalog->Find(P.Material)->Surface.Get());
             Mesh->RegisterComponent();SkinMeshes.Add(SkinPanelIndex,Mesh);SkinComponentPanels.Add(Mesh,SkinPanelIndex);
         }
-        const double Start=FPlatformTime::Seconds();FDynamicMesh3 Geometry;ERMeshCells::Build(CellWorld,SkinPanelIndex,Geometry);
+        const double Start=FPlatformTime::Seconds();FDynamicMesh3 Geometry;
+        ERMeshCells::BuildCached(CellWorld,SkinPanelIndex,Geometry,SkinClipCaches.FindOrAdd(SkinPanelIndex));
         const int32 Triangles=Geometry.TriangleCount();const bool Empty=Triangles==0;
         RebuildProfile.Quads+=FMath::DivideAndRoundUp(Triangles,2);
         Mesh->SetMesh(MoveTemp(Geometry));const double Built=FPlatformTime::Seconds();
@@ -470,10 +474,11 @@ void AERBlockRoom::MulticastCellImpact_Implementation(uint32 Epoch, uint8 Materi
 
 void AERBlockRoom::PublishCellGeneration()
 {
+    ClearCellRecoveries();
     for (auto& S : AuthorityShards) if (S.IsValid()) S->Destroy();
     AuthorityShards.Empty();
     const uint32 Epoch = Network.Epoch + 1;
-    Network = {}; Network.Epoch = Epoch ? Epoch : 1; Network.Protocol = 59; Network.Cells = true; Network.CellSettings = CellSettings;
+    Network = {}; Network.Epoch = Epoch ? Epoch : 1; Network.Protocol = ERCellProtocol::Version; Network.Cells = true; Network.CellSettings = CellSettings;
     Network.Rules=MaterialRules; Network.Blocks = Config; Network.BlockCount = int32(CellWorld.GetCellCount()); Network.LayoutDigest = GetLayoutDigest(); Network.Sequence = 1;
     if (auto* Map = Cast<AERProceduralMap>(this)) { Network.Procedural = true; Network.Layout = Map->LayoutConfig; Network.Ceilings = Map->bCeilings; }
     // Untouched chunks never travel: shards start empty and only carry modified masks.
@@ -500,11 +505,12 @@ void AERBlockRoom::PublishCellChanges(const TArray<int32>& Changed)
         auto* S = AuthorityShards.IsValidIndex(Index) ? AuthorityShards[Index].Get() : nullptr;
         if (!S) continue;
         TArray<uint8> Mask; CellWorld.EncodeChunk(Chunk, Mask);
-        if (S->SetChunk(Chunk, CellWorld.GetChunks()[Chunk].Revision, MoveTemp(Mask))) Dirty.Add(Index);
+        if (S->SetChunk(Chunk, CellWorld.GetChunks()[Chunk].Revision, MoveTemp(Mask),false)) Dirty.Add(Index);
     }
     for (int32 Index : Dirty)
     {
         auto* S = AuthorityShards[Index].Get();
+        S->FinalizePayload();
         ++S->Header.Version; Network.PageVersions[Index] = S->Header.Version; S->ForceNetUpdate();
     }
     if (!Dirty.IsEmpty()) { ++Network.Sequence; ForceNetUpdate(); }
@@ -519,62 +525,117 @@ bool AERBlockRoom::OnRepCellDescriptor()
     // alley architecture. Multiple storeys can exceed the ordinary 8M limit;
     // the regenerated cell world still validates occupied/storage budgets.
     const bool SkinnedVillage=Template && Template->Archetype==EERMapArchetype::Village && (Template->Village.BridgeStructure || Template->Village.StorageStructure);
-    if (Network.Protocol != 59 || !Network.Cells || Network.BlockCount <= 0 || Network.BlockCount > (Architecture || SkinnedVillage ? 96000000:8000000) || Network.Procedural != (Map != nullptr))
-    { bNetworkError = true; UE_LOG(LogTemp, Error, TEXT("ER_BLOCK_NET_INCOMPATIBLE descriptor")); return false; }
+    if (Network.Protocol != ERCellProtocol::Version || !Network.Cells || Network.BlockCount <= 0 || Network.BlockCount > (Architecture || SkinnedVillage ? 96000000:8000000) || Network.Procedural != (Map != nullptr))
+    { FailCellSynchronization(TEXT("ER_BLOCK_NET_INCOMPATIBLE descriptor")); return false; }
     MaterialRules=Network.Rules; Config = Network.Blocks; CellSettings = Network.CellSettings;
     if (Map) { Map->LayoutConfig = Network.Layout; Map->bCeilings = Network.Ceilings; }
     bApplyingNetwork = true; const bool bBuilt = Regenerate(); bApplyingNetwork = false; SetMapCollision(false);
     if (!bBuilt || CellWorld.GetCellCount() != Network.BlockCount || GetLayoutDigest() != Network.LayoutDigest ||
         Network.PageVersions.Num() != FMath::DivideAndRoundUp(CellWorld.GetChunks().Num(), AERCellNetShard::Capacity))
-    { bNetworkError = true; UE_LOG(LogTemp, Error, TEXT("ER_BLOCK_NET_INCOMPATIBLE layout/assets epoch=%u"), Network.Epoch); return false; }
+    { FailCellSynchronization(TEXT("ER_BLOCK_NET_INCOMPATIBLE layout/assets")); return false; }
     BuiltEpoch = Network.Epoch; AppliedSequence = 0;
     AppliedPageVersions.Init(0, Network.PageVersions.Num()); AppliedChunkRevisions.Init(0, CellWorld.GetChunks().Num());
     // Shards can arrive before their descriptor or their Room reference.
     ReceivedShards.Empty();
-    for (TActorIterator<AERCellNetShard> S(GetWorld()); S; ++S) if (S->Room == this && S->Header.Epoch == BuiltEpoch) ReceivedShards.Add(S->Header.Index, *S);
+    for (TActorIterator<AERCellNetShard> S(GetWorld()); S; ++S) if (S->Room == this && S->Header.Epoch == BuiltEpoch)
+    {
+        if(S->IsRecoveryTransfer())ReceiveCellShard(*S);
+        else ReceivedShards.Add(S->Header.Index,*S);
+    }
+    // Actor channels can deliver the immutable checkpoint before this room's
+    // descriptor. Discover it after regeneration just like the live shards.
+    for(TActorIterator<AERCellRecoveryManifest> M(GetWorld());M;++M)if(M->Room==this && M->Descriptor.Epoch==BuiltEpoch)ReceiveCellRecovery(*M);
+    ++SyncProgressSerial;
     return true;
 }
 
 void AERBlockRoom::ReceiveCellShard(AERCellNetShard* Shard)
 {
     if (HasAuthority() || !Shard || Shard->Room != this || Shard->Header.Epoch != Network.Epoch || !Network.PageVersions.IsValidIndex(Shard->Header.Index)) return;
+    if(Shard->IsRecoveryTransfer())
+    {
+        const uint32 Id=Shard->GetRecoveryId();
+        if(Id==0 || Id<=CompletedRecoveryId)return;
+        // Keep at most two generations of recovery pages while their actor
+        // channels reorder; the validated layout bounds pages per generation.
+        if(RecoveryShards.Num()>=2*Network.PageVersions.Num() && !RecoveryShards.Contains((uint64(Id)<<32)|uint32(Shard->Header.Index)))return;
+        RecoveryShards.Add((uint64(Id)<<32)|uint32(Shard->Header.Index),Shard);TryApplyCellRecovery();return;
+    }
     ReceivedShards.Add(Shard->Header.Index, Shard); TryApplyCellNetwork();
 }
 
 void AERBlockRoom::TryApplyCellNetwork()
 {
-    if (HasAuthority() || bNetworkError || BuiltEpoch == 0 || BuiltEpoch != Network.Epoch || AppliedSequence == Network.Sequence) return;
+    if (HasAuthority() || bNetworkError || BuiltEpoch == 0 || BuiltEpoch != Network.Epoch || AppliedSequence >= Network.Sequence) return;
+#if !UE_BUILD_SHIPPING
+    // Opt-in transport probe: keep the initial baseline, but require the first
+    // subsequent state to arrive through the owner-only checkpoint channels.
+    // Live shards still accumulate normally and resume after that checkpoint.
+    if(AppliedSequence>0 && CompletedRecoveryId==0 && FParse::Param(FCommandLine::Get(),TEXT("ERCellRecoveryProbe")))return;
+#endif
+    ApplyCellSnapshot(Network,ReceivedShards,false);
+}
+
+bool AERBlockRoom::ApplyCellSnapshot(const FERBlockNetworkDescriptor& Descriptor,const TMap<int32,TWeakObjectPtr<AERCellNetShard>>& Pages,bool Recovery,const TArray<FERCellShardHeader>* RecoveryHeaders)
+{
+    if(Descriptor.Epoch!=BuiltEpoch || Descriptor.Sequence<AppliedSequence || (!Recovery && bNetworkError))return false;
+    if(Descriptor.Protocol!=ERCellProtocol::Version || !Descriptor.Cells || Descriptor.BlockCount!=CellWorld.GetCellCount() ||
+        Descriptor.PageVersions.Num()!=AppliedPageVersions.Num() || Descriptor.LayoutDigest!=Network.LayoutDigest ||
+        (RecoveryHeaders && RecoveryHeaders->Num()!=Descriptor.PageVersions.Num()))
+    {FailCellSynchronization(TEXT("ER_BLOCK_NET_INCOMPATIBLE state"));return false;}
+    const double Start=FPlatformTime::Seconds();
+    int32 Verified=0;
     // The entire manifest must match before logical state or collision changes.
-    for (int32 I = 0; I < Network.PageVersions.Num(); ++I)
+    for (int32 I = 0; I < Descriptor.PageVersions.Num(); ++I)
     {
-        const auto* Weak = ReceivedShards.Find(I); const auto* S = Weak ? Weak->Get() : nullptr;
-        if (!S || S->Header.Epoch != BuiltEpoch || S->Header.Version != Network.PageVersions[I] || !S->IsPayloadCurrent()) return;
+        if(RecoveryHeaders && (*RecoveryHeaders)[I].ChunkCount==0){++Verified;continue;}
+        const auto* Weak = Pages.Find(I); const auto* S = Weak ? Weak->Get() : nullptr;
+        if (!S || S->Room!=this || S->Header.Epoch != BuiltEpoch || S->Header.Index!=I || S->Header.Version != Descriptor.PageVersions[I] || !S->IsPayloadCurrent())continue;
+        if(RecoveryHeaders && (S->Header.ChunkCount!=(*RecoveryHeaders)[I].ChunkCount || S->Header.PayloadDigest!=(*RecoveryHeaders)[I].PayloadDigest))continue;
+        ++Verified;RecordVerifiedPayload(S);
     }
-    TArray<TPair<int32, TArray<uint64>>> Pending;
-    for (int32 I = 0; I < Network.PageVersions.Num(); ++I)
+    if(Recovery || !RecoveryManifest.IsValid()){SyncExpectedPages=Descriptor.PageVersions.Num();SyncVerifiedPages=Verified;}
+    if(Verified!=Descriptor.PageVersions.Num())return false;
+    struct FPendingChunk { int32 Chunk;uint32 Revision;TArray<uint64> Alive; };
+    TArray<FPendingChunk> Pending;
+    TSet<int32> SeenChunks;
+    for (int32 I = 0; I < Descriptor.PageVersions.Num(); ++I)
     {
-        if (AppliedPageVersions[I] == Network.PageVersions[I]) continue;
-        for (const auto& Item : ReceivedShards[I]->Chunks.Items)
+        if (!Recovery && AppliedPageVersions[I] == Descriptor.PageVersions[I]) continue;
+        const auto* S=Pages.FindRef(I).Get();if(!S)continue;
+        for (const auto& Item : S->Chunks.Items)
         {
-            if (!CellWorld.GetChunks().IsValidIndex(Item.Chunk) || Item.Chunk / AERCellNetShard::Capacity != I)
-            { bNetworkError = true; SetMapCollision(false); UE_LOG(LogTemp, Error, TEXT("ER_BLOCK_NET_INCOMPATIBLE state")); return; }
+            if (!CellWorld.GetChunks().IsValidIndex(Item.Chunk) || Item.Chunk / AERCellNetShard::Capacity != I || SeenChunks.Contains(Item.Chunk))
+            { FailCellSynchronization(TEXT("ER_BLOCK_NET_INCOMPATIBLE state")); return false; }
+            SeenChunks.Add(Item.Chunk);
             if (AppliedChunkRevisions[Item.Chunk] == Item.Revision) continue;
-            auto& Entry = Pending.Emplace_GetRef(Item.Chunk, TArray<uint64>());
-            if (!CellWorld.DecodeChunk(Item.Chunk, Item.Mask, Entry.Value))
-            { bNetworkError = true; SetMapCollision(false); UE_LOG(LogTemp, Error, TEXT("ER_BLOCK_NET_INCOMPATIBLE state")); return; }
+            auto& Entry=Pending.AddDefaulted_GetRef();Entry.Chunk=Item.Chunk;Entry.Revision=Item.Revision;
+            if (!CellWorld.DecodeChunk(Item.Chunk, Item.Mask, Entry.Alive))
+            { FailCellSynchronization(TEXT("ER_BLOCK_NET_INCOMPATIBLE state")); return false; }
+            // A same-epoch checkpoint may skip events, but may never resurrect
+            // cells removed by an already committed authoritative snapshot.
+            const auto& Before=CellWorld.GetChunks()[Item.Chunk].Alive;
+            for(int32 Word=0;Word<Entry.Alive.Num();++Word)if(Entry.Alive[Word]&~Before[Word])
+            {FailCellSynchronization(TEXT("ER_BLOCK_NET_INCOMPATIBLE state"));return false;}
         }
     }
-    TArray<int32> Dirty;
-    for (const auto& Entry : Pending) CellWorld.SetChunkAlive(Entry.Key, Entry.Value, Dirty);
-    for (const auto& Entry : Pending) for (const auto& Item : ReceivedShards[Entry.Key / AERCellNetShard::Capacity]->Chunks.Items)
-        if (Item.Chunk == Entry.Key) AppliedChunkRevisions[Entry.Key] = Item.Revision;
+    TSet<int32> DirtySet;
+    for (const auto& Entry : Pending)
+    {
+        CellWorld.SetChunkAlive(Entry.Chunk,Entry.Alive,DirtySet);
+        AppliedChunkRevisions[Entry.Chunk]=Entry.Revision;
+    }
+    auto Dirty=DirtySet.Array();Dirty.Sort();
     RebuildProfile = {};
     for (int32 Chunk : Dirty) RebuildCellChunk(Chunk);
     FlushSkinMeshes();
-    for (int32 I = 0; I < Network.PageVersions.Num(); ++I) AppliedPageVersions[I] = Network.PageVersions[I];
-    AppliedSequence = Network.Sequence;
+    AppliedPageVersions=Descriptor.PageVersions;
+    AppliedSequence = Descriptor.Sequence;
+    if(Recovery)bNetworkError=false;
     if (!bMapReady) { bMapReady = true; SetMapCollision(true); }
     // Empty chunks keep no query collision after the gate opens.
     for (int32 I = 0; I < CellMeshes.Num(); ++I) if (CellMeshes[I] && ChunkBoxes[I] == 0) CellMeshes[I]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     UE_LOG(LogTemp, Verbose, TEXT("ER_BLOCK_NET_APPLIED epoch=%u sequence=%u removed_cells=%lld"), BuiltEpoch, AppliedSequence, CellWorld.GetRemovedCount());
+    LastCellApplyAt=FPlatformTime::Seconds();LastCellApplyMs=float((LastCellApplyAt-Start)*1000);++SyncProgressSerial;
+    return true;
 }

@@ -12,6 +12,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Misc/ConfigCacheIni.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 namespace
 {
@@ -25,8 +26,11 @@ public:
     double Retry = 0;
     FERLocomotionState Posture;
     bool PreviousSprint = false, LadderNeedsRelease = false;
+    uint16 FireSequence=0;
+    bool FireHeld=false;
+    FERFireWeaponBinding FireWeapon;
     double SprintRequest = 0;
-    virtual void Clear() override { Super::Clear(); Walk = Climb = High = Sprint = Prone = false; Elapsed = Duration = 0; Retry = 0; Start = End = FVector::ZeroVector; Posture = FERLocomotionState(); PreviousSprint = LadderNeedsRelease = false; SprintRequest = 0; }
+    virtual void Clear() override { Super::Clear(); Walk = Climb = High = Sprint = Prone = false; Elapsed = Duration = 0; Retry = 0; Start = End = FVector::ZeroVector; Posture = FERLocomotionState(); PreviousSprint = LadderNeedsRelease = false; SprintRequest = 0; FireSequence=0;FireHeld=false;FireWeapon=FERFireWeaponBinding(); }
     virtual uint8 GetCompressedFlags() const override
     {
         return Super::GetCompressedFlags() | (Walk ? FLAG_Custom_0 : 0) | (Climb ? FLAG_Custom_1 : 0) | (Sprint ? FLAG_Custom_2 : 0) | (Prone ? FLAG_Custom_3 : 0);
@@ -34,12 +38,18 @@ public:
     virtual bool CanCombineWith(const FSavedMovePtr& Other, ACharacter* Character, float MaxDelta) const override
     {
         const auto* Move = static_cast<const FERSavedMove*>(Other.Get());
-        return Duration == 0 && Move->Duration == 0 && Walk == Move->Walk && Climb == Move->Climb && Sprint == Move->Sprint && Prone == Move->Prone && Super::CanCombineWith(Other, Character, MaxDelta);
+        return FireSequence==Move->FireSequence && FireHeld==Move->FireHeld && FireWeapon==Move->FireWeapon && Duration == 0 && Move->Duration == 0 && Walk == Move->Walk && Climb == Move->Climb && Sprint == Move->Sprint && Prone == Move->Prone && Super::CanCombineWith(Other, Character, MaxDelta);
+    }
+    virtual bool IsImportantMove(const FSavedMovePtr& LastAcked) const override
+    {
+        const auto* Previous=static_cast<const FERSavedMove*>(LastAcked.Get());
+        return !Previous || FireSequence!=Previous->FireSequence || FireHeld!=Previous->FireHeld || FireWeapon!=Previous->FireWeapon || Super::IsImportantMove(LastAcked);
     }
     virtual void SetMoveFor(ACharacter* Character, float Delta, FVector const& Accel, FNetworkPredictionData_Client_Character& Data) override
     {
         Super::SetMoveFor(Character, Delta, Accel, Data);
         const auto* Move = Cast<UERMovement>(Character->GetCharacterMovement());
+        FireSequence=Move->FireInput.Sequence;FireHeld=Move->FireInput.Held;FireWeapon=Move->FireWeapon;
         LadderNeedsRelease=Move->bLadderNeedsRelease;
         Posture = Move->Locomotion; PreviousSprint = Move->bPreviousSprintHeld; SprintRequest = Move->SprintRequestUntil;
         Walk = Move->bWalkHeld; Climb = Move->bClimbHeld; Sprint = Move->bSprintHeld; Prone = Move->bProneWanted;
@@ -52,7 +62,8 @@ public:
         auto* Move = Cast<UERMovement>(Character->GetCharacterMovement());
         Move->bLadderNeedsRelease=LadderNeedsRelease;
         Move->Locomotion = Posture; Move->bPreviousSprintHeld = PreviousSprint; Move->SprintRequestUntil = SprintRequest;
-        Character->GetCapsuleComponent()->SetCapsuleHalfHeight(Posture.HalfHeight, true);
+        if(Character->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight()!=Posture.HalfHeight)
+            Character->GetCapsuleComponent()->SetCapsuleHalfHeight(Posture.HalfHeight, true);
         Move->ApplyPosturePresentation();
         Move->bWalkHeld = Walk; Move->bClimbHeld = Climb; Move->bSprintHeld = Sprint; Move->bProneWanted = Prone;
         Move->TraversalStart=Start; Move->TraversalEnd=End; Move->TraversalElapsed=Elapsed; Move->TraversalDuration=Duration; Move->RetryAfter=Retry; Move->bHighClimb=High;
@@ -66,8 +77,23 @@ public:
     virtual FSavedMovePtr AllocateNewMove() override { return FSavedMovePtr(new FERSavedMove()); }
 };
 }
+void FERNetworkMoveData::ClientFillNetworkMoveData(const FSavedMove_Character& Move,ENetworkMoveType Type)
+{
+    FCharacterNetworkMoveData::ClientFillNetworkMoveData(Move,Type);
+    const auto& Saved=static_cast<const FERSavedMove&>(Move);
+    FireSequence=Saved.FireSequence;FireHeld=Saved.FireHeld;FireWeapon=Saved.FireWeapon;
+}
+bool FERNetworkMoveData::Serialize(UCharacterMovementComponent& Movement,FArchive& Ar,UPackageMap* Map,ENetworkMoveType Type)
+{
+    const bool Result=FCharacterNetworkMoveData::Serialize(Movement,Ar,Map,Type);
+    Ar<<FireSequence;
+    uint8 Held=FireHeld?1:0;Ar.SerializeBits(&Held,1);FireHeld=Held!=0;
+    Ar<<FireWeapon.Slot;Ar<<FireWeapon.Revision;
+    return Result && !Ar.IsError();
+}
 UERMovement::UERMovement()
 {
+    SetNetworkMoveDataContainer(NetworkMoveStorage);
     SetIsReplicatedByDefault(true);
     SetCrouchedHalfHeight(62.5f);
     MaxWalkSpeed = 1500.f / 3.6f; MaxWalkSpeedCrouched = 150.f;
@@ -75,6 +101,52 @@ UERMovement::UERMovement()
     bUseSeparateBrakingFriction = true; BrakingFriction = 0;
     BrakingDecelerationWalking = 850;
     MaxStepHeight = 30; JumpZVelocity = 460; GravityScale = 1.8f; AirControl = .2f;
+}
+void UERMovement::SetFireInput(bool Held,const FERFireWeaponBinding& SelectedWeapon)
+{
+    if(FireInput.Held==Held)return;
+    FireInput.Held=Held;
+    if(Held){++FireInput.Sequence;FireWeapon=SelectedWeapon;}
+    SendMoveThisFrame();
+}
+void UERMovement::MoveAutonomous(float ClientTimeStamp,float DeltaTime,uint8 Flags,const FVector& NewAccel)
+{
+    Super::MoveAutonomous(ClientTimeStamp,DeltaTime,Flags,NewAccel);
+    if(CharacterOwner && CharacterOwner->HasAuthority() && GetCurrentNetworkMoveData() && HasValidData())
+    {
+        bAcceptedNetworkMove=true;
+        LastAcceptedMoveServerTime=GetWorld()->GetTimeSeconds();
+        LastAcceptedMoveTimeStamp=ClientTimeStamp;
+    }
+}
+void UERMovement::ServerMove_PerformMovement(const FCharacterNetworkMoveData& MoveData)
+{
+    bAcceptedNetworkMove=false;
+    Super::ServerMove_PerformMovement(MoveData);
+    // The base has checked timestamps/readiness, applied view and movement, and
+    // flushed its scoped transforms. Replays on the client never fire weapons.
+    if(bAcceptedNetworkMove)
+        if(auto* Character=Cast<AERCharacter>(CharacterOwner))
+        {
+            const auto& Intent=static_cast<const FERNetworkMoveData&>(MoveData);
+            Character->ApplyFireMove(Intent.FireSequence,Intent.FireHeld,Intent.FireWeapon);
+            bool Pressed=false;AcceptedFireInput.Receive(Intent.FireSequence,Intent.FireHeld,Pressed);
+        }
+}
+void UERMovement::ServerMove_HandleMoveData(const FCharacterNetworkMoveDataContainer& MoveData)
+{
+    auto ChangesFire=[this](const FCharacterNetworkMoveData* Data)
+    {
+        const auto* Intent=static_cast<const FERNetworkMoveData*>(Data);
+        return Intent && (Intent->FireSequence!=AcceptedFireInput.Sequence || Intent->FireHeld!=AcceptedFireInput.Held);
+    };
+    // An outer dual-move scope would defer the camera attachment until after
+    // a trigger in its pending move. Enforce the flush server-side on edges.
+    const bool Combined=bEnableServerDualMoveScopedMovementUpdates;
+    if(ChangesFire(MoveData.GetNewMoveData()) || (MoveData.bHasPendingMove && ChangesFire(MoveData.GetPendingMoveData())) ||
+        (MoveData.bHasOldMove && ChangesFire(MoveData.GetOldMoveData())))bEnableServerDualMoveScopedMovementUpdates=false;
+    Super::ServerMove_HandleMoveData(MoveData);
+    bEnableServerDualMoveScopedMovementUpdates=Combined;
 }
 void UERMovement::ApplyServerSettings()
 {
@@ -285,6 +357,7 @@ void UERMovement::UpdateSprint()
 }
 void UERMovement::UpdatePosture(float DeltaSeconds)
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(ERMovementPosture);
     if (!CharacterOwner || !UpdatedComponent || CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy) return;
     const auto* C = Cast<AERCharacter>(CharacterOwner);
     if ((C && C->Health->bDead) || IsTraversing()) return;
@@ -312,12 +385,17 @@ void UERMovement::UpdatePosture(float DeltaSeconds)
             FQuat::Identity, UpdatedComponent->GetCollisionObjectType(),
             FCollisionShape::MakeCapsule(Capsule->GetScaledCapsuleRadius(), Target*Scale), Params)) return;
     }
-    Capsule->SetCapsuleHalfHeight(Next, true);
-    UpdatedComponent->MoveComponent(Shift, UpdatedComponent->GetComponentQuat(), false);
+    // SetCapsuleHalfHeight rebuilds collision/overlaps even when its value is
+    // unchanged. ProneBlend can still advance after reaching the target height.
+    if(Next!=Old)
+    {
+        Capsule->SetCapsuleHalfHeight(Next, true);
+        UpdatedComponent->MoveComponent(Shift, UpdatedComponent->GetComponentQuat(), false);
+        bForceNextFloorCheck = true;
+    }
     Locomotion.HalfHeight = Next;
     Locomotion.ProneBlend = FMath::FInterpConstantTo(Locomotion.ProneBlend, LowerToProne ? 1.f : 0.f, DeltaSeconds, 1.f / ERServer::Get(GetWorld(),"Move.ProneTime"));
     CharacterOwner->bIsCrouched = !LowerToProne && Next < 92.f;
-    bForceNextFloorCheck = true;
     ApplyPosturePresentation();
 }
 bool UERMovement::HasProneClearance(const FVector& Position, const FQuat& Rotation, float Blend) const
@@ -426,10 +504,13 @@ void UERMovement::ApplyPosturePresentation()
     // 2.15cm and the live idle stands about .85cm taller, so seat soles on the real floor.
     constexpr float FloorContact = 3.f;
     const float FeetOffset = (C->GetTeamAppearance().Mesh ? C->GetTeamAppearance().FeetOffset : -92.5f) - FloorContact;
-    float ProneFloorOffset=0;
-    if(const auto* SkinMesh=C->GetTeamAppearance().Mesh.Get())
-        GConfig->GetFloat(TEXT("RespawnAndRage.ProneGrounding"),*SkinMesh->GetPathName(),ProneFloorOffset,GGameIni);
-    const FVector MeshLocation = FMath::Lerp(FVector(0,0,FeetOffset + 92.5f - Locomotion.HalfHeight), FVector(-55,0,-18+FMath::Clamp(ProneFloorOffset,0.f,30.f)), Blend);
+    auto* SkinMesh=C->GetTeamAppearance().Mesh.Get();
+    if(GroundingMesh.IsStale() || GroundingMesh.Get()!=SkinMesh)
+    {
+        GroundingMesh=SkinMesh;CachedProneFloorOffset=0;
+        if(SkinMesh)GConfig->GetFloat(TEXT("RespawnAndRage.ProneGrounding"),*SkinMesh->GetPathName(),CachedProneFloorOffset,GGameIni);
+    }
+    const FVector MeshLocation = FMath::Lerp(FVector(0,0,FeetOffset + 92.5f - Locomotion.HalfHeight), FVector(-55,0,-18+FMath::Clamp(CachedProneFloorOffset,0.f,30.f)), Blend);
     const FQuat Rotation = FQuat(FVector::YAxisVector, Blend * PI * .5f) * FRotator(0,-90,0).Quaternion();
     C->GetMesh()->SetRelativeLocationAndRotation(MeshLocation, Rotation);
     C->CacheInitialMeshOffset(MeshLocation, Rotation.Rotator());
@@ -447,7 +528,8 @@ bool UERMovement::CanDelaySendingMove(const FSavedMovePtr& NewMove)
 }
 void UERMovement::OnRep_Locomotion()
 {
-    if (CharacterOwner && CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy)
+    if (CharacterOwner && CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy &&
+        CharacterOwner->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight()!=Locomotion.HalfHeight)
         CharacterOwner->GetCapsuleComponent()->SetCapsuleHalfHeight(Locomotion.HalfHeight, true);
     ApplyPosturePresentation();
 }

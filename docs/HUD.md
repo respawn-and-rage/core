@@ -17,7 +17,9 @@ without pixel caps, recomputed from the live viewport. Font: Teko SemiBold throu
 - **Reticle**: ring of ammo dots that reads the real server cone plus replicated owner state.
   It indicates accuracy with a readability margin, not an exact boundary.
 - **Top centre**: blue Alpha score, neutral target, orange Omega score, timer; FPS and scene size
-  in Teko 9 above it.
+  in Teko 9 above it. Online clients show ping, RTT variation, packet loss and server frame
+  period below the timer; pending destruction adds snapshot age. Synchronization shows
+  verified-page progress before entering combat.
 - **Inflicted damage**: red HP and green AP text under the reticle, up to five rows, 1s hold,
   .2s fade, attacker only. Rejected, zero and self damage are not shown.
 - Damage arcs and edge flashes: see [WEAPON_TUNING.md](WEAPON_TUNING.md).
@@ -29,6 +31,8 @@ Top right, 30-unit inset, heading-up with a fixed 40m radius, centred 26m ahead 
 frame from local controller yaw. A static mipmapped 1024px bird capture is taken after generation,
 gated on the local geometry epoch; it shows roofs and ignores later destruction. Five drone icons
 sit below it, plus fixed-bearing triangles for enemy and home spawn sides.
+Circle tessellation is cached. A summed-area fog mask merges fully explored interior squares
+into larger quads; boundary cells retain clipping and feathering, and unknown cells stay hidden.
 
 ## Verify
 

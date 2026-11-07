@@ -94,6 +94,10 @@ bool FERMapSelectionDecideTest::RunTest(const FString&)
     R.Graph.Coverage=EERGraphCoverage::Routes;R.Find(TEXT("INITIAL_SPAWN_LOS"))->Status=EERPlayabilityStatus::NotEvaluated;
     ERMapSelection::Judge(C,R,P);
     TestEqual(TEXT("undecided sight with exposed pairs still rejects the candidate"),C.Rejected.Num(),2);
+    R.Find(TEXT("BASE_EXIT_PATHS"))->Status=EERPlayabilityStatus::NotEvaluated;
+    R.Find(TEXT("ROUTE_DIVERSITY"))->Status=EERPlayabilityStatus::NotEvaluated;
+    P.Paths=FFloatInterval(1,4);ERMapSelection::Judge(C,R,P);
+    TestEqual(TEXT("partial graph measurements do not earn tactical preference points"),C.Preference,0);
     FERMapCandidate Exposed;Exposed.bBuilt=true;Exposed.Rejected.Add(TEXT("spawn_sight_1"));
     TestEqual(TEXT("fallback cannot accept exposed spawns"),ERMapSelection::Decide({Exposed},42,Fallback),INDEX_NONE);
     return true;

@@ -1,5 +1,6 @@
 #include "ERMapPlayability.h"
 #include "ERProceduralMap.h"
+#include "Components/BoxComponent.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -153,7 +154,15 @@ bool FERPlayabilityGraphTest::RunTest(const FString&)
         // Missing metadata must never read as a pass.
         FERPlayabilityReport R=Evaluate(FERTacticalGraph());
         TestEqual(TEXT("no graph stays not evaluated"),R.Find(TEXT("CONNECTED_ZONES"))->Status,EERPlayabilityStatus::NotEvaluated);
-        TestEqual(TEXT("no metric means no overall pass"),R.Overall(),EERPlayabilityStatus::NotEvaluated);
+        TestEqual(TEXT("unevaluated metrics warn overall"),R.Overall(),EERPlayabilityStatus::Warn);
+        FERPlayabilityReport Empty;
+        TestEqual(TEXT("no metrics means no overall verdict"),Empty.Overall(),EERPlayabilityStatus::NotEvaluated);
+        auto& First=Empty.Metrics.AddDefaulted_GetRef();First.Status=EERPlayabilityStatus::Pass;
+        TestEqual(TEXT("complete passing report passes"),Empty.Overall(),EERPlayabilityStatus::Pass);
+        Empty.Metrics.AddDefaulted();
+        TestEqual(TEXT("passing metric cannot hide missing coverage"),Empty.Overall(),EERPlayabilityStatus::Warn);
+        Empty.Metrics[0].Status=EERPlayabilityStatus::Fail;
+        TestEqual(TEXT("failure takes precedence over missing coverage"),Empty.Overall(),EERPlayabilityStatus::Fail);
     }
     return !HasAnyErrors();
 }
@@ -199,6 +208,209 @@ bool FERPlayabilitySightTest::RunTest(const FString&)
     return !HasAnyErrors();
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERPlayabilitySamplingTest,"EclipseRecoil.Maps.Playability.SamplingAndCover",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FERPlayabilitySamplingTest::RunTest(const FString&)
+{
+    using namespace ERPlayability;
+    {
+        FERProceduralLayout L;L.ArenaSize={10000,10000,1000};
+        L.AlphaSpawns.Emplace(FVector(1000,-3000,100));L.OmegaSpawns.Emplace(FVector(2000,3000,100));
+        L.RoomAccessRoutes={{{1000,-3000,100},{1000,1000,100},{2000,1000,100},{2000,3000,100}},
+                            {{-1000,-1000,100},{-1000,0,100}}};
+        FERLayoutFixedPiece Divider;Divider.Material=EERBlockMaterial::Concrete;
+        Divider.Transform=FTransform(FQuat::Identity,{0,0,150},{2,14,3});L.FixedPieces.Add(Divider);
+        const auto P=PolicyFor(EERMapArchetype::Village,4);
+        const auto G=BuildGraph(L,EERMapArchetype::Village,P);
+        const int32 Side=G.Nodes.IndexOfByPredicate([](const FERTacticalNode& Node){return Node.Position.Equals({-1000,0,100},.1);});
+        const int32 Base=G.Nodes.IndexOfByPredicate([](const FERTacticalNode& Node){return Node.Position.Equals({1000,-3000,100},.1);});
+        TestTrue(TEXT("flat-floor side route joins circulation around furniture"),Side!=INDEX_NONE && Base!=INDEX_NONE && PathLength(G,{Side},{Base})>0);
+        TestTrue(TEXT("connector records its collision-checked turn"),G.Edges.ContainsByPredicate([](const FERTacticalEdge& E){return E.Source.Contains(TEXT(".link")) && E.Path.Num()==3;}));
+        const auto DuplicateRoute=L.RoomAccessRoutes[0];L.RoomAccessRoutes.Add(DuplicateRoute);
+        const auto Duplicate=BuildGraph(L,EERMapArchetype::Village,P);
+        TestEqual(TEXT("duplicate route metadata does not consume connector coverage"),Duplicate.Edges.Num(),G.Edges.Num());
+        L.FixedPieces[0].Transform.SetScale3D({2,200,3});const auto Sealed=BuildGraph(L,EERMapArchetype::Village,P);
+        const int32 SealedSide=Sealed.Nodes.IndexOfByPredicate([](const FERTacticalNode& Node){return Node.Position.Equals({-1000,0,100},.1);});
+        const int32 SealedBase=Sealed.Nodes.IndexOfByPredicate([](const FERTacticalNode& Node){return Node.Position.Equals({1000,-3000,100},.1);});
+        TestTrue(TEXT("flat-floor connector never crosses a sealed divider"),SealedSide!=INDEX_NONE && SealedBase!=INDEX_NONE && PathLength(Sealed,{SealedSide},{SealedBase})<0);
+    }
+    {
+        // A guessed connector may skirt a bounded base, but may not pass
+        // through it even when neither endpoint nor its bend lies inside.
+        FERProceduralLayout L;L.ArenaSize={20000,20000,1000};
+        L.AlphaSpawns.Emplace(FVector(-9000,-9000,100));L.OmegaSpawns.Emplace(FVector(9000,9000,100));
+        L.RoomAccessRoutes={{{1000,-3000,100},{1000,1000,100},{2000,1000,100},{2000,3000,100}},
+                            {{-1000,-1000,100},{-1000,0,100}}};
+        FERLayoutFixedPiece Divider;Divider.Material=EERBlockMaterial::Concrete;
+        Divider.Transform=FTransform(FQuat::Identity,{0,0,150},{2,14,3});L.FixedPieces.Add(Divider);
+        FERPlayabilityPolicy P=PolicyFor(EERMapArchetype::FireTraining,4);P.SpawnLinkRadius=0;
+        const FBox Court(FVector(-1100,400,0),FVector(-900,600,300));
+        auto CrossesCourt=[&](const FERTacticalEdge& E)
+        {
+            if(!E.Source.Contains(TEXT(".link")))return false;
+            for(int32 I=1;I<E.Path.Num();++I)
+                if(FMath::LineBoxIntersection(Court,E.Path[I-1],E.Path[I],E.Path[I]-E.Path[I-1]))return true;
+            return false;
+        };
+        const auto Open=BuildGraph(L,EERMapArchetype::FireTraining,P);
+        TestTrue(TEXT("fixture has a dogleg through the future base"),Open.Edges.ContainsByPredicate([&](const FERTacticalEdge& E){return E.Path.Num()==3 && CrossesCourt(E);}));
+        L.AlphaSpawns[0].SetLocation({-1000,500,100});L.WarehouseBaseCourts.Add(Court);
+        const auto Bounded=BuildGraph(L,EERMapArchetype::FireTraining,P);
+        TestFalse(TEXT("no guessed connector enters and leaves a bounded base"),Bounded.Edges.ContainsByPredicate(CrossesCourt));
+    }
+    {
+        FERProceduralLayout L;L.AlphaSpawns.Emplace(FVector(0,0,100));L.OmegaSpawns.Emplace(FVector(9000,9000,100));
+        L.WarehouseBaseCourts.Add(FBox(FVector(-10,-10,0),FVector(10,10,300)));
+        // The 40cm offset is outside the court but merges with the first
+        // route's node inside it. Checking only the raw join would allow an exit.
+        L.RoomAccessRoutes={{{0,0,100},{0,-100,100}},{{40,0,100},{40,100,100}},{{400,0,100},{500,0,100}}};
+        FERPlayabilityPolicy P;P.SpawnLinkRadius=0;
+        const auto G=BuildGraph(L,EERMapArchetype::FireTraining,P);
+        TestFalse(TEXT("nearby route endpoint was merged rather than kept as a separate node"),G.Nodes.ContainsByPredicate([](const FERTacticalNode& N){return N.Position.Equals({40,0,100},.1);}));
+        TestTrue(TEXT("merge fixture still has ordinary links outside the base"),G.Edges.ContainsByPredicate([](const FERTacticalEdge& E){return E.Source.Contains(TEXT(".link"));}));
+        for(const auto& E:G.Edges)if(E.Source.Contains(TEXT(".link")))
+            TestEqual(TEXT("node merging cannot introduce a guessed base exit"),G.Nodes[E.A].bBase,G.Nodes[E.B].bBase);
+    }
+    {
+        FERProceduralLayout L;L.AlphaSpawns.Emplace(FVector(-1000,0,100));L.OmegaSpawns.Emplace(FVector(1000,0,100));
+        auto& A=L.RoomNodes.AddDefaulted_GetRef();A.Center={-1000,0,0};A.Base=true;
+        auto& B=L.RoomNodes.AddDefaulted_GetRef();B.Center={1000,0,0};B.Base=true;
+        L.RoomLinks.Add({0,1,{-1000,0,0},{1000,0,0},300,300,0});
+        L.RoomAccessRoutes.Add({{-1000,0,100},{1000,0,100}});
+        L.SpawnZones.AddDefaulted(3);auto& Pocket=L.SpawnZones[2];Pocket.FirstStart=1;Pocket.Team=0;
+        Pocket.Center={-1000,1000,100};Pocket.ExitRoute={{-1000,1000,100},{-1000,500,100}};
+        const auto Joined=BuildGraph(L,EERMapArchetype::Rooms,FERPlayabilityPolicy());
+        TestEqual(TEXT("room floor metadata becomes a pawn-centre node"),Joined.Nodes[0].Position.Z,100.);
+        TestEqual(TEXT("room path contains no artificial descent into the floor"),Joined.Edges[0].Length,2000.f);
+        TestTrue(TEXT("pocket exit inside a room joins its room centre"),PathLength(Joined,{2},{1})>0);
+        // The fallback must not bridge the same gap through a wall.
+        L.RoomShell.Add({{-3000,250,0},{1000,250,0},{1000,250,300},{-3000,250,300}});
+        const auto Blocked=BuildGraph(L,EERMapArchetype::Rooms,FERPlayabilityPolicy());
+        TestEqual(TEXT("room pocket connector fails closed across a wall"),PathLength(Blocked,{2},{1}),-1.f);
+    }
+    {
+        auto G=MakeGraph(2,{{0,1}});
+        G.SetPath(0,{{0,0,0},{0,1000,0},{1000,1000,0},{1000,0,0}});
+        TestEqual(TEXT("bent edge distance follows the walkable polyline"),PathLength(G,{0},{1}),3000.f);
+        FERPlayabilityPolicy P;P.RouteStep=500;P.MaxRouteSamples=10;float Step=0;
+        const auto Forward=SampleRoute(G,{0,1},P,Step),Reverse=SampleRoute(G,{1,0},P,Step);
+        TestEqual(TEXT("all dogleg segments are sampled"),Forward.Num(),7);
+        TestTrue(TEXT("samples go around the corner instead of cutting through the wall"),Forward.Contains(FVector(0,1000,0)) && Forward.Contains(FVector(1000,1000,0)));
+        TestEqual(TEXT("reversing travel preserves sample count"),Reverse.Num(),Forward.Num());
+        for(int32 I=0;I<Forward.Num() && I<Reverse.Num();++I)TestTrue(TEXT("reverse traversal follows the same geometry"),Forward[I].Equals(Reverse[Reverse.Num()-1-I],.01));
+    }
+    {
+        FERTacticalGraph G;G.Symmetry=EERTemplateSymmetry::Mirror;TArray<int32> Candidates;
+        for(double X:{-2000.,0.,2000.})for(double Y:{-1000.,1000.})
+        {auto& N=G.Nodes.AddDefaulted_GetRef();N.Position={X,Y,300};Candidates.Add(G.Nodes.Num()-1);}
+        const auto Selected=SelectObservers(G,Candidates,4);
+        TestEqual(TEXT("observer budget is bounded"),Selected.Num(),4);
+        for(int32 I:Selected)
+        {
+            const auto P=G.Nodes[I].Position;
+            TestTrue(TEXT("the budget never cuts a symmetry pair in half"),Selected.ContainsByPredicate([&](int32 J){return G.Nodes[J].Position.Equals({P.X,-P.Y,P.Z},.01);}));
+        }
+        TArray<int32> Reversed;for(int32 I=Candidates.Num()-1;I>=0;--I)Reversed.Add(Candidates[I]);
+        TestEqual(TEXT("metadata insertion order does not change spatial selection"),SelectObservers(G,Reversed,4),Selected);
+    }
+    {
+        // An L-shaped local approach reaches cover against ground fire. A raised
+        // threat can see over the same wall, so authored cover is not presumed safe.
+        FERProceduralLayout L;L.AlphaSpawns.Emplace(FVector(-2000,0,100));L.OmegaSpawns.Emplace(FVector(2000,0,100));
+        for(const auto& Position:TArray<FVector>{{-2000,0,100},{2000,0,100},{0,1500,100}})
+        {auto& N=L.RoomNodes.AddDefaulted_GetRef();N.Center=Position-FVector(0,0,100);}
+        L.RoomNodes[0].Base=L.RoomNodes[1].Base=true;
+        L.RoomLinks.Add({0,1,{-2000,0,100},{2000,0,100},300,300,0});
+        L.RoomLinks.Add({0,2,{-2000,0,100},{0,1500,100},300,300,0});
+        L.RoomAccessRoutes={{{-2000,0,100},{2000,0,100}},{{-2000,0,100},{0,1500,100}}};
+        FERLayoutFixedPiece Wall;Wall.Material=EERBlockMaterial::Concrete;Wall.Transform=FTransform(FQuat::Identity,{0,500,120},{10,.2,2.4});L.FixedPieces.Add(Wall);
+        FERLayoutCover Cover;Cover.Entry={0,-100,100};Cover.Hide={0,0,100};Cover.SightTo={0,0,177.5};L.CoverSites.Add(Cover);
+        auto* T=NewObject<UERMapTemplate>();T->Archetype=EERMapArchetype::Rooms;FERProceduralConfig C;C.TemplateAsset=T;
+        FERPlayabilityPolicy P;
+        const auto Ground=Analyze(L,C,P);
+        TestTrue(TEXT("flat side routes contribute observers"),Ground.Find(TEXT("ROUTE_EXPOSURE"))->Value(TEXT("observers"))>0);
+        TestTrue(TEXT("ground fire can be escaped using nearby cover"),Ground.Find(TEXT("COVER_ACCESS"))->Value(TEXT("sheltered_samples"))>0);
+        TestTrue(TEXT("sample intervals never exceed the route length"),Ground.Find(TEXT("ROUTE_EXPOSURE"))->Value(TEXT("longest_open_run_m"))<=40.);
+        auto& High=L.RoomNodes.AddDefaulted_GetRef();High.Center={0,1500,400};High.Upper=true;
+        L.RoomLinks.Add({2,3,{0,1500,100},{0,1500,500},300,300,0});L.RoomAccessRoutes.Add({{0,1500,100},{0,1500,500}});
+        const auto Elevated=Analyze(L,C,P);
+        TestTrue(TEXT("raised threats expose the authored hiding site"),Elevated.Find(TEXT("COVER_ACCESS"))->Value(TEXT("sites_exposed_from_height"))>0);
+        TestTrue(TEXT("cover against ground fire is not automatically cover against height"),Elevated.Find(TEXT("COVER_ACCESS"))->Value(TEXT("sheltered_samples"))<Ground.Find(TEXT("COVER_ACCESS"))->Value(TEXT("sheltered_samples")));
+        auto& Hollow=L.Panels.AddDefaulted_GetRef();Hollow.Skin.AddDefaulted(3);Hollow.Size={100,100,100};Hollow.Cell={5,5,5};
+        const auto Unknown=Analyze(L,C,P);
+        TestEqual(TEXT("unknown geometry leaves route exposure undecided"),Unknown.Find(TEXT("ROUTE_EXPOSURE"))->Status,EERPlayabilityStatus::NotEvaluated);
+        L.Panels.Reset();
+        L.CoverSites.Reset();const auto Missing=Analyze(L,C,P);
+        TestEqual(TEXT("missing cover metadata stays unevaluated"),Missing.Find(TEXT("COVER_ACCESS"))->Status,EERPlayabilityStatus::NotEvaluated);
+        TSharedPtr<FJsonObject> Json;const auto Reader=TJsonReaderFactory<>::Create(ToJson(Missing,false));
+        TestTrue(TEXT("partial evaluation is serialized"),FJsonSerializer::Deserialize(Reader,Json) && Json.IsValid());
+        if(Json.IsValid())TestTrue(TEXT("report explicitly marks partial evaluation"),Missing.UnevaluatedMetrics()>0 && !Json->GetBoolField(TEXT("evaluation_complete")));
+    }
+    {
+        // Low cover needs its crouched capsule; a standing capsule at Entry
+        // intersects the real floor. Both approach legs must remain clear.
+        FERProceduralLayout L;L.AlphaSpawns.Emplace(FVector(-2000,0,100));L.OmegaSpawns.Emplace(FVector(2000,0,100));
+        for(const FVector Position:{FVector(-2000,0,0),FVector(2000,0,0),FVector(0,1500,0)})
+        {auto& N=L.RoomNodes.AddDefaulted_GetRef();N.Center=Position;}
+        L.RoomNodes[0].Base=L.RoomNodes[1].Base=true;
+        L.RoomLinks.Add({0,1,{-2000,0,0},{2000,0,0},300,300,0});
+        L.RoomLinks.Add({0,2,{-2000,0,0},{0,1500,0},300,300,0});
+        L.RoomAccessRoutes={{{-2000,0,100},{2000,0,100}},{{-2000,0,100},{0,1500,100}}};
+        auto AddBox=[&](FVector Center,FVector Size)
+        {FERLayoutFixedPiece Piece;Piece.Material=EERBlockMaterial::Concrete;Piece.Transform=FTransform(FQuat::Identity,Center,Size/100);L.FixedPieces.Add(Piece);};
+        AddBox({0,0,-50},{10000,10000,100});AddBox({0,500,120},{1000,20,240});
+        FERLayoutCover Cover;Cover.HalfHeight=62.5;Cover.Entry={0,-300,65};Cover.Hide={0,-600,65};Cover.SightTo={0,-600,115};L.CoverSites.Add(Cover);
+        auto* T=NewObject<UERMapTemplate>();T->Archetype=EERMapArchetype::Rooms;FERProceduralConfig C;C.TemplateAsset=T;
+        const FERPlayabilityPolicy P;
+        auto Report=Analyze(L,C,P);
+        TestTrue(TEXT("layout accepts crouched cover above a solid floor"),Report.Find(TEXT("COVER_ACCESS"))->Value(TEXT("sheltered_samples"))>0);
+        UWorld::InitializationValues Values;Values.AllowAudioPlayback(false).CreateNavigation(false).CreateAISystem(false).CreateFXSystem(false).EnableTraceCollision(true);
+        auto* World=UWorld::CreateWorld(EWorldType::Game,false,NAME_None,nullptr,true,ERHIFeatureLevel::Num,&Values);
+        if(!TestNotNull(TEXT("cover collision world"),World))return false;
+        auto PhysicalBox=[&](const FERLayoutFixedPiece& Piece)
+        {
+            auto* Body=World->SpawnActor<AActor>();auto* Box=NewObject<UBoxComponent>(Body);
+            Body->SetRootComponent(Box);Body->AddInstanceComponent(Box);
+            Box->SetBoxExtent(Piece.Transform.GetScale3D()*50);Box->SetCollisionProfileName(TEXT("BlockAll"));Box->RegisterComponent();
+            Box->SetWorldLocation(Piece.Transform.GetLocation());
+        };
+        for(const auto& Piece:L.FixedPieces)PhysicalBox(Piece);
+        ConfirmInWorld(Report,World,FTransform::Identity,L,P);
+        TestTrue(TEXT("physical crouched approach does not penetrate the floor"),Report.Find(TEXT("COVER_ACCESS"))->Value(TEXT("sheltered_samples"))>0);
+        AddBox({0,-450,100},{1000,20,200});PhysicalBox(L.FixedPieces.Last());
+        Report=Analyze(L,C,P);
+        TestEqual(TEXT("layout rejects a clear entry with an obstructed hiding leg"),Report.Find(TEXT("COVER_ACCESS"))->Value(TEXT("clear_approach_samples")),0.);
+        ConfirmInWorld(Report,World,FTransform::Identity,L,P);
+        TestEqual(TEXT("physics rejects an obstructed entry-to-hide leg"),Report.Find(TEXT("COVER_ACCESS"))->Value(TEXT("clear_approach_samples")),0.);
+        World->DestroyWorld(false);
+    }
+    {
+        // The metric includes node-to-polyline connectors. An obstacle only
+        // on either connector must block that same path in the physical stage.
+        auto G=MakeGraph(2,{{0,1}});G.Nodes[0].Position.Z=G.Nodes[1].Position.Z=100;SetBases(G,0,1);
+        G.SetPath(0,{{200,0,100},{800,0,100}});
+        TestEqual(TEXT("edge distance includes both endpoint connectors"),G.Edges[0].Length,1000.f);
+        UWorld::InitializationValues Values;Values.AllowAudioPlayback(false).CreateNavigation(false).CreateAISystem(false).CreateFXSystem(false).EnableTraceCollision(true);
+        auto* World=UWorld::CreateWorld(EWorldType::Game,false,NAME_None,nullptr,true,ERHIFeatureLevel::Num,&Values);
+        if(!TestNotNull(TEXT("connector collision world"),World))return false;
+        const FERProceduralLayout L;const FERPlayabilityPolicy P;
+        auto Clear=Evaluate(G);ConfirmInWorld(Clear,World,FTransform::Identity,L,P);
+        TestTrue(TEXT("unobstructed complete polyline is physically confirmed"),Clear.Graph.Edges[0].bConfirmed && !Clear.Graph.Edges[0].bBlocked);
+        auto* Body=World->SpawnActor<AActor>();auto* Box=NewObject<UBoxComponent>(Body);
+        Body->SetRootComponent(Box);Body->AddInstanceComponent(Box);
+        Box->SetBoxExtent({5,100,100});Box->SetCollisionProfileName(TEXT("BlockAll"));Box->RegisterComponent();
+        for(double WallX:{100.,900.})
+        {
+            Box->SetWorldLocation({WallX,0,100});
+            FCollisionQueryParams Query;const auto Capsule=FCollisionShape::MakeCapsule(34,88);
+            TestFalse(TEXT("authored interior polyline stays clear in connector fixture"),World->SweepTestByChannel({200,0,100},{800,0,100},FQuat::Identity,ECC_Pawn,Capsule,Query));
+            auto Blocked=Evaluate(G);ConfirmInWorld(Blocked,World,FTransform::Identity,L,P);
+            TestTrue(TEXT("obstacle confined to a connector blocks the measured edge"),Blocked.Graph.Edges[0].bBlocked && !Blocked.Graph.Edges[0].bConfirmed);
+        }
+        World->DestroyWorld(false);
+    }
+    return !HasAnyErrors();
+}
+
 // Layout stage on real recipes. -ERPlayabilityTeams= and -ERPlayabilitySeeds= size the batch;
 // -ERPlayabilityReports keeps one JSON per plan beside the summary CSV.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERPlayabilityReportTest,"EclipseRecoil.Maps.Playability.Reports",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
@@ -239,12 +451,17 @@ bool FERPlayabilityReportTest::RunTest(const FString&)
                 // Ladders onto cargo tops are dead ends, far from any recorded warehouse route.
                 const auto* Reach=Report.Find(TEXT("CONNECTED_ZONES"));
                 if(T->Archetype==EERMapArchetype::Rooms)TestEqual(*(Case+TEXT(": every room connects")),Reach->Value(TEXT("isolated_nodes")),0.);
-                for(const auto& V:Reach->Violations)for(int32 Node:V.Nodes)TestTrue(*(Case+TEXT(": only cargo ladders stay apart")),Report.Graph.Nodes[Node].Source.StartsWith(TEXT("ladder")));
+                const auto Components=ERPlayability::Components(Report.Graph);TSet<int32> BaseComponents;
+                for(int32 I=0;I<Report.Graph.Nodes.Num();++I)if(Report.Graph.Nodes[I].bBase)BaseComponents.Add(Components[I]);
+                for(int32 I=0;I<Report.Graph.Nodes.Num();++I)if(!BaseComponents.Contains(Components[I]))
+                    TestTrue(*(Case+TEXT(": only cargo ladders stay apart")),Report.Graph.Nodes[I].Source.StartsWith(TEXT("ladder")));
                 TestNotEqual(*(Case+TEXT(": exits evaluated")),X->Status,EERPlayabilityStatus::NotEvaluated);
                 TestTrue(*(Case+TEXT(": crossing distance measured")),Report.Find(TEXT("CONNECTED_ZONES"))->Value(TEXT("base_to_base_m"))>0);
                 TestEqual(*(Case+TEXT(": half-turn exits match")),X->Value(TEXT("alpha_exits")),X->Value(TEXT("omega_exits")));
                 TestEqual(*(Case+TEXT(": half-turn paths match")),X->Value(TEXT("alpha_independent_paths")),X->Value(TEXT("omega_independent_paths")));
             }
+            if(T->Archetype==EERMapArchetype::Village && Team==8 && Seed==42)
+                TestTrue(*(Case+TEXT(": flat-floor graph joins both bases")),Report.Find(TEXT("CONNECTED_ZONES"))->Value(TEXT("base_to_base_m"))>0);
             Csv+=CsvRow(Report);
             UE_LOG(LogTemp,Display,TEXT("ER_MAP_PLAYABILITY %s"),*ERPlayability::Summary(Report));
             if(Keep)ERPlayability::Save(Report,OutputDirectory());
@@ -286,6 +503,17 @@ bool FERPlayabilityPhysicsTest::RunTest(const FString&)
                 // Layout solids are real collision: they can miss cover, never invent it.
                 TestTrue(*(Case+TEXT(": layout sight is not stricter than collision")),Sight->Value(TEXT("visible_pairs"))<=LayoutVisible);
                 TestEqual(*(Case+TEXT(": no walking edge is left unconfirmed")),Report.Find(TEXT("CONNECTED_ZONES"))->Value(TEXT("edges_unconfirmed")),0.);
+                if(T->Archetype==EERMapArchetype::Rooms)
+                    TestEqual(*(Case+TEXT(": every room remains connected after collision")),Report.Find(TEXT("CONNECTED_ZONES"))->Value(TEXT("isolated_nodes")),0.);
+                if(T->Archetype==EERMapArchetype::FireTraining)
+                {
+                    const auto Components=ERPlayability::Components(Report.Graph);TSet<int32> BaseComponents;
+                    for(int32 I=0;I<Report.Graph.Nodes.Num();++I)if(Report.Graph.Nodes[I].bBase)BaseComponents.Add(Components[I]);
+                    for(int32 I=0;I<Report.Graph.Nodes.Num();++I)if(!BaseComponents.Contains(Components[I]))
+                        TestTrue(*(Case+TEXT(": collision leaves only cargo ladders apart")),Report.Graph.Nodes[I].Source.StartsWith(TEXT("ladder")));
+                }
+                if(T->Archetype==EERMapArchetype::Village && Team==8 && Seed==42)
+                    TestTrue(*(Case+TEXT(": flat-floor graph joins both bases after collision")),Report.Find(TEXT("CONNECTED_ZONES"))->Value(TEXT("base_to_base_m"))>0);
                 Csv+=CsvRow(Report);
                 UE_LOG(LogTemp,Display,TEXT("ER_MAP_PLAYABILITY %s"),*ERPlayability::Summary(Report));
                 UE_LOG(LogTemp,Display,TEXT("ER_MAP_PLAYABILITY_DIGEST template=%s team=%d seed=%d digest=%u"),Id,Team,Seed,Map->GetLayoutDigest());

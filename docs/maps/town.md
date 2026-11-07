@@ -10,7 +10,9 @@ half, with paired closed service buildings that split the corner courts into
 staggered lanes. Larger layouts add more parcels. A bent covered passage joins the wings,
 with outdoor courts in their recesses. Doors sit on different axes and deeper
 wings add a third room, creating successive turns through the complex. Screened
-spawn pockets sit at opposite ends of the ring.
+spawn pockets sit at opposite ends of the ring. Each primary bank reserves two dogleg exits around
+its screen. The perimeter bypass is 2.4m wide, leaving space for opposing standing player traffic;
+the other bypass reaches the transverse street independently. Initial spawn occlusion remains mandatory.
 
 All initial circulation stays on the ground, with 12cm pavement thresholds. One to
 three storeys give the blocks height and overhead shelter; upper facades and concrete

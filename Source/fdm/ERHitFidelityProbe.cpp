@@ -21,23 +21,23 @@
 #include "StaticMeshResources.h"
 namespace
 {
-constexpr float Cell=2.f;
-constexpr int32 Width=170,Height=120;
-const int32 Skins[]={0,3,5,10,15};
-const int32 Slots[]={0,4,6};
-constexpr int32 SkinCount=UE_ARRAY_COUNT(Skins),SlotCount=UE_ARRAY_COUNT(Slots),PostureCount=3;
+constexpr float HitProbeCellSize=2.f;
+constexpr int32 HitProbeWidth=170,HitProbeHeight=120;
+const int32 HitProbeSkins[]={0,3,5,10,15};
+const int32 HitProbeSlots[]={0,4,6};
+constexpr int32 HitProbeSkinCount=UE_ARRAY_COUNT(HitProbeSkins),HitProbeSlotCount=UE_ARRAY_COUNT(HitProbeSlots),HitProbePostureCount=3;
 // The last skin rows repeat the rifle stance while running.
-constexpr int32 Still=SkinCount*SlotCount*PostureCount,Total=Still+SkinCount;
+constexpr int32 HitProbeStillCount=HitProbeSkinCount*HitProbeSlotCount*HitProbePostureCount,HitProbeSampleCount=HitProbeStillCount+HitProbeSkinCount;
 bool LagMode(){return FParse::Param(FCommandLine::Get(),TEXT("ERHitLagProbe"));}
-int32 SkinOf(int32 Sample){return Sample>=Still ? Skins[Sample-Still]:Skins[Sample/(SlotCount*PostureCount)];}
-int32 SlotOf(int32 Sample){return Sample>=Still ? 4:Slots[(Sample/PostureCount)%SlotCount];}
-int32 PostureOf(int32 Sample){return Sample>=Still ? 0:Sample%PostureCount;}
+int32 SkinOf(int32 Sample){return Sample>=HitProbeStillCount ? HitProbeSkins[Sample-HitProbeStillCount]:HitProbeSkins[Sample/(HitProbeSlotCount*HitProbePostureCount)];}
+int32 SlotOf(int32 Sample){return Sample>=HitProbeStillCount ? 4:HitProbeSlots[(Sample/HitProbePostureCount)%HitProbeSlotCount];}
+int32 PostureOf(int32 Sample){return Sample>=HitProbeStillCount ? 0:Sample%HitProbePostureCount;}
 const TCHAR* PostureName(int32 Posture){return Posture==2 ? TEXT("prone"):Posture==1 ? TEXT("crouch"):TEXT("stand");}
 void Dilate(TArray<bool>& Mask)
 {
     const TArray<bool> Old=Mask;
-    for(int32 Y=1;Y<Height-1;++Y)for(int32 X=1;X<Width-1;++X)
-        if(Old[Y*Width+X-1] || Old[Y*Width+X+1] || Old[(Y-1)*Width+X] || Old[(Y+1)*Width+X])Mask[Y*Width+X]=true;
+    for(int32 Y=1;Y<HitProbeHeight-1;++Y)for(int32 X=1;X<HitProbeWidth-1;++X)
+        if(Old[Y*HitProbeWidth+X-1] || Old[Y*HitProbeWidth+X+1] || Old[(Y-1)*HitProbeWidth+X] || Old[(Y+1)*HitProbeWidth+X])Mask[Y*HitProbeWidth+X]=true;
 }
 }
 AERHitFidelityProbe::AERHitFidelityProbe()
@@ -52,7 +52,7 @@ void AERHitFidelityProbe::BeginPlay()
     Super::BeginPlay();
     if(LagMode() && GetWorld()->GetFirstPlayerController())AddTickPrerequisiteActor(GetWorld()->GetFirstPlayerController());
 }
-bool AERHitFidelityProbe::Moving() const {return Sample>=Still;}
+bool AERHitFidelityProbe::Moving() const {return Sample>=HitProbeStillCount;}
 void AERHitFidelityProbe::Tick(float Delta)
 {
     Super::Tick(Delta);Age+=Delta;
@@ -88,9 +88,9 @@ void AERHitFidelityProbe::TickFidelity()
     }
     if(Age-Changed<(PostureOf(Sample)==2 ? 2.5f:1.6f))return;
     Measure();
-    if(++Sample>=Total)
+    if(++Sample>=HitProbeSampleCount)
     {
-        UE_LOG(LogTemp,Display,TEXT("ER_HIT_FIDELITY_COMPLETE samples=%d"),Total);
+        UE_LOG(LogTemp,Display,TEXT("ER_HIT_FIDELITY_COMPLETE samples=%d"),HitProbeSampleCount);
         FPlatformMisc::RequestExitWithStatus(false,0);return;
     }
     Configure();
@@ -178,7 +178,7 @@ void AERHitFidelityProbe::Measure()
             FTransform Transform=Instance && Instance->IsValidBodyInstance() ? Instance->GetUnrealWorldTransform():FTransform::Identity;
             Transform.AddToTranslation(FVector(0,300,0));Old.Bodies.Add(Transform);
         }
-        Synthetic.Frames.Add(Old);
+        Synthetic.Append(Old.Time)=Old;
         const FVector Original=Body->Bodies[0]->GetUnrealWorldTransform().GetLocation();
         const FVector Center=Original+FVector(0,300,0);
         FHitResult HistoricalHit,CurrentHit,ShortHit;
@@ -189,7 +189,10 @@ void AERHitFidelityProbe::Measure()
         const FVector OldContact=HistoricalHit.ImpactPoint;
         Synthetic.ProjectToCurrent(Body,HistoricalHit,1);
         const bool Wound=HistoricalHit.ImpactPoint.Equals(OldContact-FVector(0,300,0),.001);
-        const bool Valid=Rewound && !Current && !Short && Unchanged && Wound && HistoricalHit.BoneName!=NAME_None;
+        TArray<FTransform> Prepared;Synthetic.Sample(1,Prepared);FHitResult CachedHit;
+        const bool Cached=Synthetic.TracePose(Body,CachedHit,Center-FVector(500,0,0),Center+FVector(500,0,0),Query,&Prepared,0);
+        const bool Equivalent=Cached && CachedHit.ImpactPoint.Equals(OldContact,.001) && CachedHit.BoneName==HistoricalHit.BoneName;
+        const bool Valid=Rewound && !Current && !Short && Unchanged && Wound && Equivalent && HistoricalHit.BoneName!=NAME_None;
         UE_LOG(LogTemp,Display,TEXT("ER_HIT_HISTORY_QUERY result=%s rewound=%d current=%d short=%d unchanged=%d wound=%d bone=%s"),
             Valid ? TEXT("PASS"):TEXT("FAIL"),Rewound,Current,Short,Unchanged,Wound,*HistoricalHit.BoneName.ToString());
         if(!Valid){FPlatformMisc::RequestExitWithStatus(false,1);return;}
@@ -207,15 +210,15 @@ void AERHitFidelityProbe::MeasureView(const TArray<FVector>& World,const TArray<
 {
     auto* Body=Subject->GetMesh();
     const FVector Along=FVector::CrossProduct(Across,FVector::UpVector);
-    const auto ToGrid=[&](const FVector& P){return FVector2D((FVector::DotProduct(P-Feet,Across)+Width*Cell*.5)/Cell,((P-Feet).Z+20)/Cell);};
-    const auto Index=[](int32 X,int32 Y){return Y*Width+X;};
-    TArray<bool> Visible,Hit;Visible.SetNumZeroed(Width*Height);Hit.SetNumZeroed(Width*Height);
+    const auto ToGrid=[&](const FVector& P){return FVector2D((FVector::DotProduct(P-Feet,Across)+HitProbeWidth*HitProbeCellSize*.5)/HitProbeCellSize,((P-Feet).Z+20)/HitProbeCellSize);};
+    const auto Index=[](int32 X,int32 Y){return Y*HitProbeWidth+X;};
+    TArray<bool> Visible,Hit;Visible.SetNumZeroed(HitProbeWidth*HitProbeHeight);Hit.SetNumZeroed(HitProbeWidth*HitProbeHeight);
     for(int32 T=0;T<Triangles.Num();T+=3)
     {
         const FVector2D A=ToGrid(World[Triangles[T]]),B=ToGrid(World[Triangles[T+1]]),C=ToGrid(World[Triangles[T+2]]);
         const double Area=(B.X-A.X)*(C.Y-A.Y)-(B.Y-A.Y)*(C.X-A.X);if(FMath::IsNearlyZero(Area))continue;
-        const int32 X0=FMath::Max(0,FMath::FloorToInt32(FMath::Min3(A.X,B.X,C.X))),X1=FMath::Min(Width-1,FMath::CeilToInt32(FMath::Max3(A.X,B.X,C.X)));
-        const int32 Y0=FMath::Max(0,FMath::FloorToInt32(FMath::Min3(A.Y,B.Y,C.Y))),Y1=FMath::Min(Height-1,FMath::CeilToInt32(FMath::Max3(A.Y,B.Y,C.Y)));
+        const int32 X0=FMath::Max(0,FMath::FloorToInt32(FMath::Min3(A.X,B.X,C.X))),X1=FMath::Min(HitProbeWidth-1,FMath::CeilToInt32(FMath::Max3(A.X,B.X,C.X)));
+        const int32 Y0=FMath::Max(0,FMath::FloorToInt32(FMath::Min3(A.Y,B.Y,C.Y))),Y1=FMath::Min(HitProbeHeight-1,FMath::CeilToInt32(FMath::Max3(A.Y,B.Y,C.Y)));
         for(int32 Y=Y0;Y<=Y1;++Y)for(int32 X=X0;X<=X1;++X)
         {
             const double PX=X+.5,PY=Y+.5;
@@ -226,15 +229,15 @@ void AERHitFidelityProbe::MeasureView(const TArray<FVector>& World,const TArray<
     int32 Both=0,VisibleOnly=0,HitOnly=0,FeetVisible=0,FeetMissed=0;
     int32 Margin3Missed=0,Margin3Phantom=0,Margin5Missed=0,Margin5Phantom=0;
     FCollisionQueryParams Query(SCENE_QUERY_STAT(ERHitFidelityRay),false);
-    for(int32 Y=0;Y<Height;++Y)for(int32 X=0;X<Width;++X)
+    for(int32 Y=0;Y<HitProbeHeight;++Y)for(int32 X=0;X<HitProbeWidth;++X)
     {
-        const FVector Point=Feet+Across*((X+.5)*Cell-Width*Cell*.5)+FVector(0,0,(Y+.5)*Cell-20);
+        const FVector Point=Feet+Across*((X+.5)*HitProbeCellSize-HitProbeWidth*HitProbeCellSize*.5)+FVector(0,0,(Y+.5)*HitProbeCellSize-20);
         FHitResult Ray;
         Hit[Index(X,Y)]=CastChecked<UERPostureMesh>(Body)->ShotHistory.Trace(Body,Ray,Point+Along*500,Point-Along*500,Query,
             GetWorld()->GetTimeSeconds(),FERShotHistory::EdgeTolerance);
         const bool V=Visible[Index(X,Y)],H=Hit[Index(X,Y)];
         Both+=V && H;VisibleOnly+=V && !H;HitOnly+=H && !V;
-        if(V && Y*Cell-20<20){++FeetVisible;FeetMissed+=!H;}
+        if(V && Y*HitProbeCellSize-20<20){++FeetVisible;FeetMissed+=!H;}
         FHitResult Sweep;
         const bool Near3=H || Body->SweepComponent(Sweep,Point+Along*500,Point-Along*500,FQuat::Identity,FCollisionShape::MakeSphere(3.f));
         const bool Near5=Near3 || Body->SweepComponent(Sweep,Point+Along*500,Point-Along*500,FQuat::Identity,FCollisionShape::MakeSphere(5.f));
@@ -244,7 +247,7 @@ void AERHitFidelityProbe::MeasureView(const TArray<FVector>& World,const TArray<
     TArray<bool> NearHit=Hit,NearVisible=Visible;
     for(int32 I=0;I<3;++I){Dilate(NearHit);Dilate(NearVisible);}
     int32 DeepMiss=0,DeepPhantom=0;
-    for(int32 I=0;I<Width*Height;++I){DeepMiss+=Visible[I] && !NearHit[I];DeepPhantom+=Hit[I] && !NearVisible[I];}
+    for(int32 I=0;I<HitProbeWidth*HitProbeHeight;++I){DeepMiss+=Visible[I] && !NearHit[I];DeepPhantom+=Hit[I] && !NearVisible[I];}
     const int32 Shown=FMath::Max(1,Both+VisibleOnly);
     const int32 Hits=FMath::Max(1,Both+HitOnly);
     UE_LOG(LogTemp,Display,TEXT("ER_HIT_FIDELITY_VIEW sample=%d skin=%d slot=%d posture=%s moving=%d view=%s visible_cells=%d hit_cells=%d missed_pct=%.1f phantom_pct=%.1f deep_miss_pct=%.1f deep_phantom_pct=%.1f feet_visible=%d feet_missed_pct=%.1f margin3_missed=%.1f margin3_phantom=%.1f margin5_missed=%.1f margin5_phantom=%.1f"),
@@ -252,15 +255,15 @@ void AERHitFidelityProbe::MeasureView(const TArray<FVector>& World,const TArray<
         100.f*VisibleOnly/Shown,100.f*HitOnly/Hits,100.f*DeepMiss/Shown,100.f*DeepPhantom/Hits,FeetVisible,100.f*FeetMissed/FMath::Max(1,FeetVisible),
         100.f*Margin3Missed/Shown,100.f*Margin3Phantom/Shown,100.f*Margin5Missed/Shown,100.f*Margin5Phantom/Shown);
     if(!bImage)return;
-    TArray<FColor> Pixels;Pixels.SetNumUninitialized(Width*Height);
-    for(int32 Y=0;Y<Height;++Y)for(int32 X=0;X<Width;++X)
+    TArray<FColor> Pixels;Pixels.SetNumUninitialized(HitProbeWidth*HitProbeHeight);
+    for(int32 Y=0;Y<HitProbeHeight;++Y)for(int32 X=0;X<HitProbeWidth;++X)
     {
-        const bool V=Visible[Index(X,Height-1-Y)],H=Hit[Index(X,Height-1-Y)];
+        const bool V=Visible[Index(X,HitProbeHeight-1-Y)],H=Hit[Index(X,HitProbeHeight-1-Y)];
         Pixels[Index(X,Y)]=V && H ? FColor(150,150,150):V ? FColor(230,60,50):H ? FColor(40,110,240):FColor(250,250,250);
     }
     const FString Path=FPaths::ProjectSavedDir()/FString::Printf(TEXT("Testing/HitFidelity/skin%02d-%s-%s-%s.bmp"),SkinOf(Sample),PostureName(PostureOf(Sample)),Moving() ? TEXT("moving"):TEXT("still"),ViewName);
     IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path),true);
-    FFileHelper::CreateBitmap(*Path,Width,Height,Pixels.GetData());
+    FFileHelper::CreateBitmap(*Path,HitProbeWidth,HitProbeHeight,Pixels.GetData());
 }
 void AERHitFidelityProbe::TickLagHost()
 {
@@ -271,7 +274,8 @@ void AERHitFidelityProbe::TickLagHost()
         Subject=PC ? Cast<AERCharacter>(PC->GetPawn()):nullptr;
         if(Players<2 || !Subject || Age<5)return;
         for(TActorIterator<AERCharacter> It(GetWorld());It;++It)if(*It!=Subject)Shooter=*It;
-        if(!Shooter)return;
+        const auto* State=GetWorld()->GetGameState<AERGameState>();
+        if(!Shooter || !Subject->bNetworkReady || !Shooter->bNetworkReady || !State || !State->IsMatchInProgress())return;
         Shooter->ServerSelectWeapon(4);
         Ready=true;Changed=Age;return;
     }
@@ -288,7 +292,10 @@ void AERHitFidelityProbe::TickLagClient()
 {
     auto* PC=GetWorld()->GetFirstPlayerController();
     auto* Me=PC ? Cast<AERCharacter>(PC->GetPawn()):nullptr;
-    if(!Me || !Me->Weapon || Age<9)return;
+    const auto* State=GetWorld()->GetGameState<AERGameState>();
+    if(!Me || !Me->bNetworkReady || !Me->Weapon || !Me->Weapon->Data ||
+        Me->Weapon->Data->Payload!=EERPayload::Bullet || !State || !State->IsMatchInProgress() || Age<9)return;
+    if(FParse::Param(FCommandLine::Get(),TEXT("ERFireInputProbe")) && !Me->Weapon->Tuned()->bAutomatic)return;
     if(!Ready)
     {
         for(TActorIterator<AERCharacter> It(GetWorld());It;++It)if(*It!=Me)Subject=*It;
@@ -296,6 +303,7 @@ void AERHitFidelityProbe::TickLagClient()
         Me->GetCharacterMovement()->PrimaryComponentTick.AddPrerequisite(this,PrimaryActorTick);
         Ready=true;NextShot=Age+1;
     }
+    if(FParse::Param(FCommandLine::Get(),TEXT("ERFireInputProbe"))){TickFireInputClient(Me);return;}
     // Steady tracking: a real shooter's view keeps turning while the trigger breaks.
     const float Rate=120.f;
     FRotator View=PC->GetControlRotation();View.Pitch=0;View.Yaw=FRotator::NormalizeAxis(View.Yaw+Rate*GetWorld()->GetDeltaSeconds());
@@ -304,6 +312,49 @@ void AERHitFidelityProbe::TickLagClient()
     NextShot=Age+.75f;
     const FVector Seen=Subject->GetMesh()->GetBoneLocation(TEXT("spine_03"));
     UE_LOG(LogTemp,Display,TEXT("ER_HIT_LAG_CLIENT shot=%d target=%s yaw=%.3f dt=%.4f"),Shots++,*Seen.ToCompactString(),View.Yaw,GetWorld()->GetDeltaSeconds());
-    CastChecked<UERMovement>(Me->GetCharacterMovement())->SendMoveThisFrame();
-    Me->ServerStartFire();Me->ServerStopFire();
+    Me->SetFireInputHeld(true);Me->SetFireInputHeld(false);
+}
+void AERHitFidelityProbe::TickFireInputClient(AERCharacter* Me)
+{
+    if(FireInputPhase>=6 || Age<NextShot)return;
+    auto Check=[this](bool Pass,const TCHAR* Label)
+    {
+        FireInputFailed|=!Pass;
+        UE_LOG(LogTemp,Display,TEXT("ER_FIRE_INPUT_%s %s"),Pass?TEXT("PASS"):TEXT("FAIL"),Label);
+    };
+    const auto& Ack=Me->FireAcknowledgement;
+    switch(FireInputPhase)
+    {
+    case 0:
+    {
+        // Shoot away from the moving target: this probe checks transport and
+        // presentation, without a death/respawn obscuring release ordering.
+        Me->GetController()->SetControlRotation(FRotator(70,0,0));
+        const int32 Ammo=Me->Weapon->MagazineAmmo;
+        const uint32 Presented=Me->PredictedShotFeedbackCount;
+        Me->SetFireInputHeld(true);
+        FireInputSequence=CastChecked<UERMovement>(Me->GetCharacterMovement())->FireInput.Sequence;
+        Check(Me->PredictedShotFeedbackCount==Presented+1,TEXT("immediate_owner_feedback_before_ack"));
+        Check(Me->Weapon->MagazineAmmo==Ammo,TEXT("prediction_never_mutates_ammo"));
+        NextShot=Age+.7f;break;
+    }
+    case 1:
+        Me->SetFireInputHeld(false);NextShot=Age+1.5f;break;
+    case 2:
+        Check(Ack.Sequence==FireInputSequence && !Ack.Firing && Ack.ShotOrdinal>=2,TEXT("automatic_burst_and_release_recovered"));
+        ReleasedShotCount=Ack.ShotOrdinal;NextShot=Age+1;break;
+    case 3:
+        Check(Ack.Sequence==FireInputSequence && !Ack.Firing && Ack.ShotOrdinal==ReleasedShotCount,TEXT("release_does_not_restart_on_later_moves"));
+        Me->SetFireInputHeld(true);Me->SetFireInputHeld(false);
+        FireInputSequence=CastChecked<UERMovement>(Me->GetCharacterMovement())->FireInput.Sequence;
+        NextShot=Age+1.5f;break;
+    case 4:
+        Check(Ack.Sequence==FireInputSequence && !Ack.Firing && Ack.ShotOrdinal==1,TEXT("same_frame_tap_is_exactly_one_shot"));
+        NextShot=Age+1;break;
+    case 5:
+        Check(Ack.Sequence==FireInputSequence && !Ack.Firing && Ack.ShotOrdinal==1,TEXT("tap_retransmission_is_idempotent"));
+        UE_LOG(LogTemp,Display,TEXT("ER_FIRE_INPUT_COMPLETE result=%s"),FireInputFailed?TEXT("FAIL"):TEXT("PASS"));
+        break;
+    }
+    ++FireInputPhase;
 }

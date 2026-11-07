@@ -50,13 +50,14 @@ FERMapSelectionProfile ERMapSelection::ProfileFor(EERMapArchetype Archetype,int3
 void ERMapSelection::Judge(FERMapCandidate& C,const FERPlayabilityReport& R,const FERMapSelectionProfile& P)
 {
     auto Value=[&](const TCHAR* Code,const TCHAR* Name,double Default=0){const auto* M=R.Find(Code);return M ? M->Value(Name,Default):Default;};
+    auto Measured=[&](const TCHAR* Code){const auto* M=R.Find(Code);return M && M->Status!=EERPlayabilityStatus::NotEvaluated;};
     const auto* Whole=R.Find(TEXT("CONNECTED_ZONES"));
     const auto* Sight=R.Find(TEXT("INITIAL_SPAWN_LOS"));
     C.Paths=int32(FMath::Min(Value(TEXT("BASE_EXIT_PATHS"),TEXT("alpha_independent_paths")),Value(TEXT("BASE_EXIT_PATHS"),TEXT("omega_independent_paths"))));
     C.VisiblePairs=int32(Value(TEXT("INITIAL_SPAWN_LOS"),TEXT("visible_pairs")));
     C.UnknownSolids=int32(Value(TEXT("INITIAL_SPAWN_LOS"),TEXT("unknown_solids")));
     C.LateralRatio=Value(TEXT("ROUTE_DIVERSITY"),TEXT("lateral_ratio"),-1);
-    C.OpenShare=Value(TEXT("ROUTE_EXPOSURE"),TEXT("open_share"));
+    C.OpenShare=Value(TEXT("ROUTE_EXPOSURE"),TEXT("open_share"),-1);
     C.Rejected.Reset();C.Preference=0;
     if(P.bRequireWholeGraph && R.Graph.Coverage==EERGraphCoverage::Exact && (!Whole || Whole->Status==EERPlayabilityStatus::Fail))C.Rejected.Add(TEXT("split_graph"));
     if(P.MinPaths>0 && C.Paths<P.MinPaths)C.Rejected.Add(FString::Printf(TEXT("paths_%d"),C.Paths));
@@ -64,7 +65,10 @@ void ERMapSelection::Judge(FERMapCandidate& C,const FERPlayabilityReport& R,cons
     if(P.bForbidSpawnSight && (!Sight || C.VisiblePairs>0 || Sight->Value(TEXT("open_shot_pairs"),0)>0))C.Rejected.Add(FString::Printf(TEXT("spawn_sight_%d"),C.VisiblePairs));
     // Sight outweighs the rest together: no line on the layout means no line in real collision.
     constexpr int32 SightWeight=4;
-    C.Preference=SightWeight*int32(P.SpawnSight.Contains(C.VisiblePairs))+int32(P.Paths.Contains(C.Paths))+int32(P.LateralRatio.Contains(C.LateralRatio))+int32(P.OpenShare.Contains(C.OpenShare));
+    C.Preference=SightWeight*int32(Measured(TEXT("INITIAL_SPAWN_LOS")) && P.SpawnSight.Contains(C.VisiblePairs))+
+        int32(Measured(TEXT("BASE_EXIT_PATHS")) && P.Paths.Contains(C.Paths))+
+        int32(Measured(TEXT("ROUTE_DIVERSITY")) && P.LateralRatio.Contains(C.LateralRatio))+
+        int32(Measured(TEXT("ROUTE_EXPOSURE")) && P.OpenShare.Contains(C.OpenShare));
 }
 
 int32 ERMapSelection::Decide(const TArray<FERMapCandidate>& Candidates,int32 Seed,bool& bFallback)

@@ -325,6 +325,9 @@ struct FERMapTemplatePiece
     // Fixed industrial art is fitted to Size; the authored box owns collision.
     // Destructible geometry always uses the project's block mesh/catalog.
     UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<class UStaticMesh> FixedMesh;
+    // Native permanent foundations keep their fixed collision even when their
+    // finish is shared with architecture eligible for cell conversion.
+    bool bPermanentArchitecture=false;
 };
 
 UCLASS(BlueprintType)

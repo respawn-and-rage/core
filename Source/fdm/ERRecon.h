@@ -3,6 +3,7 @@
 #include "Components/ActorComponent.h"
 #include "GameFramework/Actor.h"
 #include "ERMatch.h"
+#include "ERMinimapGeometry.h"
 #include "ERRecon.generated.h"
 
 namespace ERRecon
@@ -171,6 +172,7 @@ private:
     FVector LastBreakPosition = FVector::ZeroVector;
     int32 LastDrawnEnemies = 0;
     double LastHUDSample = -1;
+    FERMinimapFog MinimapFog;
     UPROPERTY(Transient) TArray<TObjectPtr<class UDecalComponent>> Graffiti;
     uint32 GraffitiEpoch = 0;
     void DecorateBases();

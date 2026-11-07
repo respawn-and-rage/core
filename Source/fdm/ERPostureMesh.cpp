@@ -8,41 +8,80 @@
 #include "Math/RotationMatrix.h"
 #include "ERMatch.h"
 #include "Camera/CameraComponent.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
-namespace
+void FERPostureRigCache::Initialize(const FReferenceSkeleton& Ref)
 {
-bool Descendant(const FReferenceSkeleton& Ref,int32 Bone,int32 Root)
-{for(int32 I=Bone;I!=INDEX_NONE;I=Ref.GetParentIndex(I))if(I==Root)return true;return false;}
-void RotateBranch(const FReferenceSkeleton& Ref,TArray<FTransform>& Pose,const TCHAR* RootName,FQuat Rotation)
+    const int32 Count=Ref.GetNum();
+    BoneIndices.Reset();ParentIndices.SetNum(Count);TraversalOrder.SetNum(Count);SubtreeEnd.SetNum(Count);ReferenceComponentPose.SetNum(Count);
+    TArray<TArray<int32>> ChildBones;ChildBones.SetNum(Count);
+    for(int32 Bone=0;Bone<Count;++Bone)
+    {
+        BoneIndices.Add(Ref.GetBoneName(Bone),Bone);ParentIndices[Bone]=Ref.GetParentIndex(Bone);
+        const int32 Parent=ParentIndices[Bone];
+        if(Parent!=INDEX_NONE)ChildBones[Parent].Add(Bone);
+        ReferenceComponentPose[Bone]=Parent==INDEX_NONE ? Ref.GetRefBonePose()[Bone]:Ref.GetRefBonePose()[Bone]*ReferenceComponentPose[Parent];
+    }
+    // DFS intervals make ancestry queries constant time without an N-squared
+    // table or assuming that sibling branches occupy consecutive bone indices.
+    int32 NextOrder=0;
+    auto Visit=[&](auto&& Self,int32 Bone)->void
+    {
+        TraversalOrder[Bone]=NextOrder++;
+        for(int32 Child:ChildBones[Bone])Self(Self,Child);
+        SubtreeEnd[Bone]=NextOrder;
+    };
+    for(int32 Bone=0;Bone<Count;++Bone)if(ParentIndices[Bone]==INDEX_NONE)Visit(Visit,Bone);
+}
+
+void UERPostureMesh::RefreshRigCache()
+{
+    auto* RigMesh=GetSkeletalMeshAsset();
+    if(!RigMesh || (CachedRigMesh.Get()==RigMesh && RigCache.ParentIndices.Num()==RigMesh->GetRefSkeleton().GetNum()))return;
+    CachedRigMesh=RigMesh;RigCache.Initialize(RigMesh->GetRefSkeleton());
+    CachedKneeOffset=CachedToeOffset=0;CachedPelvisDepth=4;CachedContactsLeft=CachedContactsRight=FVector::ZeroVector;
+    const FString MeshPath=RigMesh->GetPathName();
+    GConfig->GetFloat(TEXT("RespawnAndRage.KneelingKnee"),*MeshPath,CachedKneeOffset,GGameIni);
+    GConfig->GetFloat(TEXT("RespawnAndRage.KneelingToe"),*MeshPath,CachedToeOffset,GGameIni);
+    GConfig->GetVector(TEXT("RespawnAndRage.ProneContactsLeft"),*MeshPath,CachedContactsLeft,GGameIni);
+    GConfig->GetVector(TEXT("RespawnAndRage.ProneContactsRight"),*MeshPath,CachedContactsRight,GGameIni);
+    GConfig->GetFloat(TEXT("RespawnAndRage.PronePelvisDepth"),*MeshPath,CachedPelvisDepth,GGameIni);
+}
+
+void ERPosturePose::RotateBranch(const FERPostureRigCache& Ref,TArray<FTransform>& Pose,const TCHAR* RootName,FQuat Rotation)
 {
     const int32 Root=Ref.FindBoneIndex(RootName);if(!Pose.IsValidIndex(Root))return;
-    const TArray<FTransform> Old=Pose;const FVector Pivot=Old[Root].GetLocation();
-    for(int32 I=0;I<Pose.Num();++I)if(Descendant(Ref,I,Root))
+    const FVector Pivot=Pose[Root].GetLocation();
+    for(int32 I=0;I<Pose.Num();++I)if(Ref.InSubtree(I,Root))
     {
-        Pose[I].SetLocation(Pivot+Rotation.RotateVector(Old[I].GetLocation()-Pivot));
-        Pose[I].SetRotation(Rotation*Old[I].GetRotation());
+        Pose[I].SetLocation(Pivot+Rotation.RotateVector(Pose[I].GetLocation()-Pivot));
+        Pose[I].SetRotation(Rotation*Pose[I].GetRotation());
     }
 }
-void FitLimb(const FReferenceSkeleton& Ref,TArray<FTransform>& Pose,const TCHAR* UpperName,const TCHAR* LowerName,const TCHAR* HandName,FVector Target,FQuat Rotation,FVector Pole)
+void ERPosturePose::FitLimb(const FERPostureRigCache& Ref,TArray<FTransform>& Pose,const TCHAR* UpperName,const TCHAR* LowerName,const TCHAR* HandName,FVector Target,FQuat Rotation,FVector Pole)
 {
     const int32 Upper=Ref.FindBoneIndex(UpperName),Lower=Ref.FindBoneIndex(LowerName),Hand=Ref.FindBoneIndex(HandName);
     if(!Pose.IsValidIndex(Upper) || !Pose.IsValidIndex(Lower) || !Pose.IsValidIndex(Hand))return;
-    const TArray<FTransform> Old=Pose;
+    const FTransform OldUpper=Pose[Upper],OldLower=Pose[Lower],OldHand=Pose[Hand];
     const FVector S=Pose[Upper].GetLocation(),E=Pose[Lower].GetLocation(),W=Pose[Hand].GetLocation();
     const float A=FVector::Dist(S,E),B=FVector::Dist(E,W),D=FMath::Clamp(float(FVector::Dist(S,Target)),FMath::Abs(A-B)+.1f,A+B-.1f);
     const FVector Direction=(Target-S).GetSafeNormal();FVector Bend=FVector::VectorPlaneProject(Pole,Direction).GetSafeNormal();
     if(Bend.IsNearlyZero())Bend=FVector::VectorPlaneProject(E-S,Direction).GetSafeNormal();
     const float Along=(A*A-B*B+D*D)/(2*D);const FVector NewE=S+Direction*Along+Bend*FMath::Sqrt(FMath::Max(0.f,A*A-Along*Along)),NewW=S+Direction*D;
-    FTransform U=Old[Upper],L=Old[Lower],H=Old[Hand];
+    FTransform U=OldUpper,L=OldLower,H=OldHand;
     U.SetRotation(FQuat::FindBetweenNormals((E-S).GetSafeNormal(),(NewE-S).GetSafeNormal())*U.GetRotation());
     L.SetLocation(NewE);L.SetRotation(FQuat::FindBetweenNormals((W-E).GetSafeNormal(),(NewW-NewE).GetSafeNormal())*L.GetRotation());H.SetLocation(NewW);H.SetRotation(Rotation);
     for(int32 I=0;I<Pose.Num();++I)
     {
-        int32 Parent=I;while(Parent!=INDEX_NONE && Parent!=Upper && Parent!=Lower && Parent!=Hand)Parent=Ref.GetParentIndex(Parent);
-        const FTransform* New=Parent==Hand ? &H:Parent==Lower ? &L:Parent==Upper ? &U:nullptr;
-        if(New)Pose[I]=Old[I].GetRelativeTransform(Old[Parent])**New;
+        const FTransform* Before=Ref.InSubtree(I,Hand) ? &OldHand:Ref.InSubtree(I,Lower) ? &OldLower:Ref.InSubtree(I,Upper) ? &OldUpper:nullptr;
+        const FTransform* After=Before==&OldHand ? &H:Before==&OldLower ? &L:&U;
+        if(Before)Pose[I]=Pose[I].GetRelativeTransform(*Before)**After;
     }
 }
+namespace
+{
+using ERPosturePose::RotateBranch;
+using ERPosturePose::FitLimb;
 FVector GroundedArmPole(const FVector& Shoulder,const FVector& Elbow,const FVector& Wrist,const FVector& Target,const FVector& Up,const FVector& Side,const FVector& Ground,const AActor* Character,const FTransform& Frame,double FloorZ)
 {
     const double A=FVector::Distance(Shoulder,Elbow),B=FVector::Distance(Elbow,Wrist);
@@ -97,13 +136,15 @@ void UERPostureMesh::TickComponent(float DeltaTime,ELevelTick TickType,FActorCom
 
 void UERPostureMesh::FinalizeBoneTransform()
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(ERPostureFinalize);
     const auto* C = Cast<AERCharacter>(GetOwner());
     const auto* M = C ? Cast<UERMovement>(C->GetCharacterMovement()) : nullptr;
     const auto* Mesh = GetSkeletalMeshAsset();
+    RefreshRigCache();
     const float Blend = M ? M->Locomotion.ProneBlend : 0.f;
     if (Mesh && M && Blend < 1.f && M->Locomotion.HalfHeight < 92.5f)
     {
-        const auto& Ref = Mesh->GetRefSkeleton();
+        const auto& Ref = RigCache;
         auto& Pose = GetEditableComponentSpaceTransforms();
         const float CrouchDepth = 92.5f - FMath::Max(M->Locomotion.HalfHeight, M->GetCrouchedHalfHeight());
         const float Kneel = FMath::Clamp(CrouchDepth / 30.f, 0.f, 1.f) * (1.f - Blend);
@@ -125,10 +166,7 @@ void UERPostureMesh::FinalizeBoneTransform()
             const FQuat ToePlant(Frame.InverseTransformVectorNoScale(C->GetActorRightVector()), FMath::DegreesToRadians(65.f));
             const FVector AnkleFromToe = ToePlant.RotateVector(RightPlant.GetLocation() - Toe);
 
-            float KneeOffset = 0.f, ToeOffset = 0.f;
-            const FString MeshPath = Mesh->GetPathName();
-            GConfig->GetFloat(TEXT("RespawnAndRage.KneelingKnee"), *MeshPath, KneeOffset, GGameIni);
-            GConfig->GetFloat(TEXT("RespawnAndRage.KneelingToe"), *MeshPath, ToeOffset, GGameIni);
+            const float KneeOffset=CachedKneeOffset,ToeOffset=CachedToeOffset;
 
             // Place the knee pad just above the contact plane. Construct the
             // kneeling triangle from the rig's own thigh and shin lengths.
@@ -150,17 +188,10 @@ void UERPostureMesh::FinalizeBoneTransform()
         }
     }
     FVector ProneGround=FVector::ZeroVector;
-    FVector ContactsLeft=FVector::ZeroVector, ContactsRight=FVector::ZeroVector;
+    const FVector ContactsLeft=CachedContactsLeft,ContactsRight=CachedContactsRight;
     double ProneFloorZ=0;
-    float PelvisDepth=4.f;
+    const float PelvisDepth=CachedPelvisDepth;
     bool GroundedProne=false;
-    if(Mesh && Blend>0)
-    {
-        const FString MeshPath=Mesh->GetPathName();
-        GConfig->GetVector(TEXT("RespawnAndRage.ProneContactsLeft"),*MeshPath,ContactsLeft,GGameIni);
-        GConfig->GetVector(TEXT("RespawnAndRage.ProneContactsRight"),*MeshPath,ContactsRight,GGameIni);
-        GConfig->GetFloat(TEXT("RespawnAndRage.PronePelvisDepth"),*MeshPath,PelvisDepth,GGameIni);
-    }
     auto ElbowGround=[&](bool LeftHand)
     {
         return ProneGround+GetComponentTransform().InverseTransformVector(
@@ -178,53 +209,46 @@ void UERPostureMesh::FinalizeBoneTransform()
     }
     if (Mesh && Blend > 0)
     {
-        const auto& Ref = Mesh->GetRefSkeleton();
+        const auto& Ref = RigCache;
         auto& Pose = GetEditableComponentSpaceTransforms();
-        const TArray<FTransform> Original = Pose;
         const int32 Left = Ref.FindBoneIndex(TEXT("upperarm_l")), Right = Ref.FindBoneIndex(TEXT("upperarm_r"));
         const int32 Neck = Ref.FindBoneIndex(TEXT("neck_01"));
         const int32 Pelvis = Ref.FindBoneIndex(TEXT("pelvis"));
+        const FVector NeckPivot=Pose.IsValidIndex(Neck) ? Pose[Neck].GetLocation():FVector::ZeroVector;
         const int32 ThighLeft = Ref.FindBoneIndex(TEXT("thigh_l")), ThighRight = Ref.FindBoneIndex(TEXT("thigh_r"));
         auto InSubtree = [&Ref](int32 Bone, int32 Root)
         {
-            if (Root == INDEX_NONE) return false;
-            for (int32 I = Bone; I != INDEX_NONE; I = Ref.GetParentIndex(I)) if (I == Root) return true;
-            return false;
+            return Ref.InSubtree(Bone,Root);
         };
         const FVector Shoulder = Pose.IsValidIndex(Left) && Pose.IsValidIndex(Right) ?
             (Pose[Left].GetLocation() + Pose[Right].GetLocation()) * .5f : FVector::ZeroVector;
         // A common shoulder pivot keeps both rifle grips together while the body lies flat.
         const FQuat Arms(FVector::XAxisVector, Blend * PI * .5f);
         const FQuat Head(FVector::XAxisVector, Blend * FMath::DegreesToRadians(70.f));
-        TArray<FTransform> StraightLegs;
-        StraightLegs.SetNum(Pose.Num());
+        const auto& StraightLegs=Ref.ReferenceComponentPose;
+        const FVector PelvisShift = Pose.IsValidIndex(Pelvis) ? Pose[Pelvis].GetLocation() - StraightLegs[Pelvis].GetLocation() : FVector::ZeroVector;
         for (int32 Bone = 0; Bone < Pose.Num(); ++Bone)
         {
-            const int32 Parent = Ref.GetParentIndex(Bone);
-            StraightLegs[Bone] = Parent == INDEX_NONE ? Ref.GetRefBonePose()[Bone] : Ref.GetRefBonePose()[Bone] * StraightLegs[Parent];
-        }
-        const FVector PelvisShift = Pose.IsValidIndex(Pelvis) ? Original[Pelvis].GetLocation() - StraightLegs[Pelvis].GetLocation() : FVector::ZeroVector;
-        for (int32 Bone = 0; Bone < Pose.Num(); ++Bone)
-        {
+            const FTransform Original=Pose[Bone];
             if (InSubtree(Bone,ThighLeft) || InSubtree(Bone,ThighRight))
             {
                 const int32 Parent = Ref.GetParentIndex(Bone);
                 if (Pose.IsValidIndex(Parent) && Pelvis != INDEX_NONE)
                 {
-                    StraightLegs[Bone].AddToTranslation(PelvisShift);
-                    Pose[Bone].Blend(Original[Bone], StraightLegs[Bone], Blend);
+                    FTransform Straight=StraightLegs[Bone];Straight.AddToTranslation(PelvisShift);
+                    Pose[Bone].Blend(Original,Straight,Blend);
                 }
             }
             else if (InSubtree(Bone,Left) || InSubtree(Bone,Right))
             {
-                Pose[Bone].SetLocation(Shoulder + Arms.RotateVector(Original[Bone].GetLocation() - Shoulder));
-                Pose[Bone].SetRotation(Arms * Original[Bone].GetRotation());
+                Pose[Bone].SetLocation(Shoulder + Arms.RotateVector(Original.GetLocation() - Shoulder));
+                Pose[Bone].SetRotation(Arms * Original.GetRotation());
             }
             else if (InSubtree(Bone,Neck) && Pose.IsValidIndex(Neck))
             {
-                const FVector Pivot = Original[Neck].GetLocation();
-                Pose[Bone].SetLocation(Pivot + Head.RotateVector(Original[Bone].GetLocation() - Pivot));
-                Pose[Bone].SetRotation(Head * Original[Bone].GetRotation());
+                const FVector Pivot = NeckPivot;
+                Pose[Bone].SetLocation(Pivot + Head.RotateVector(Original.GetLocation() - Pivot));
+                Pose[Bone].SetRotation(Head * Original.GetRotation());
             }
         }
         // The standing reference feet point forward. Counterturn the ankles
@@ -327,7 +351,7 @@ void UERPostureMesh::FinalizeBoneTransform()
     const auto* Data=C ? (C->Weapon ? C->Weapon->Data.Get():nullptr):PreviewWeapon.Get();
     if(Mesh && Data && Data->bWorldReferencePose && ((!C && PreviewWeapon) || (C && !C->Health->bDead && !C->IsWeaponStowed())))
     {
-        const auto& Ref=Mesh->GetRefSkeleton();auto& Pose=GetEditableComponentSpaceTransforms();
+        const auto& Ref=RigCache;auto& Pose=GetEditableComponentSpaceTransforms();
         const auto* PalmR=Mesh->FindSocket(TEXT("ER_Palm_R"));const auto* PalmL=Mesh->FindSocket(TEXT("ER_Palm_L"));
         const int32 ShoulderR=Ref.FindBoneIndex(TEXT("upperarm_r")),ShoulderL=Ref.FindBoneIndex(TEXT("upperarm_l"));
         if(PalmR && PalmL && Pose.IsValidIndex(ShoulderR) && Pose.IsValidIndex(ShoulderL))
@@ -402,7 +426,7 @@ void UERPostureMesh::FinalizeBoneTransform()
     }
     if(Mesh && C && Data && !Data->bWorldReferencePose && !C->Health->bDead && !C->IsWeaponStowed())
     {
-        const auto& Ref=Mesh->GetRefSkeleton();auto& Pose=GetEditableComponentSpaceTransforms();
+        const auto& Ref=RigCache;auto& Pose=GetEditableComponentSpaceTransforms();
         const auto* Grip=Mesh->FindSocket(TEXT("HandGrip_R"));
         const int32 Hand=Grip ? Ref.FindBoneIndex(Grip->BoneName):INDEX_NONE;
         if(Pose.IsValidIndex(Hand))
@@ -425,7 +449,7 @@ void UERPostureMesh::FinalizeBoneTransform()
     }
     if (Mesh && Data && Data->bFitSupportHand && !Data->bWorldReferencePose)
     {
-        const auto& Ref=Mesh->GetRefSkeleton();auto& Pose=GetEditableComponentSpaceTransforms();
+        const auto& Ref=RigCache;auto& Pose=GetEditableComponentSpaceTransforms();
         const auto* Right=Mesh->FindSocket(TEXT("HandGrip_R"));
         const auto* Surface=Data->SupportSurfaceContacts.IsEmpty() ? nullptr : Mesh->FindSocket(TEXT("ER_Palm_L"));
         const auto* Left=Surface ? Surface : Mesh->FindSocket(TEXT("HandGrip_L"));
@@ -433,7 +457,7 @@ void UERPostureMesh::FinalizeBoneTransform()
         {
             const int32 Upper=Ref.FindBoneIndex(UpperName),Lower=Ref.FindBoneIndex(LowerName),Hand=Ref.FindBoneIndex(HandName);
             if (!Pose.IsValidIndex(Upper) || !Pose.IsValidIndex(Lower) || !Pose.IsValidIndex(Hand)) return;
-            const TArray<FTransform> Original=Pose;
+            const FTransform OldUpper=Pose[Upper],OldLower=Pose[Lower],OldHand=Pose[Hand];
             const FVector Shoulder=Pose[Upper].GetLocation(),Elbow=Pose[Lower].GetLocation(),Wrist=Pose[Hand].GetLocation();
             const float A=FVector::Distance(Shoulder,Elbow),B=FVector::Distance(Elbow,Wrist);
             const FVector Direction=(Target-Shoulder).GetSafeNormal();
@@ -449,10 +473,9 @@ void UERPostureMesh::FinalizeBoneTransform()
             NewLower.SetLocation(NewElbow);NewHand.SetLocation(NewWrist);NewHand.SetRotation(Rotation);
             for (int32 Bone=Upper;Bone<Pose.Num();++Bone)
             {
-                int32 Ancestor=Bone;
-                while (Ancestor!=INDEX_NONE && Ancestor!=Upper && Ancestor!=Lower && Ancestor!=Hand) Ancestor=Ref.GetParentIndex(Ancestor);
-                const FTransform* Replacement=Ancestor==Hand ? &NewHand : Ancestor==Lower ? &NewLower : Ancestor==Upper ? &NewUpper : nullptr;
-                if (Replacement) Pose[Bone]=Original[Bone].GetRelativeTransform(Original[Ancestor]) * *Replacement;
+                const FTransform* Before=Ref.InSubtree(Bone,Hand) ? &OldHand:Ref.InSubtree(Bone,Lower) ? &OldLower:Ref.InSubtree(Bone,Upper) ? &OldUpper:nullptr;
+                const FTransform* After=Before==&OldHand ? &NewHand:Before==&OldLower ? &NewLower:&NewUpper;
+                if(Before)Pose[Bone]=Pose[Bone].GetRelativeTransform(*Before)**After;
             }
         };
         const int32 RightBone=Right ? Ref.FindBoneIndex(Right->BoneName) : INDEX_NONE;
@@ -487,11 +510,11 @@ void UERPostureMesh::FinalizeBoneTransform()
     if(Mesh && C && C->Weapon && Data && AERWeapon::IsHandGrenade(Data->Payload) &&
         !C->Health->bDead && C->GrenadeThrowPoseBlend>.001f)
     {
-        const auto& Ref=Mesh->GetRefSkeleton();auto& Pose=GetEditableComponentSpaceTransforms();
+        const auto& Ref=RigCache;auto& Pose=GetEditableComponentSpaceTransforms();
         const int32 Upper=Ref.FindBoneIndex(TEXT("upperarm_r")),Lower=Ref.FindBoneIndex(TEXT("lowerarm_r")),Hand=Ref.FindBoneIndex(TEXT("hand_r"));
         if(Pose.IsValidIndex(Upper) && Pose.IsValidIndex(Lower) && Pose.IsValidIndex(Hand))
         {
-            const TArray<FTransform> Original=Pose;
+            const FTransform OldUpper=Pose[Upper],OldLower=Pose[Lower],OldHand=Pose[Hand];
             const FRotator Yaw(0,C->GetBaseAimRotation().Yaw,0);
             const FVector TargetWorld=C->Camera->GetComponentLocation()+Yaw.RotateVector(FVector(-14,24,-4));
             const FVector Target=GetComponentTransform().InverseTransformPosition(TargetWorld);
@@ -512,13 +535,13 @@ void UERPostureMesh::FinalizeBoneTransform()
             NewHand.SetLocation(NewWrist);NewHand.SetRotation(LowerTurn*NewHand.GetRotation());
             for(int32 Bone=Upper;Bone<Pose.Num();++Bone)
             {
-                int32 Ancestor=Bone;
-                while(Ancestor!=INDEX_NONE && Ancestor!=Upper && Ancestor!=Lower && Ancestor!=Hand) Ancestor=Ref.GetParentIndex(Ancestor);
-                const FTransform* Replacement=Ancestor==Hand?&NewHand:Ancestor==Lower?&NewLower:Ancestor==Upper?&NewUpper:nullptr;
-                if(Replacement)
+                const FTransform* Before=Ref.InSubtree(Bone,Hand) ? &OldHand:Ref.InSubtree(Bone,Lower) ? &OldLower:Ref.InSubtree(Bone,Upper) ? &OldUpper:nullptr;
+                const FTransform* After=Before==&OldHand ? &NewHand:Before==&OldLower ? &NewLower:&NewUpper;
+                if(Before)
                 {
-                    const FTransform Ready=Original[Bone].GetRelativeTransform(Original[Ancestor]) * *Replacement;
-                    Pose[Bone].Blend(Original[Bone],Ready,C->GrenadeThrowPoseBlend);
+                    const FTransform Original=Pose[Bone];
+                    const FTransform Ready=Original.GetRelativeTransform(*Before)**After;
+                    Pose[Bone].Blend(Original,Ready,C->GrenadeThrowPoseBlend);
                 }
             }
         }
@@ -526,7 +549,7 @@ void UERPostureMesh::FinalizeBoneTransform()
     if(Mesh && C && Data && AERWeapon::IsHandGrenade(Data->Payload) && !C->Health->bDead && C->GrenadeThrowPoseBlend>.001f)
     {
         // Relax the empty support arm instead of leaving the rifle support pose.
-        const auto& Ref=Mesh->GetRefSkeleton();auto& Pose=GetEditableComponentSpaceTransforms();
+        const auto& Ref=RigCache;auto& Pose=GetEditableComponentSpaceTransforms();
         const int32 Upper=Ref.FindBoneIndex(TEXT("upperarm_l")),Lower=Ref.FindBoneIndex(TEXT("lowerarm_l"));
         if(Pose.IsValidIndex(Upper) && Pose.IsValidIndex(Lower))
         {
@@ -536,8 +559,7 @@ void UERPostureMesh::FinalizeBoneTransform()
             const FQuat Turn=FQuat::FindBetweenNormals((Pose[Lower].GetLocation()-Pivot).GetSafeNormal(),Down);
             for(int32 Bone=Upper;Bone<Pose.Num();++Bone)
             {
-                int32 Ancestor=Bone;while(Ancestor!=INDEX_NONE && Ancestor!=Upper) Ancestor=Ref.GetParentIndex(Ancestor);
-                if(Ancestor!=Upper) continue;
+                if(!Ref.InSubtree(Bone,Upper))continue;
                 const FTransform Original=Pose[Bone];FTransform Rest=Original;
                 Rest.SetLocation(Pivot+Turn.RotateVector(Original.GetLocation()-Pivot));Rest.SetRotation(Turn*Original.GetRotation());
                 Pose[Bone].Blend(Original,Rest,C->GrenadeThrowPoseBlend);
@@ -550,5 +572,5 @@ void UERPostureMesh::FinalizeBoneTransform()
         UpdateKinematicBonesToAnim(GetEditableComponentSpaceTransforms(),ETeleportType::TeleportPhysics,false,EAllowKinematicDeferral::DisallowDeferral);
     Super::FinalizeBoneTransform();
     if(C && C->HasAuthority() && !C->Health->bDead && !Bodies.IsEmpty())ShotHistory.Record(this);
-    else ShotHistory.Frames.Reset();
+    else ShotHistory.Reset();
 }

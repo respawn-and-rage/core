@@ -2,6 +2,9 @@
 
 Daily compile and run. Packaging: [PACKAGE_MAC.md](PACKAGE_MAC.md), [PACKAGE_DESKTOP.md](PACKAGE_DESKTOP.md).
 
+**Code:** `Source/RespawnAndRage*.Target.cs`, `scripts/build-editor.command`,
+`scripts/build-server-linux.py`.
+
 ## Prerequisites
 
 - Unreal Engine **5.8.3** (`/Users/Shared/Epic Games/UE_5.8` on Mac).
@@ -42,6 +45,19 @@ block the home screen on a macOS privacy prompt until the user answers it.
 **A Mac compile does not validate the other platforms.** Before pushing C++, follow
 the cross-platform rules in [AGENTS.md](../AGENTS.md#cross-platform-c-rules).
 
+## Dedicated server target
+
+`RespawnAndRageServer` uses `TargetType.Server`, the same module and build settings as
+the game. The Linux helper builds the Linux Editor for cooking, then a **Development
+Linux x86_64 server**. It requires a prepared source engine or an Installed Build that
+declares both Editor and Server support; Linux Game support alone is insufficient.
+It never overrides Installed Build restrictions or changes the selected engine.
+
+The target preserves the game's asset references and authority animation/hitbox code.
+Headless execution is not permission to remove skeletal meshes, animation or collision
+assets. Server-specific asset reductions require cooked authority hitbox verification.
+See [local server packaging and verification](PACKAGE_DESKTOP.md#local-linux-dedicated-server).
+
 ## Channels and versions
 
 Uploads go to `aaggeeaa/respawn-and-rage`: `mac-universal` (or `mac-arm64`, `mac-x86_64`),
@@ -55,3 +71,9 @@ Each native build stamps `YY.MM.DD.<8-char commit>` through
 bottom right of the main menu. The date is the HEAD committer date. Isolated workspaces
 and source exports without `.git` carry `Build/SourceCommit.txt` and
 `Build/SourceCommitDate.txt`.
+
+## Verify
+
+Use `scripts/build-editor.command` for Mac Editor compilation. Dedicated-server helper
+tests run with `python3 -m unittest discover -s scripts/tests -p test_build_server_linux.py`.
+They verify tooling contracts, not a Linux compile, cook, server tick rate or connection.

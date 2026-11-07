@@ -127,7 +127,7 @@ bool AERClaymore::HasSupport() const
 // A ground-plane sector: capsule height must not create a blind spot near the mine.
 bool AERClaymore::TriggerTarget(AERCharacter* T) const
 {
-    if(!T || T->Health->bDead)return false;
+    if(!T || T->Health->bDead || !T->bNetworkReady)return false;
     const FVector Delta=T->GetActorLocation()-GetActorLocation();
     const FVector Flat=FVector::VectorPlaneProject(Delta,GetActorUpVector());
     if(Delta.SizeSquared()>=FMath::Square(DamageRadius) || Flat.SizeSquared()>FMath::Square(DetectionRange) || Flat.IsNearlyZero() ||
@@ -161,7 +161,7 @@ void AERClaymore::UpdateLasers()
 }
 bool AERClaymore::VisibleTarget(AERCharacter* T) const
 {
-    if(!T || T->Health->bDead)return false;
+    if(!T || T->Health->bDead || !T->bNetworkReady)return false;
     const FVector Start=GetActorLocation()+GetActorUpVector()*8;
     // The blast has its own forward-only cone and never damages targets behind the device.
     const FVector Delta=FVector::VectorPlaneProject(T->GetActorLocation()-Start,GetActorUpVector());

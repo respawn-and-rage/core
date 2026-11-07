@@ -3,6 +3,7 @@
 #include "ERPlayerController.h"
 #include "ERWeapon.h"
 #include "ERBlockWorld.h"
+#include "ERMapCatalog.h"
 #include "Engine/World.h"
 #include "Misc/ConfigCacheIni.h"
 #include "UObject/UnrealType.h"
@@ -141,11 +142,8 @@ const TArray<FERServerSetting>& ERServer::Settings()
         Add(TEXT("Material.Metal.Transmission"),TEXT("Destruction"),TEXT("Metal blast transmission"),TEXT("×"),1.f,0.f,4.f,true);
         Add(TEXT("Material.Glass.Health"),TEXT("Destruction"),TEXT("Glass resistance"),TEXT("×"),1.f,.1f,10.f,true);
         Add(TEXT("Material.Glass.Transmission"),TEXT("Destruction"),TEXT("Glass blast transmission"),TEXT("×"),1.f,0.f,4.f,true);
-        Add(TEXT("Map.central_building"),TEXT("Maps"),TEXT("Central Building in rotation"),TEXT("on/off"),1.f,0.f,1.f,false,true);
-        Add(TEXT("Map.middle_eastern_alleys"),TEXT("Maps"),TEXT("Alleys in rotation"),TEXT("on/off"),1.f,0.f,1.f,false,true);
-        Add(TEXT("Map.fire_training"),TEXT("Maps"),TEXT("Fire Training in rotation"),TEXT("on/off"),1.f,0.f,1.f,false,true);
-        Add(TEXT("Map.rooms"),TEXT("Maps"),TEXT("Rooms in rotation"),TEXT("on/off"),1.f,0.f,1.f,false,true);
-        Add(TEXT("Map.village"),TEXT("Maps"),TEXT("Village in rotation"),TEXT("on/off"),1.f,0.f,1.f,false,true);
+        for(const auto& Entry:ERMaps::All())if(Entry.InRotation)
+            Add(*(FString(TEXT("Map."))+Entry.Id),TEXT("Maps"),*(FString(Entry.Label)+TEXT(" in rotation")),TEXT("on/off"),1.f,0.f,1.f,false,true);
         // Absolute weapon overrides retain authored values until explicitly edited.
         auto WeaponField = [&](const TCHAR* Id, const TCHAR* Section, const TCHAR* Property, const TCHAR* Label,
             const TCHAR* Unit, float Min, float Max, bool Advanced=false, bool Integer=false, float Factor=1)
@@ -280,9 +278,10 @@ void FERServerRules::Normalize()
     if(Get("Move.Climb")<Get("Move.Vault"))Set("Move.Climb",Get("Move.Vault"));
     if(Get("Claymore.DetectionAngle")>Get("Claymore.DamageAngle"))Set("Claymore.DetectionAngle",Get("Claymore.DamageAngle"));
     bool AnyMap=false;
-    for(const TCHAR* Id:{TEXT("central_building"),TEXT("middle_eastern_alleys"),TEXT("fire_training"),TEXT("rooms"),TEXT("village")})
-        AnyMap|=Get(FName(*(FString(TEXT("Map."))+Id)))>0;
-    if(!AnyMap)Set("Map.central_building",1);
+    for(const auto& Entry:ERMaps::All())if(Entry.InRotation)
+        AnyMap|=Get(FName(*(FString(TEXT("Map."))+Entry.Id)))>0;
+    if(!AnyMap)for(const auto& Entry:ERMaps::All())if(Entry.InRotation)
+    {Set(FName(*(FString(TEXT("Map."))+Entry.Id)),1);break;}
 }
 const FERServerRules& ERServer::Rules(const UWorld* World)
 {

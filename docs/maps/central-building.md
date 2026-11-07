@@ -55,6 +55,10 @@ Outdoor cover combines straight walls, L corners, U pockets, staggered block pai
 and deep timber blocks. Seeds vary the number of exterior bands, dimensions, standing/crouching heights, quarter-turn
 orientations, Brick/Concrete/Wood materials and placement. Groups within one generation use different materials. Every group has
 paired geometry, a level foundation, a clear rear approach and a checked hiding site.
+From 4v4 onward, additional groups are sampled on a 16m grid through the larger approaches, with
+a bounded area-based count. Their physical dimensions stay unchanged. Foundations keep separation,
+and placement reserves the spawn-to-villa and flank routes. Rejected sites can leave larger gaps;
+route exposure and cover-access reports measure the result rather than assuming a uniform density.
 Some straight, L and U covers have mirrored rear firing steps: two 30cm treads and
 a 90cm landing with three 20cm rises, reaching a 60cm firing platform. Ground hiding
 sites remain clear. Standing capsule support and firing clearance are checked; the

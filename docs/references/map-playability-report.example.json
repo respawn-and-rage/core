@@ -1,5 +1,5 @@
 {
-	"report_version": 3,
+	"report_version": 4,
 	"seed": 42,
 	"expected_team_size": 2,
 	"archetype": "Rooms",
@@ -7,7 +7,9 @@
 	"template_revision": 5,
 	"mode": "report_only",
 	"stage": "physical",
-	"overall": "pass",
+	"overall": "warn",
+	"evaluation_complete": false,
+	"unevaluated_metrics": 1,
 	"graph":
 	{
 		"coverage": "exact",
@@ -214,7 +216,7 @@
 			"code": "COVER_ACCESS",
 			"status": "not_evaluated",
 			"stage": "layout",
-			"reason": "Planned metric, not computed yet",
+			"reason": "No authored hiding sites; buildings and incidental cover are not classified",
 			"values":
 			{
 			},

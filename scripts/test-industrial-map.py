@@ -33,7 +33,7 @@ def launch(role,url,render=False,extra=()):
     if args.executable:command.append('-UserDir='+str(out/(label+'-user-'+role)))
     proc=subprocess.Popen(command,stdout=f,stderr=subprocess.STDOUT);children.append(proc);return proc
 def read(role):return paths[role].read_text(errors='replace')
-def wait_for(marker,timeout=150):
+def wait_for(marker,timeout=300):
     end=time.monotonic()+timeout
     while time.monotonic()<end:
         if marker in read('host'):return
@@ -47,8 +47,10 @@ try:
     if args.network:
         wait_for('ER_INDUSTRIAL_STATE phase=1 ');launch('initial','127.0.0.1:17791?Name=Initial')
         wait_for('ER_INDUSTRIAL_STATE phase=3 ');launch('late','127.0.0.1:17791?Name=Late')
-    host.wait(timeout=300)
+    host.wait(timeout=420)
     text=read('host');passed=host.returncode==0 and 'ER_INDUSTRIAL_PROBE_COMPLETE result=PASS' in text and 'ER_INDUSTRIAL_PROBE_FAIL' not in text
+    if not args.finish_gallery:
+        passed&='ER_INDUSTRIAL_PROBE_PASS all_recorded_crossings_walked' in text
     factory_shader_ok=not any('Art/Industrial/' in line and 'Failed to compile' in line for line in text.splitlines())
     passed&=factory_shader_ok
     if not factory_shader_ok:print('FAIL: Factory material shader compilation')

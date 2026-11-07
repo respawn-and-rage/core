@@ -11,6 +11,8 @@ visible contacts: never derive enemy markers by enumerating client pawns.
 
 - Server sight at 4Hz: living players and bots (120°, map extent), active drone (360°, 42m
   horizontal footprint), through real geometry, two head/torso samples.
+  Sample player poses once and evaluate each target once per observing team; owner snapshots
+  reuse the result without exposing the other team's visibility.
 - Contacts expire on lost sight (1s HUD stale timeout); terrain persists within a round. Late
   join and respawn keep fog and stock; round reset or generation epoch clears them.
 - Smoke hides sightings and new terrain by integrating 48 density samples along the ray, with

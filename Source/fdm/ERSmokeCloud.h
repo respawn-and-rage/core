@@ -46,6 +46,9 @@ public:
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Props) const override;
     void RebuildContainment();
+    // Also used by the containment regression; no rendering is required.
+    bool PollGeometryChanges();
+    uint32 ContainmentBuildCount = 0;
     bool ContainsSmokeAt(const FVector& Position) const;
     // Authoritative optical depth through occupied smoke, including growth,
     // fade and the same shot/blast pockets used by the volume material.
@@ -64,7 +67,17 @@ private:
     UPROPERTY() TObjectPtr<class UTexture2D> DensityAtlas;
     UPROPERTY() TObjectPtr<class UMaterialInstanceDynamic> VolumeInstance;
     TArray<uint8> Occupancy;
-    uint64 GeometryRevision = MAX_uint64;
+    struct FGeometryWatch
+    {
+        TWeakObjectPtr<class AERBlockRoom> Room;
+        uint32 Epoch=0,LayoutDigest=0;
+        int32 ChunkCount=0;
+        FTransform Transform;
+        FBox Region=FBox(ForceInit);
+        TArray<int32> Chunks;
+        TArray<uint32> Revisions;
+    };
+    TArray<FGeometryWatch> GeometryWatches;
     double NextGeometryCheck = 0;
     void UploadDensity();
     double ServerNow() const;

@@ -125,6 +125,134 @@ void ERMeshCells::Build(const FERCellWorld& World,int32 SkinPanelIndex,UE::Geome
     }
 }
 
+SIZE_T ERMeshCells::FCache::GetAllocatedBytes() const
+{
+    SIZE_T Bytes=Revisions.GetAllocatedSize()+ChunkTriangles.GetAllocatedSize()+TriangleChunks.GetAllocatedSize()+ChunkCuts.GetAllocatedSize()+TriangleCorners.GetAllocatedSize()+FractureCorners.GetAllocatedSize();
+    for(const auto& Items:ChunkTriangles)Bytes+=Items.GetAllocatedSize();
+    for(const auto& Items:TriangleChunks)Bytes+=Items.GetAllocatedSize();
+    for(const auto& Items:ChunkCuts)Bytes+=Items.GetAllocatedSize();
+    for(const auto& Items:TriangleCorners)Bytes+=Items.GetAllocatedSize();
+    for(const auto& Items:FractureCorners)Bytes+=Items.GetAllocatedSize();
+    return Bytes;
+}
+
+void ERMeshCells::BuildCached(const FERCellWorld& World,int32 SkinPanelIndex,UE::Geometry::FDynamicMesh3& Mesh,FCache& Cache)
+{
+    const auto& P=World.GetPanels()[SkinPanelIndex];
+    const int32 ChunkCount=P.ChunksX*P.ChunksZ,TriangleCount=P.Skin.Num()/3;
+    constexpr SIZE_T MaxCacheBytes=32*1024*1024;
+    constexpr int32 MaxReferences=1000000;
+    if(Cache.SourceLayoutDigest!=World.GetLayoutDigest() || Cache.SourceCRC!=P.SkinCRC || Cache.FirstChunk!=P.FirstChunk || Cache.SourceCorners!=P.Skin.Num())Cache=FCache();
+    Cache.LastClippedTriangles=Cache.LastCutChunks=0;
+    auto Fallback=[&]()
+    {
+        Cache=FCache();Cache.Disabled=true;Cache.SourceCRC=P.SkinCRC;Cache.SourceLayoutDigest=World.GetLayoutDigest();Cache.FirstChunk=P.FirstChunk;Cache.SourceCorners=P.Skin.Num();
+        Build(World,SkinPanelIndex,Mesh);
+    };
+    if(Cache.Disabled){Build(World,SkinPanelIndex,Mesh);return;}
+    const bool Initial=Cache.FirstChunk==INDEX_NONE;
+    if(Initial)
+    {
+        // Intact skins need no clipping history. Defer the triangle index and
+        // retained geometry until this particular structure is damaged.
+        bool Changed=false;
+        for(int32 C=0;C<ChunkCount;++C)if(World.GetChunks()[P.FirstChunk+C].Revision){Changed=true;break;}
+        if(!Changed){Build(World,SkinPanelIndex,Mesh);return;}
+        Cache.SourceCRC=P.SkinCRC;Cache.SourceLayoutDigest=World.GetLayoutDigest();Cache.FirstChunk=P.FirstChunk;Cache.SourceCorners=P.Skin.Num();
+        Cache.Revisions.Init(MAX_uint32,ChunkCount);Cache.ChunkCuts.SetNum(ChunkCount);Cache.ChunkTriangles.SetNum(ChunkCount);
+        Cache.FractureCorners.SetNum(ChunkCount);Cache.TriangleChunks.SetNum(TriangleCount);Cache.TriangleCorners.SetNum(TriangleCount);
+        int32 References=0;
+        const auto& First=World.GetChunks()[P.FirstChunk];
+        // A triangle can span several chunks. Index its original bounds, including
+        // the exact clipping epsilon, so a later cut cannot escape the index.
+        for(int32 T=0;T<TriangleCount;++T)
+        {
+            FBox Bounds(ForceInit);for(int32 V=0;V<3;++V)Bounds+=P.Skin[T*3+V].Position;
+            Bounds=Bounds.ExpandBy(.001);
+            const int32 X0=FMath::Clamp(FMath::FloorToInt32(Bounds.Min.X/(P.Cell.X*First.SX)),0,P.ChunksX-1);
+            const int32 X1=FMath::Clamp(FMath::FloorToInt32(Bounds.Max.X/(P.Cell.X*First.SX)),0,P.ChunksX-1);
+            const int32 Z0=FMath::Clamp(FMath::FloorToInt32(Bounds.Min.Z/(P.Cell.Z*First.SZ)),0,P.ChunksZ-1);
+            const int32 Z1=FMath::Clamp(FMath::FloorToInt32(Bounds.Max.Z/(P.Cell.Z*First.SZ)),0,P.ChunksZ-1);
+            for(int32 Z=Z0;Z<=Z1;++Z)for(int32 X=X0;X<=X1;++X)
+            {
+                const int32 C=Z*P.ChunksX+X;
+                const auto& K=World.GetChunks()[P.FirstChunk+C];
+                const FBox ChunkBox(FVector(K.X0,0,K.Z0)*P.Cell,FVector(K.X0+K.SX,P.Dims.Y,K.Z0+K.SZ)*P.Cell);
+                if(!Bounds.Intersect(ChunkBox))continue;
+                if(++References>MaxReferences){Fallback();return;}
+                Cache.ChunkTriangles[C].Add(T);Cache.TriangleChunks[T].Add(C);
+            }
+        }
+    }
+    TBitArray<> DirtyTriangles(Initial,TriangleCount),DirtyFractures(false,ChunkCount),FractureEdges(false,ChunkCount);
+    auto MarkEdges=[&](TBitArray<>& Flags,int32 C)
+    {
+        Flags[C]=true;const int32 X=C%P.ChunksX,Z=C/P.ChunksX;
+        if(X)Flags[C-1]=true;if(X+1<P.ChunksX)Flags[C+1]=true;
+        if(Z)Flags[C-P.ChunksX]=true;if(Z+1<P.ChunksZ)Flags[C+P.ChunksX]=true;
+    };
+    for(int32 C=0;C<ChunkCount;++C)
+    {
+        const uint32 Revision=World.GetChunks()[P.FirstChunk+C].Revision;
+        if(Revision)MarkEdges(FractureEdges,C);
+        if(Cache.Revisions[C]==Revision)continue;
+        Cache.Revisions[C]=Revision;Cache.ChunkCuts[C].Reset();Cuts(World,P.FirstChunk+C,Cache.ChunkCuts[C]);++Cache.LastCutChunks;
+        for(int32 T:Cache.ChunkTriangles[C])DirtyTriangles[T]=true;
+        MarkEdges(DirtyFractures,C);
+    }
+    for(int32 T=0;T<TriangleCount;++T)if(DirtyTriangles[T])
+    {
+        ++Cache.LastClippedTriangles;
+        TArray<FCellPoly> Polys;Polys.Add({P.Skin[T*3],P.Skin[T*3+1],P.Skin[T*3+2]});
+        // Both lists are in the original chunk/cut order. Skipping boxes outside
+        // the original triangle does not alter clipping, winding or interpolation.
+        for(int32 C:Cache.TriangleChunks[T])
+        {
+            for(const auto& Cut:Cache.ChunkCuts[C])
+            {
+                const FBox Box=Cut.ExpandBy(.001);TArray<FCellPoly> Next;
+                for(const auto& Poly:Polys)
+                {
+                    FBox Bounds(ForceInit);for(const auto& V:Poly)Bounds+=V.Position;
+                    if(!Bounds.Intersect(Box)){Next.Add(Poly);continue;}
+                    auto Inside=Poly;
+                    for(int32 Axis=0;Axis<3 && Inside.Num()>=3;++Axis)
+                    {
+                        auto Outside=Clip(Inside,Axis,Box.Min[Axis],true);if(Outside.Num()>=3)Next.Add(MoveTemp(Outside));
+                        Inside=Clip(Inside,Axis,Box.Min[Axis],false);
+                        Outside=Clip(Inside,Axis,Box.Max[Axis],false);if(Outside.Num()>=3)Next.Add(MoveTemp(Outside));
+                        Inside=Clip(Inside,Axis,Box.Max[Axis],true);
+                    }
+                }
+                Polys=MoveTemp(Next);if(Polys.IsEmpty())break;
+            }
+            if(Polys.IsEmpty())break;
+        }
+        auto& Corners=Cache.TriangleCorners[T];Corners.Reset();
+        for(const auto& Poly:Polys)for(int32 V=1;V+1<Poly.Num();++V){Corners.Add(Poly[0]);Corners.Add(Poly[V]);Corners.Add(Poly[V+1]);}
+    }
+    TArray<ERCellMesh::FQuad> Faces;
+    for(int32 C=0;C<ChunkCount;++C)if(DirtyFractures[C])
+    {
+        auto& Corners=Cache.FractureCorners[C];Corners.Reset();
+        if(!FractureEdges[C])continue;
+        ERCellMesh::BuildFaces(World,P.FirstChunk+C,Faces,true);
+        for(const auto& Q:Faces)
+        {
+            const int32 Axis=FMath::Abs(Q.Normal.X)>.5 ? 0:FMath::Abs(Q.Normal.Y)>.5 ? 1:2,U=(Axis+1)%3,V=(Axis+2)%3;
+            const float Mirror=Q.Normal[Axis]<0 ? -1.f:1.f;
+            FERMeshCorner Quad[4];for(int32 Corner=0;Corner<4;++Corner)Quad[Corner]={FVector(Q.Corner[Corner]),FVector(Q.Normal),FVector2D(Mirror*Q.Corner[Corner][U],Q.Corner[Corner][V])/100};
+            for(int32 Corner:{0,1,2,0,2,3})Corners.Add(Quad[Corner]);
+        }
+    }
+    if(Cache.GetAllocatedBytes()>MaxCacheBytes){Fallback();return;}
+    Mesh.EnableAttributes();Mesh.Attributes()->EnableMaterialID();
+    auto Emit=[&](const TArray<FERMeshCorner>& Corners,int32 Material)
+    {for(int32 V=0;V<Corners.Num();V+=3)Append({Corners[V],Corners[V+1],Corners[V+2]},Mesh,Material);};
+    for(const auto& Corners:Cache.TriangleCorners)Emit(Corners,0);
+    for(int32 C=0;C<ChunkCount;++C)if(FractureEdges[C])Emit(Cache.FractureCorners[C],1);
+}
+
 void ERMeshCells::BoxSkin(FERCellPanelDesc& P)
 {
     for(int32 Axis=0;Axis<3;++Axis)for(int32 Sign:{-1,1})

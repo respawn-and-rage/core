@@ -108,7 +108,7 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
                 if(BreakArchitecture && Piece.FixedMesh)for(const auto& S:T->Town.BuildingStructures)if(S && S->Source==Piece.FixedMesh){Structure=S;break;}
                 const bool Masonry=BreakArchitecture && !Piece.FixedMesh && !Piece.VisualOnly &&
                     (Piece.FixedSurface==T->Town.WallSurface || (Piece.FixedSurface==T->Town.RoofSurface && Piece.Size.Z<=30));
-                if(Masonry || Structure)
+                if((Masonry || Structure) && !Piece.bPermanentArchitecture)
                 {
                     auto& P=L.Panels.AddDefaulted_GetRef();P.Id=Wall++*8;P.Material=EERBlockMaterial::Stone;
                     P.Size=Structure ? Rotation.UnrotateVector(Piece.Size).GetAbs():Piece.Size;

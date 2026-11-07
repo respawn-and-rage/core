@@ -14,6 +14,7 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
     int32 PoolLayouts=0,SinglePoolLayouts=0,PairedPoolLayouts=0,WaterfrontLayouts=0,RoofPoolLayouts=0,SmallRoofPoolLayouts=0;
     int32 PhysicalRoofSeed=INDEX_NONE,PhysicalSingleSeed=INDEX_NONE,PhysicalPairSeed=INDEX_NONE,PhysicalWaterfrontSeed=INDEX_NONE;
     int32 PhysicalAlphaStairSeed=INDEX_NONE,PhysicalOmegaStairSeed=INDEX_NONE;
+    int32 SmallCoverSites=0,LargeCoverSites=0;
     for(int32 TeamSize:{1,2,3,4,8,16})for(int32 Seed=0;Seed<516;++Seed)
     {
         C.ExpectedTeamSize=TeamSize;C.Seed=Seed;FERProceduralLayout L;
@@ -82,7 +83,8 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
                 if(GroundPoolCount!=9 || RoofPool || (TeamSize>1 && L.CoverSites.Num()<2) ||
                    L.PoolWater[0].Min.X>=-L.ArenaSize.X*.475f ||
                    L.PoolWater[0].Max.X>=L.CentralBuildingCenter.X-L.CentralBuildingSize.X*.5f)
-                {AddError(TEXT("waterfront must span the villa shore to the perimeter"));return false;}
+                {AddError(FString::Printf(TEXT("waterfront must span the villa shore to the perimeter: team=%d seed=%d pools=%d roof_pool=%d cover_sites=%d min_x=%.2f perimeter=%.2f max_x=%.2f villa_edge=%.2f"),
+                    TeamSize,Seed,GroundPoolCount,RoofPool,L.CoverSites.Num(),L.PoolWater[0].Min.X,-L.ArenaSize.X*.475f,L.PoolWater[0].Max.X,L.CentralBuildingCenter.X-L.CentralBuildingSize.X*.5f));return false;}
             }
             const bool Single=GroundPoolCount==1 && L.PoolWater[0].Max.Z<600 &&
                 FMath::IsNearlyZero(L.PoolWater[0].GetCenter().Y,.001);
@@ -96,6 +98,8 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
         }
         for(const auto& Name:L.FeatureNames)if(Name.ToString().StartsWith(TEXT("Cover.")) && Name!=FName(TEXT("Cover.FiringSteps")))CoverKinds.Add(Name);
         for(const auto& Site:L.CoverSites)CoverDimensions.Add(FIntVector(FMath::RoundToInt32(Site.Size.X),FMath::RoundToInt32(Site.Size.Y),FMath::RoundToInt32(Site.Size.Z)));
+        if(TeamSize==2)SmallCoverSites+=L.CoverSites.Num();
+        if(TeamSize==16)LargeCoverSites+=L.CoverSites.Num();
         for(const auto& Site:L.CoverSites)
         {
             if(Site.FiringStair==INDEX_NONE){++GroundOnlySites;continue;}
@@ -137,6 +141,7 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("both teams can receive the lower stair approach"),
         PhysicalAlphaStairSeed!=INDEX_NONE && PhysicalOmegaStairSeed!=INDEX_NONE);
     TestTrue(TEXT("some cover has firing steps"),FiringSites>0);
+    TestTrue(TEXT("large arenas add useful-sized cover instead of stretching the compact count"),LargeCoverSites>2*SmallCoverSites);
     TestTrue(TEXT("some cover stays at ground level"),GroundOnlySites>0);
     TestEqual(TEXT("five cover profiles sampled"),CoverKinds.Num(),5);
     TestTrue(TEXT("cover dimensions vary"),CoverDimensions.Num()>8);

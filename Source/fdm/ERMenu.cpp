@@ -178,6 +178,7 @@ void AERPlayerController::OpenMenuPage(int32 Page)
 }
 void AERPlayerController::ShowMenu(bool bShow)
 {
+    if(bShow)if(auto* C=Cast<AERCharacter>(GetPawn()))C->SetFireInputHeld(false);
     if (!IsLocalController() || !GetWorld()->GetGameViewport()) return;
     ResetSprintInput(); LastCrouchTap = -1;
     FireReleased(); WalkReleased(); CrouchReleased(); JumpReleased(); bShowScoreboard = false;
@@ -253,7 +254,7 @@ void AERPlayerController::ShowMenu(bool bShow)
             Add(Panel,SNew(STextBlock).Font(MenuFont(22)).Text_Lambda([this]()
             {
                 const int32 N=FMath::RoundToInt(ERServer::Get(GetWorld(),"Map.ExpectedTeamSize"));
-                return FText::FromString(FString::Printf(TEXT("Map sizing: %d vs %d · target %d m² (±10%%) · fixed at server creation"),N,N,N*1000));
+                return FText::FromString(FString::Printf(TEXT("Map sizing: %d vs %d · target %d m² (±10%%) · fixed at server creation"),N,N,N*1500));
             }));
             auto Body = SNew(SHorizontalBox);
             auto Teams = SNew(SVerticalBox);
@@ -332,7 +333,7 @@ void AERPlayerController::ShowMenu(bool bShow)
                 .Value_Lambda([GI](){return TOptional<int32>(FMath::RoundToInt(GI->ServerRules.Get("Map.ExpectedTeamSize")));})
                 .OnValueChanged_Lambda([GI](int32 N){GI->ServerRules.Set("Map.ExpectedTeamSize",N);})
                 .OnValueCommitted_Lambda([GI](int32 N,ETextCommit::Type){GI->ServerRules.Set("Map.ExpectedTeamSize",N);GI->SaveServerSettings();}));
-            Add(Sizing,Text(TEXT("500 m² per expected player (±10%). Fixed when the server is created; capacity is independent."),18));
+            Add(Sizing,Text(TEXT("750 m² per expected player (±10%). Fixed when the server is created; capacity is independent."),18));
             Choice(Field(), TEXT("Connection"), {TEXT("Internet (Epic Online Services)"), TEXT("LAN")},
                 [GI]() { return GI->bInternetMenu ? 0 : 1; },
                 [GI, Online](int32 I) { Online->Cancel(); GI->CancelLANSearch(); GI->bInternetMenu = I == 0; });

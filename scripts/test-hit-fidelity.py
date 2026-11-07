@@ -13,7 +13,13 @@ from client_shutdown import settle_clients
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--lag',type=int,nargs='*',help='One-way PktLag values in ms: run two peers instead of geometry')
 parser.add_argument('--map',default='L_Depot')
+parser.add_argument('--jitter',type=int,default=0,help='Packet lag variance in ms on both peers')
+parser.add_argument('--loss',type=int,default=0,help='Outgoing packet loss percent on both peers')
+parser.add_argument('--client-fps',type=int,default=60,help='Remote client frame cap for slow-client checks')
+parser.add_argument('--fire-input',action='store_true',help='Verify predicted feedback, automatic release and same-frame taps over saved moves')
 args=parser.parse_args()
+if args.jitter<0 or not 0<=args.loss<=100 or args.client_fps<1:parser.error('jitter >= 0, loss 0..100 and client-fps >= 1 are required')
+if args.fire_input and args.lag is None:args.lag=[0]
 project=Path(__file__).resolve().parents[1]
 engine=Path(os.environ.get('UE_ROOT','/Users/Shared/Epic Games/UE_5.8'))
 editor=engine/'Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor'
@@ -53,17 +59,22 @@ def geometry():
     raise SystemExit(0 if code==0 and complete and bodies and soles else 1)
 
 def lag(ms):
-    hostlog=logs/f'hit-lag-{ms}-host.log';clientlog=logs/f'hit-lag-{ms}-client.log'
+    suffix=f'-j{args.jitter}-l{args.loss}-fps{args.client_fps}' if args.jitter or args.loss or args.client_fps!=60 else ''
+    if args.fire_input:suffix+='-fire'
+    hostlog=logs/f'hit-lag-{ms}{suffix}-host.log';clientlog=logs/f'hit-lag-{ms}{suffix}-client.log'
+    emulation=[f'-PktLag={ms}',f'-PktLagVariance={args.jitter}',f'-PktLoss={args.loss}']
+    if args.fire_input:emulation+=['-ERFireInputProbe']
     processes=[];handles=[]
     try:
         handles.append(hostlog.open('w'))
-        host=subprocess.Popen(base+[travel+'?listen?Name=Target','-port=17971','-ERHitLagProbe',f'-PktLag={ms}'],stdout=handles[-1],stderr=subprocess.STDOUT)
+        host=subprocess.Popen(base+[travel+'?listen?Name=Target','-port=17971','-ERHitLagProbe']+emulation,stdout=handles[-1],stderr=subprocess.STDOUT)
         processes.append(host);deadline=time.monotonic()+90
         while 'listening on port 17971' not in hostlog.read_text(errors='replace'):
             if host.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Lag host did not listen')
             time.sleep(.2)
         handles.append(clientlog.open('w'))
-        client=subprocess.Popen(base+['127.0.0.1:17971?Name=Shooter','-ERHitLagProbe',f'-PktLag={ms}'],stdout=handles[-1],stderr=subprocess.STDOUT)
+        clientbase=[arg for arg in base if not arg.startswith('-ExecCmds=')]+[f'-ExecCmds=t.MaxFPS {args.client_fps}']
+        client=subprocess.Popen(clientbase+['127.0.0.1:17971?Name=Shooter','-ERHitLagProbe']+emulation,stdout=handles[-1],stderr=subprocess.STDOUT)
         processes.append(client)
         host.wait(timeout=120)
     finally:
@@ -74,6 +85,13 @@ def lag(ms):
                 try:process.wait(timeout=5)
                 except subprocess.TimeoutExpired:process.kill();process.wait()
         for handle in handles:handle.close()
+    if args.fire_input:
+        report=clientlog.read_text(errors='replace')
+        for line in report.splitlines():
+            if 'ER_FIRE_INPUT_' in line:print(line)
+        if host.returncode!=0 or 'ER_FIRE_INPUT_COMPLETE result=PASS' not in report or 'ER_FIRE_INPUT_FAIL' in report:
+            raise RuntimeError(f'Fire input transport failed; inspect {hostlog} and {clientlog}')
+        return
     def read(path,tag):
         rows={}
         for line in path.read_text(errors='replace').splitlines():

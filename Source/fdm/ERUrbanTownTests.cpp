@@ -33,6 +33,11 @@ bool FERUrbanTownLayoutTest::RunTest(const FString&)
         for(const auto& Outline:L.TownFootprints)TestTrue(TEXT("room wings and galleries have polygon plans"),Outline.Num()>=4);
         TestTrue(TEXT("paired central through-buildings"),L.TownBuildings.Num()>=2 && L.TownBuildings.Num()%2==0);
         TestTrue(TEXT("all circulation remains on the ground"),L.Ladders.IsEmpty() && L.StairRoutes.IsEmpty() && L.RooftopRoutes.IsEmpty());
+        TestEqual(TEXT("both base bypasses and their half-turn mates are reserved"),L.SpawnExitRoutes.Num(),4);
+        ERLayoutQueries::FLayoutSolids SpawnSolids(L);
+        const double HX=L.ArenaSize.X*.5,HY=L.ArenaSize.Y*.5;
+        for(double Side:{-45.,45.})TestTrue(TEXT("two separated standing lanes fit the perimeter spawn bypass"),
+            SpawnSolids.PawnClear({-HX+120+Side,-HY+550,100},{-HX+120+Side,-HY+800,100}));
         for(const auto& Path:L.RoomAccessRoutes)for(const auto& P:Path)TestTrue(TEXT("ground route height"),P.Z>=100 && P.Z<=112);
         for(int32 J=0;J<L.TownBuildings.Num();J+=2)
             TestTrue(TEXT("building footprints are half-turn pairs"),L.TownBuildings[J].TransformBy(FTransform(FRotator(0,180,0))).GetCenter().Equals(L.TownBuildings[J+1].GetCenter(),.01));
@@ -73,6 +78,9 @@ bool FERUrbanTownPhysicsTest::RunTest(const FString&)
         TestTrue(TEXT("all real sight and projectile rays screened"),ERPlayability::InitialSpawnsOccludedInWorld(World,FTransform::Identity,L));
         FCollisionQueryParams Q(SCENE_QUERY_STAT(ERTownPhysics),false);FHitResult Hit;
         const auto Capsule=FCollisionShape::MakeCapsule(34,92.5);
+        const double HX=L.ArenaSize.X*.5,HY=L.ArenaSize.Y*.5;
+        for(double Side:{-45.,45.})TestFalse(TEXT("two standing players fit the primary spawn bypass"),
+            World->SweepSingleByChannel(Hit,{-HX+120+Side,-HY+550,100},{-HX+120+Side,-HY+800,100},FQuat::Identity,ECC_Pawn,Capsule,Q));
         TArray<TArray<FVector>> Paths=L.RoomAccessRoutes;Paths.Append(L.CrossingRoutes);
         for(const auto& Path:Paths)for(int32 I=1;I<Path.Num();++I)
             TestFalse(TEXT("standing capsule traverses urban route"),World->SweepSingleByChannel(Hit,Path[I-1],Path[I],FQuat::Identity,ECC_Pawn,Capsule,Q));

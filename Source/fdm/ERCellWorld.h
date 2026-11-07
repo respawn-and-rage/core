@@ -53,6 +53,7 @@ struct FERCellPanel : FERCellPanelDesc
     FIntVector Dims = FIntVector::ZeroValue;
     int32 FirstChunk = 0, ChunksX = 0, ChunksZ = 0;
     FBox Bounds = FBox(ForceInit); // room-local
+    bool bSkinned=false; // support snapshots need no copy of the source triangles
 };
 // Stable within an epoch: panel index in the deterministic layout plus grid coordinates.
 struct FERCellId
@@ -63,12 +64,39 @@ struct FERCellId
     friend uint32 GetTypeHash(const FERCellId& Id) { return HashCombineFast(HashCombineFast(::GetTypeHash(Id.Panel),::GetTypeHash(Id.X)),HashCombineFast(::GetTypeHash(Id.Y),::GetTypeHash(Id.Z))); }
 };
 struct FERDamagedCell { uint32 Index = 0; float Health = 0; };
+// Support checks retain immutable masks across timer slices. Mutations detach
+// only a changed chunk, rather than copying the entire cell world for a check.
+class FERCellAliveBits
+{
+    TSharedPtr<TArray<uint64>> Storage;
+public:
+    const TArray<uint64>& Read() const { static const TArray<uint64> Empty;return Storage ? *Storage:Empty; }
+    TArray<uint64>& Write()
+    {
+        if(!Storage)Storage=MakeShared<TArray<uint64>>();
+        else if(!Storage.IsUnique())Storage=MakeShared<TArray<uint64>>(*Storage);
+        return *Storage;
+    }
+    operator const TArray<uint64>&() const { return Read(); }
+    FERCellAliveBits& operator=(const TArray<uint64>& Value){Write()=Value;return *this;}
+    bool operator==(const FERCellAliveBits& Other) const {return Read()==Other.Read();}
+    bool operator==(const TArray<uint64>& Other) const {return Read()==Other;}
+    friend bool operator==(const TArray<uint64>& A,const FERCellAliveBits& B){return A==B.Read();}
+    void Init(uint64 Value,int32 Count){Write().Init(Value,Count);}
+    int32 Num() const{return Read().Num();}
+    uint64 operator[](int32 Index) const{return Read()[Index];}
+    uint64& operator[](int32 Index){return Write()[Index];}
+    uint64& Last(){return Write().Last();}
+    const uint64* begin() const{return Read().GetData();}
+    const uint64* end() const{return Read().GetData()+Read().Num();}
+    SIZE_T GetAllocatedSize() const{return Read().GetAllocatedSize();}
+};
 // Dense alive bits plus sparse HP of damaged survivors. Intact cells have no entry.
 struct FERCellChunk
 {
     int32 Panel = 0, X0 = 0, Z0 = 0, SX = 0, SZ = 0, AliveCount = 0;
     uint32 Revision = 0;
-    TArray<uint64> Alive;
+    FERCellAliveBits Alive;
     TArray<uint64> InitialAlive; // only skins: distinguish source voids from cuts
     TArray<FERDamagedCell> Damaged;
     FBox Bounds = FBox(ForceInit); // room-local
@@ -93,6 +121,8 @@ public:
     // Validates everything before replacing live state.
     bool Build(const TArray<FERCellPanelDesc>& Desc, const FERCellSettings& Settings, const UERBlockMaterialCatalog* Catalog, FString& Error);
     void Reset();
+    // Immutable alive-mask snapshot, with support metadata only (no HP or art).
+    FERCellWorld MakeSupportSnapshot() const;
     const TArray<FERCellPanel>& GetPanels() const { return Panels; }
     const TArray<FERCellChunk>& GetChunks() const { return Chunks; }
     int64 GetCellCount() const { return CellCount; }
@@ -125,6 +155,7 @@ public:
     bool DecodeChunk(int32 Chunk, const TArray<uint8>& Data, TArray<uint64>& OutAlive) const;
     // Client state: alive bits only, HP stay on the server.
     void SetChunkAlive(int32 Chunk, const TArray<uint64>& Alive, TArray<int32>& Dirty);
+    void SetChunkAlive(int32 Chunk, const TArray<uint64>& Alive, TSet<int32>& Dirty);
     uint32 GetLayoutDigest() const { return LayoutDigest; }
     uint32 GetAliveDigest() const;
     SIZE_T GetAllocatedBytes() const;

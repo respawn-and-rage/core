@@ -255,6 +255,7 @@ bool AERCharacter::SetMercenaryAnimationSkeleton(UAnimSequence* Animation, USkel
 UERHealthComponent::UERHealthComponent() { SetIsReplicatedByDefault(true); }
 bool UERHealthComponent::IsProtected() const
 {
+    if(const auto* Character=Cast<AERCharacter>(GetOwner());Character && !Character->bNetworkReady)return true;
     const auto* State = GetWorld()->GetGameState<AERGameState>();
     return State && State->GetServerWorldTimeSeconds() < ProtectionEndServerTime;
 }
@@ -262,7 +263,7 @@ float UERHealthComponent::ReceiveDamage(float Amount, AController* Killer, float
 {
     auto* Character = Cast<AERCharacter>(GetOwner());
     auto* Mode = GetWorld()->GetAuthGameMode<AERGameMode>();
-    if (!Character || !Character->HasAuthority() || !Mode || !Mode->IsMatchInProgress() || bDead || IsProtected() || Amount <= 0) return 0;
+    if (!Character || !Character->bNetworkReady || !Character->HasAuthority() || !Mode || !Mode->IsMatchInProgress() || bDead || IsProtected() || Amount <= 0) return 0;
     if(Killer)
     {
         if(Killer==Character->GetController())Amount*=ERServer::Get(GetWorld(),"Damage.Self");
@@ -516,7 +517,9 @@ void AERCharacter::Tick(float DeltaTime)
     if (BlastRinging) UpdateBlastRinging();
     Cast<UERMovement>(GetCharacterMovement())->ApplyPosturePresentation();
     if(HasAuthority())for(auto Item:Inventory)if(Item)Item->UpdateAccuracyRecovery();
+    if(HasAuthority())UpdateFireAcknowledgement();
     UpdateWeaponPresentation();
+    UpdatePredictedFire();
     DamageViewKick = FMath::VInterpTo(DamageViewKick, FVector::ZeroVector, DeltaTime, 18.f);
     CosmeticDamagePitch = FMath::VInterpTo(CosmeticDamagePitch, FVector::ZeroVector, DeltaTime, 18.f);
     DamageVisuals.RemoveAll([this](const FERDamageVisual& V){return GetWorld()->GetTimeSeconds()-V.LocalTime>.7;});
@@ -1032,6 +1035,7 @@ void AERCharacter::ApplyDeathVisuals()
 {
     if (bDeathVisualsApplied) return;
     bDeathVisualsApplied = true;
+    bPredictingFire=false;
     StopBlastRinging();
     ResetAimPunch();
     if (HasAuthority()) for (auto Item : Inventory) if (Item) Item->Cancel();
@@ -1055,6 +1059,93 @@ void AERCharacter::ApplyDeathVisuals()
     FirstPersonMuzzleFlash->SetVisibility(false); WorldMuzzleFlash->SetVisibility(false);
     CameraKick = 0; MuzzleFlashUntil = 0;
 }
+void AERCharacter::OnRep_NetworkReady()
+{
+    SetActorEnableCollision(bNetworkReady && !Health->bDead);
+    if(!bNetworkReady){bPredictingFire=false;SetFireInputHeld(false);}
+}
+void AERCharacter::SetFireInputHeld(bool Held)
+{
+    if(!IsLocallyControlled())return;
+    if(Held && (!bNetworkReady || Health->bDead))return;
+    auto* Movement=CastChecked<UERMovement>(GetCharacterMovement());
+    if(Movement->FireInput.Held==Held)return;
+    const int32 SelectedSlot=Inventory.IndexOfByKey(Weapon);
+    const FERFireWeaponBinding SelectedWeapon{uint8(SelectedSlot>=0 && SelectedSlot<MAX_uint8 ? SelectedSlot:MAX_uint8),WeaponSelectionRevision};
+    Movement->SetFireInput(Held,SelectedWeapon);
+    SetGrenadeInputHeld(Held);
+    if(HasAuthority()){ApplyFireMove(Movement->FireInput.Sequence,Held,Movement->FireWeapon);return;}
+    bPredictingFire=Held;
+    if(Held)
+    {
+        if(PredictedFireWeapon!=Weapon)NextPredictedFireTime=0;
+        PredictedFireWeapon=Weapon;PredictedFireSequence=Movement->FireInput.Sequence;PredictedFireOrdinal=0;
+        PredictedMagazineLimit=Weapon ? Weapon->MagazineAmmo:0;
+        UpdatePredictedFire();
+    }
+}
+void AERCharacter::ApplyFireMove(uint16 Sequence,bool Held,const FERFireWeaponBinding& WeaponBinding)
+{
+    if(!HasAuthority())return;
+    bool Pressed=false;
+    if(!ServerFireInput.Receive(Sequence,Held,Pressed))return;
+    ++AcceptedFireMoveCount;
+    if(Pressed)
+    {
+        if(Weapon)Weapon->StopFire();
+        ServerFireOrdinal=0;
+        FireAcknowledgement.Sequence=Sequence;FireAcknowledgement.ShotOrdinal=0;
+        FireAcknowledgement.Data=Weapon ? Weapon->Data.Get():nullptr;
+        // A reliable switch can overtake a retransmitted movement press. Consume
+        // its sequence, but never transfer that press onto the newly selected gun.
+        if(WeaponBinding.Matches(Inventory.IndexOfByKey(Weapon),WeaponSelectionRevision))ApplyStartFire();
+    }
+    if(!Held && Weapon)Weapon->StopFire();
+    UpdateFireAcknowledgement();++FireAcknowledgement.Revision;ForceNetUpdate();
+#if !UE_BUILD_SHIPPING
+    if(FParse::Param(FCommandLine::Get(),TEXT("ERHitLagProbe")))
+        UE_LOG(LogTemp,Display,TEXT("ER_FIRE_MOVE pawn=%s sequence=%u pressed=%d held=%d shots=%u move=%.6f"),
+            *GetName(),Sequence,Pressed,Held,ServerFireOrdinal,CastChecked<UERMovement>(GetCharacterMovement())->LastAcceptedMoveTimeStamp);
+#endif
+}
+void AERCharacter::UpdateFireAcknowledgement()
+{
+    const bool Firing=Weapon && Weapon->IsFiring();
+    if(FireAcknowledgement.Firing==Firing)return;
+    FireAcknowledgement.Firing=Firing;++FireAcknowledgement.Revision;ForceNetUpdate();
+}
+void AERCharacter::UpdatePredictedFire()
+{
+    if(!bPredictingFire || HasAuthority())return;
+    const auto* State=GetWorld()->GetGameState<AERGameState>();
+    const auto* Data=Weapon ? Weapon->Tuned():nullptr;
+    if(!IsLocallyControlled() || !bNetworkReady || Health->bDead || !State || !State->IsMatchInProgress() ||
+        PredictedFireWeapon!=Weapon || !Data || Data->Payload!=EERPayload::Bullet || Weapon->bReloading ||
+        Weapon->MagazineAmmo<=0 || PredictedFireOrdinal>=PredictedMagazineLimit || IsWeaponStowed() ||
+        CastChecked<UERMovement>(GetCharacterMovement())->bHighClimb)
+    {bPredictingFire=false;return;}
+    const double Now=GetWorld()->GetTimeSeconds();
+    const double ServerNow=State->GetServerWorldTimeSeconds();
+    if(!ERFirePrediction::Ready(Now,NextPredictedFireTime,PredictedFireOrdinal,ServerNow,Weapon->LastSpreadShotServerTime,Data->ShotInterval))return;
+    ++PredictedFireOrdinal;
+    if(ShotPresentation.Mark(PredictedFireSequence,PredictedFireOrdinal))
+    {
+        ++PredictedShotFeedbackCount;PlayShotPresentation(Weapon->Data);
+    }
+    NextPredictedFireTime=Now+FMath::Max(.01f,Data->ShotInterval);
+    if(!Data->bAutomatic)bPredictingFire=false;
+}
+void AERCharacter::OnRep_FireAcknowledgement()
+{
+    if(HasAuthority() || !IsLocallyControlled())return;
+    const auto& Ack=FireAcknowledgement;
+    // Replicated state eventually repairs a lost multicast. It carries no hit,
+    // damage or tracer prediction and coalesces during an automatic burst.
+    if(Ack.ShotOrdinal>0 && ShotPresentation.Mark(Ack.Sequence,Ack.ShotOrdinal) &&
+        bNetworkReady && !Health->bDead && Weapon && Weapon->Data==Ack.Data)
+        PlayShotPresentation(Ack.Data);
+    if(Ack.Sequence==PredictedFireSequence && !Ack.Firing)bPredictingFire=false;
+}
 void AERCharacter::ServerStartFire_Implementation()
 {
     const auto* Driver = GetNetDriver();
@@ -1064,7 +1155,7 @@ void AERCharacter::ServerStartFire_Implementation()
     bQueuedFireStart = true; bQueuedFireStop = false;
     GetWorldTimerManager().SetTimerForNextTick(this, &AERCharacter::ApplyQueuedFire);
 }
-void AERCharacter::ApplyStartFire() { if (!Health->bDead && Weapon && !Cast<UERMovement>(GetCharacterMovement())->bHighClimb) Weapon->StartFire(); }
+void AERCharacter::ApplyStartFire() { if (bNetworkReady && !Health->bDead && Weapon && !Cast<UERMovement>(GetCharacterMovement())->bHighClimb) Weapon->StartFire(); }
 void AERCharacter::ApplyQueuedFire()
 {
     const bool bStart = bQueuedFireStart, bStop = bQueuedFireStop;
@@ -1124,7 +1215,9 @@ void AERCharacter::InitializeLoadout(int32 Primary)
             Item->AttachToComponent(GetRootComponent(),FAttachmentTransformRules::KeepRelativeTransform);
             Inventory.Add(Item);
         }
-        Weapon=Inventory.IsEmpty()?nullptr:Inventory[0];ForceNetUpdate();return;
+        Weapon=Inventory.IsEmpty()?nullptr:Inventory[0];
+        if(Weapon)++WeaponSelectionRevision;
+        ForceNetUpdate();return;
     }
     if(Arsenal.Num()<11)return;
     if (Weapon) Weapon->Destroy();
@@ -1142,6 +1235,7 @@ void AERCharacter::InitializeLoadout(int32 Primary)
         Inventory.Add(Item);
     }
     Weapon = Inventory.IsEmpty() ? nullptr : Inventory[bReference ? FMath::Clamp(Primary, 0, 9) : 0];
+    if(Weapon)++WeaponSelectionRevision;
     ForceNetUpdate();
     UE_LOG(LogTemp, Display, TEXT("ER_LOADOUT_SPAWN primary=%d slots=%d"), Primary, Inventory.Num());
 }
@@ -1173,7 +1267,7 @@ void AERCharacter::ServerSelectWeapon_Implementation(int32 Slot)
     if(!Inventory.IsValidIndex(Slot) || !Inventory[Slot] || Weapon==Inventory[Slot])return;
     if(bPresetInventory && Inventory[Slot]->Data && Inventory[Slot]->Data->Payload!=EERPayload::Bullet && Inventory[Slot]->Data->Payload!=EERPayload::Melee && Inventory[Slot]->MagazineAmmo+Inventory[Slot]->ReserveAmmo<=0)return;
     if(Weapon)Weapon->Cancel();
-    Weapon=Inventory[Slot];
+    Weapon=Inventory[Slot];++WeaponSelectionRevision;
     if(IsWeaponStowed())Weapon->Cancel();
     MuzzleFlashUntil = 0; CameraKick = 0;
     ForceNetUpdate();
@@ -1282,26 +1376,40 @@ void AERCharacter::UpdateWeaponPresentation()
     MuzzleFlashUntil = 0;
     UE_LOG(LogTemp, Display, TEXT("ER_WEAPON_MODEL name=%s mesh=%s"), *Data->DisplayName, *Data->Mesh->GetPathName());
 }
-void AERCharacter::MulticastShot_Implementation(FVector_NetQuantize Start, FVector_NetQuantize End, bool bTracer, UERWeaponData* FiredData, const TArray<FVector_NetQuantize>& PelletEnds)
+void AERCharacter::MulticastShot(FVector_NetQuantize Start,FVector_NetQuantize End,bool bTracer,UERWeaponData* FiredData,const TArray<FVector_NetQuantize>& PelletEnds)
 {
-    ++ShotFeedbackCount;
+    if(!HasAuthority())return;
+    FireAcknowledgement.Sequence=ServerFireInput.Sequence;
+    FireAcknowledgement.ShotOrdinal=++ServerFireOrdinal;
+    FireAcknowledgement.Data=FiredData;
+    FireAcknowledgement.ShotServerTime=GetWorld()->GetTimeSeconds();
+    FireAcknowledgement.Firing=Weapon && Weapon->IsFiring();
+    ++FireAcknowledgement.Revision;ForceNetUpdate();
+    MulticastConfirmedShot(Start,End,bTracer,FiredData,PelletEnds,ServerFireInput.Sequence,ServerFireOrdinal);
+}
+void AERCharacter::MulticastConfirmedShot_Implementation(FVector_NetQuantize Start,FVector_NetQuantize End,bool bTracer,UERWeaponData* FiredData,const TArray<FVector_NetQuantize>& PelletEnds,uint16 Sequence,uint16 Ordinal)
+{
     if (FParse::Param(FCommandLine::Get(),TEXT("ERShotAudit")))
         UE_LOG(LogTemp,Display,TEXT("ER_PELLET_TRACERS pawn=%s weapon=%s count=%d"),*GetName(),*GetNameSafe(FiredData),bTracer ? (PelletEnds.IsEmpty()?1:FMath::Min(PelletEnds.Num(),16)) : 0);
-    const auto* Data = Weapon ? Weapon->Data.Get() : nullptr;
-    // Smoke is also an authoritative recon occluder. Record authorized cuts on
-    // dedicated servers before skipping presentation, exactly once per peer.
+    const auto* Data=FiredData ? FiredData:(Weapon ? Weapon->Data.Get():nullptr);
+    // Only confirmed endpoints may open smoke. Cosmetics never mutate recon.
     if(Data && Data->Payload==EERPayload::Bullet)
-        for(TActorIterator<AERSmokeCloud> It(GetWorld());It;++It) It->AddShot(Start,End);
-    if (GetNetMode() == NM_DedicatedServer || Health->bDead || IsWeaponStowed() || Cast<UERMovement>(GetCharacterMovement())->bHighClimb) return;
-    const bool bFirstPerson = IsLocallyControlled() && Controller && Controller->IsPlayerController();
-    if (bTracer && Data && Data->Payload == EERPayload::Bullet)
+        for(TActorIterator<AERSmokeCloud> It(GetWorld());It;++It)It->AddShot(Start,End);
+    if(GetNetMode()==NM_DedicatedServer || Health->bDead || !bNetworkReady || IsWeaponStowed() || Cast<UERMovement>(GetCharacterMovement())->bHighClimb)return;
+    const bool bFirstPerson=IsLocallyControlled() && Controller && Controller->IsPlayerController();
+    if(bTracer && Data && Data->Payload==EERPayload::Bullet)
     {
-        if (PelletEnds.IsEmpty())
-            AERAttachedTracer::Spawn(this, TracerSystem, End, bFirstPerson);
-        else
-            for (int32 I=0;I<FMath::Min(PelletEnds.Num(),16);++I)
-                AERAttachedTracer::Spawn(this, TracerSystem, PelletEnds[I], bFirstPerson);
+        if(PelletEnds.IsEmpty())AERAttachedTracer::Spawn(this,TracerSystem,End,bFirstPerson);
+        else for(int32 I=0;I<FMath::Min(PelletEnds.Num(),16);++I)AERAttachedTracer::Spawn(this,TracerSystem,PelletEnds[I],bFirstPerson);
     }
+    if(ShotPresentation.Mark(Sequence,Ordinal))PlayShotPresentation(FiredData);
+}
+void AERCharacter::PlayShotPresentation(UERWeaponData* FiredData)
+{
+    if(GetNetMode()==NM_DedicatedServer || Health->bDead || !bNetworkReady || IsWeaponStowed() || Cast<UERMovement>(GetCharacterMovement())->bHighClimb)return;
+    ++ShotFeedbackCount;
+    const auto* Data=Weapon ? Weapon->Data.Get():nullptr;
+    const bool bFirstPerson=IsLocallyControlled() && Controller && Controller->IsPlayerController();
     if (Data && Data->WeaponFireAnimation)
         for (auto* Component : {FirstPersonRifle.Get(), WorldRifle.Get()})
         {
@@ -1388,9 +1496,12 @@ void AERCharacter::MulticastShot_Implementation(FVector_NetQuantize Start, FVect
 void AERCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps); DOREPLIFETIME(AERCharacter, Weapon);
+    DOREPLIFETIME_CONDITION(AERCharacter,WeaponSelectionRevision,COND_OwnerOnly);
     DOREPLIFETIME(AERCharacter, bReferenceInventory);
     DOREPLIFETIME(AERCharacter, bPresetInventory); DOREPLIFETIME(AERCharacter, ActivePreset); DOREPLIFETIME(AERCharacter, ActiveVariant);
     DOREPLIFETIME(AERCharacter, Inventory);
+    DOREPLIFETIME(AERCharacter,bNetworkReady);
+    DOREPLIFETIME_CONDITION(AERCharacter,FireAcknowledgement,COND_OwnerOnly);
     DOREPLIFETIME_CONDITION(AERCharacter, SpawnFacingYaw, COND_InitialOnly);
     DOREPLIFETIME_CONDITION(AERCharacter, RecoilState, COND_OwnerOnly);
     DOREPLIFETIME_CONDITION(AERCharacter, DeathFocus, COND_OwnerOnly);

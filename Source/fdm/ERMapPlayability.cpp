@@ -20,6 +20,7 @@ const TCHAR* const SpawnSight=TEXT("INITIAL_SPAWN_LOS");
 const TCHAR* const Vantage=TEXT("DOMINANT_VANTAGE");
 const TCHAR* const Exposure=TEXT("ROUTE_EXPOSURE");
 const TCHAR* const Diversity=TEXT("ROUTE_DIVERSITY");
+const TCHAR* const CoverAccess=TEXT("COVER_ACCESS");
 constexpr float PawnRadius=35,PawnHalfHeight=93;
 constexpr float SweepRadius=34,SweepHalfHeight=88;
 
@@ -72,11 +73,16 @@ TArray<FVector> ThinRoute(const TArray<FVector>& Dense)
 class FRouteGraph
 {
 public:
-    FRouteGraph(FERTacticalGraph& InGraph,const FERProceduralLayout& InLayout,const FERPlayabilityPolicy& InPolicy):G(InGraph),L(InLayout),P(InPolicy),Solids(InLayout){}
+    FRouteGraph(FERTacticalGraph& InGraph,const FERProceduralLayout& InLayout,const FERPlayabilityPolicy& InPolicy,bool InFlatGround):G(InGraph),L(InLayout),P(InPolicy),Solids(InLayout),bFlatGround(InFlatGround && !InLayout.GradedTerrain && InLayout.RoomShell.IsEmpty() && InLayout.UnderpassBreaches.IsEmpty()){}
     void Add(const TArray<FVector>& Path,const FString& Source,EERTacticalMove Move=EERTacticalMove::Walk,bool Confirmed=true,bool Closed=false)
     {
         if(Path.Num()<2)return;
-        auto& R=Routes.AddDefaulted_GetRef();R.Points=ThinRoute(Path);R.Source=Source;R.Move=Move;R.bConfirmed=Confirmed || Move!=EERTacticalMove::Walk;R.bClosed=Closed;
+        const auto Points=ThinRoute(Path);
+        // Some templates already record both symmetry copies. Re-adding them
+        // must not consume the bounded connector search with identical spans.
+        for(auto& Existing:Routes)if(Existing.Move==Move && Existing.bClosed==Closed && Existing.Points==Points)
+        {Existing.bConfirmed|=Confirmed || Move!=EERTacticalMove::Walk;return;}
+        auto& R=Routes.AddDefaulted_GetRef();R.Points=Points;R.Source=Source;R.Move=Move;R.bConfirmed=Confirmed || Move!=EERTacticalMove::Walk;R.bClosed=Closed;
     }
     void AddAll(const TArray<TArray<FVector>>& Paths,const TCHAR* Source,EERTacticalMove Move=EERTacticalMove::Walk,bool Confirmed=true)
     {
@@ -116,12 +122,42 @@ public:
                 if(Zone.IsInsideOrOnXY(Q) && Q.Z<=Zone.Max.Z)return Team;
             return int32(INDEX_NONE);
         };
+        auto StaysInZone=[&](const TArray<FVector>& Path)
+        {
+            if(Path.IsEmpty())return false;
+            const int32 Team=ZoneOf(Path[0]);
+            for(int32 I=1;I<Path.Num();++I)
+            {
+                const FVector A=Path[I-1],Delta=Path[I]-A;
+                // Classify every interval cut by a base boundary. Endpoints
+                // alone miss a straight or bent connector passing through a base.
+                TArray<double> Cuts{0.,1.};
+                for(const auto* Zones:{&AlphaZones,&OmegaZones})for(const auto& Zone:*Zones)
+                    for(int32 Axis=0;Axis<3;++Axis)if(!FMath::IsNearlyZero(Delta[Axis]))
+                        for(double Plane:{Zone.Min[Axis],Zone.Max[Axis]})
+                        {
+                            const double Along=(Plane-A[Axis])/Delta[Axis];
+                            if(Along>0 && Along<1)Cuts.Add(Along);
+                        }
+                Cuts.Sort();
+                for(int32 J=0;J<Cuts.Num();++J)
+                {
+                    if(ZoneOf(A+Delta*Cuts[J])!=Team)return false;
+                    if(J && ZoneOf(A+Delta*((Cuts[J-1]+Cuts[J])*.5))!=Team)return false;
+                }
+            }
+            return true;
+        };
         for(const auto& Link:Links)
         {
+            const int32 A=Node(Link.A,Link.Source),B=Node(Link.B,Link.Source);
+            TArray<FVector> Line{G.Nodes[A].Position};Line.Append(Link.Path);Line.Add(G.Nodes[B].Position);
             // Bounded bases are left through validated routes, never through a guessed join.
-            if(G.bExitsBounded && ZoneOf(Link.A)!=ZoneOf(Link.B))continue;
-            const int32 Edge=Connect(Node(Link.A,Link.Source),Node(Link.B,Link.Source),EERTacticalMove::Walk,Link.Source,false);
-            if(Edge!=INDEX_NONE)G.Edges[Edge].Path={Link.A,Link.B};
+            // Merging can move an endpoint across a boundary: inspect the same
+            // complete polyline that distance and physical confirmation use.
+            if(G.bExitsBounded && !StaysInZone(Line))continue;
+            const int32 Edge=Connect(A,B,EERTacticalMove::Walk,Link.Source,false);
+            if(Edge!=INDEX_NONE)G.SetPath(Edge,Link.Path);
         }
         for(auto& V:G.Nodes)if(const int32 Team=ZoneOf(V.Position);Team!=INDEX_NONE){V.bBase=true;V.Team=Team;}
     }
@@ -129,8 +165,9 @@ public:
 private:
     struct FCut{int32 Segment;float Along;FVector Point;};
     struct FRoute{TArray<FVector> Points;FString Source;EERTacticalMove Move;bool bConfirmed,bClosed;TArray<FCut> Cuts;};
-    struct FLink{FVector A,B;FString Source;};
+    struct FLink{FVector A,B;FString Source;TArray<FVector> Path;};
     FERTacticalGraph& G;const FERProceduralLayout& L;const FERPlayabilityPolicy& P;FLayoutSolids Solids;
+    bool bFlatGround=false;
     TArray<FRoute> Routes;TArray<FLink> Links;TSet<uint64> Known;
     static bool Walkable(const FRoute& R){return R.Move==EERTacticalMove::Walk || R.Move==EERTacticalMove::Ramp;}
     static int32 SegmentCount(const FRoute& R){return R.Points.Num()-(R.bClosed ? 0:1);}
@@ -172,26 +209,52 @@ private:
     {
         struct FCandidate{float Distance;int32 Route,Segment;float Along;FVector Point;};
         TArray<FCandidate> Candidates;
+        auto Ground=[&](FVector Point){return bFlatGround && FMath::Abs(Point.Z-100)<3;};
+        auto Candidate=[&](int32 Route,int32 SegmentIndex,float Along,FVector Point)
+        {
+            const float Distance=FVector::Dist2D(End,Point);
+            const bool Floor=Ground(End) && Ground(Point);
+            if(Distance<=(Floor ? Radius*2:Radius) && FMath::Abs(Point.Z-End.Z)<=P.MergeRadius+.2f*Distance)
+                Candidates.Add({Distance,Route,SegmentIndex,Along,Point});
+        };
         for(int32 I=0;I<Routes.Num();++I)if(I!=Self && Walkable(Routes[I]))
             for(int32 S=0;S<SegmentCount(Routes[I]);++S)
             {
                 FVector A1;const FVector A0=Segment(Routes[I],S,A1);
                 const FVector2D Flat(A1-A0);const double Squared=Flat.SizeSquared();
                 const float Along=Squared>0 ? FMath::Clamp(FVector2D::DotProduct(FVector2D(End-A0),Flat)/Squared,0.,1.):0;
-                const FVector Point=FMath::Lerp(A0,A1,Along);const float Distance=FVector::Dist2D(End,Point);
-                if(Distance<=Radius && FMath::Abs(Point.Z-End.Z)<=P.MergeRadius+.2f*Distance)Candidates.Add({Distance,I,S,Along,Point});
+                Candidate(I,S,Along,FMath::Lerp(A0,A1,Along));
+                if(Ground(End) && Ground(A0) && Ground(A1))
+                {if(Along>0)Candidate(I,S,0,A0);if(Along<1)Candidate(I,S,1,A1);}
             }
+        // Ladder feet on the continuous primary floor can join each other.
+        // Never create a horizontal walk between arbitrary elevated landings.
+        if(Ground(End))for(int32 I=0;I<Routes.Num();++I)if(I!=Self && !Walkable(Routes[I]))
+            for(int32 J:{0,Routes[I].Points.Num()-1})if(Ground(Routes[I].Points[J]))
+                Candidate(I,J==0 ? 0:Routes[I].Points.Num()-2,J==0 ? 0.f:1.f,Routes[I].Points[J]);
         Candidates.Sort([](const FCandidate& A,const FCandidate& B){return A.Distance!=B.Distance ? A.Distance<B.Distance:A.Route!=B.Route ? A.Route<B.Route:A.Segment<B.Segment;});
         // Cover may hide the nearest point of a lane, so a few further spans are tried.
-        TArray<int32> Joined;int32 Tries=0;
+        TArray<int32> Joined;TArray<FVector> TriedPoints;int32 Tries=0;
         for(const auto& C:Candidates)
         {
             if(Joined.Num()>=3 || Tries>=16)break;
             if(Joined.Contains(C.Route))continue;
-            ++Tries;
-            if(C.Distance>P.MergeRadius && !Solids.PawnClear(End,C.Point))continue;
+            if(TriedPoints.ContainsByPredicate([&](const FVector& Point){return Point.Equals(C.Point,.1);}))continue;
+            ++Tries;TriedPoints.Add(C.Point);
+            TArray<FVector> Walk{End,C.Point};
+            if(C.Distance>P.MergeRadius && !Solids.PawnClear(End,C.Point))
+            {
+                bool Found=false;
+                // These templates have a continuous flat primary floor. Test
+                // two orthogonal detours around furniture, never through it.
+                if(Ground(End) && Ground(C.Point))for(const FVector Corner:{FVector(End.X,C.Point.Y,100),FVector(C.Point.X,End.Y,100)})
+                    if(FVector::Dist(End,Corner)+FVector::Dist(Corner,C.Point)<=Radius*2 &&
+                       Solids.PawnClear(End,Corner) && Solids.PawnClear(Corner,C.Point))
+                    {Walk={End,Corner,C.Point};Found=true;break;}
+                if(!Found)continue;
+            }
             Routes[C.Route].Cuts.Add({C.Segment,C.Along,C.Point});
-            if(C.Distance>P.MergeRadius)Links.Add({End,C.Point,Source+TEXT(".link")});
+            if(C.Distance>P.MergeRadius)Links.Add({End,C.Point,Source+TEXT(".link"),MoveTemp(Walk)});
             Joined.Add(C.Route);
         }
     }
@@ -213,7 +276,7 @@ private:
             const auto Move=R.Move!=EERTacticalMove::Walk ? R.Move:Slope>.6f ? EERTacticalMove::Stairs:Slope>.02f ? EERTacticalMove::Ramp:R.Move;
             // A straight sweep cannot climb treads or rungs: each template's pawn probes prove them.
             const int32 Edge=Connect(Previous,Next,Move,R.Source,R.bConfirmed || Move==EERTacticalMove::Stairs || Move==EERTacticalMove::Ladder);
-            if(Edge!=INDEX_NONE)G.Edges[Edge].Path={From,Line[I]};
+            if(Edge!=INDEX_NONE)G.SetPath(Edge,{From,Line[I]});
             Previous=Next;From=Line[I];
         }
     }
@@ -222,13 +285,26 @@ private:
 void BuildRoomsGraph(const FERProceduralLayout& L,FERTacticalGraph& G)
 {
     G.Coverage=EERGraphCoverage::Exact;G.bExitsBounded=true;
+    const FLayoutSolids Solids(L);
+    auto ClearRoomWalk=[&](FVector A,FVector B)
+    {
+        if(Solids.Unknown>0 || !Solids.PawnClear(A,B))return false;
+        for(const auto& Face:L.RoomShell)
+        {
+            if(FMath::Abs(FVector::CrossProduct(Face.B-Face.A,Face.C-Face.A).GetSafeNormal().Z)>=.7)continue;
+            const FBox Wall=(FBox(ForceInit)+Face.A+Face.B+Face.C+Face.D).ExpandBy(FVector(PawnRadius,PawnRadius,PawnHalfHeight));
+            if(FMath::LineBoxIntersection(Wall,A,B,B-A))return false;
+        }
+        return true;
+    };
     G.Note=TEXT("RoomNodes and RoomLinks: the sealed shell allows no other movement");
     const FVector Alpha=L.AlphaSpawns.IsEmpty() ? FVector::ZeroVector:L.AlphaSpawns[0].GetLocation();
     const FVector Omega=L.OmegaSpawns.IsEmpty() ? FVector::ZeroVector:L.OmegaSpawns[0].GetLocation();
     for(int32 I=0;I<L.RoomNodes.Num();++I)
     {
         const auto& R=L.RoomNodes[I];auto& V=G.Nodes.AddDefaulted_GetRef();
-        V.Position=R.Center;V.Source=FString::Printf(TEXT("room%d"),I);V.bBase=R.Base;
+        // Room metadata stores floor centres; routes and graph positions store pawn centres.
+        V.Position=R.Center+FVector(0,0,100);V.Source=FString::Printf(TEXT("room%d"),I);V.bBase=R.Base;
         V.Kind=R.Junction ? EERTacticalNodeKind::Junction:R.Upper ? EERTacticalNodeKind::Upper:EERTacticalNodeKind::Room;
         // With explicit secondary spawn nodes, retain the original base room
         // in the spawn set as well; it must not disappear from path metrics.
@@ -241,7 +317,7 @@ void BuildRoomsGraph(const FERProceduralLayout& L,FERTacticalGraph& G)
         const bool Sloped=FMath::Abs(E.End.Z-E.Start.Z)>.02f*FVector::Dist2D(E.Start,E.End);
         const bool Route=L.RoomAccessRoutes.IsValidIndex(I) && L.RoomAccessRoutes[I].Num()>=2;
         const int32 Edge=G.AddEdge(E.A,E.B,Sloped ? EERTacticalMove::Ramp:EERTacticalMove::Walk,FString::Printf(TEXT("link%d"),I),Route,E.Width-2*E.Cut);
-        if(Edge!=INDEX_NONE && Route)G.Edges[Edge].Path=L.RoomAccessRoutes[I];
+        if(Edge!=INDEX_NONE && Route)G.SetPath(Edge,L.RoomAccessRoutes[I]);
     }
     // Each secondary pocket is a separate base in the exact room graph. Join
     // it along the already furnished corridor polyline, never across a wall.
@@ -258,7 +334,26 @@ void BuildRoomsGraph(const FERProceduralLayout& L,FERTacticalGraph& G)
             }
         }
         auto& Node=G.Nodes.AddDefaulted_GetRef();Node.Position=Zone.Center;Node.Kind=EERTacticalNodeKind::Spawn;Node.Team=Zone.Team;Node.bBase=true;Node.Source=TEXT("spawn-zone");
-        if(LinkIndex==INDEX_NONE)continue;
+        if(LinkIndex==INDEX_NONE)
+        {
+            // A pocket can join a primary circulation route inside a room,
+            // rather than a corridor RoomLink. Preserve its validated exit,
+            // then connect only to a room centre reachable by a clear sweep.
+            int32 Room=INDEX_NONE;double Distance=TNumericLimits<double>::Max();
+            for(int32 I=0;I<L.RoomNodes.Num();++I)
+            {
+                const FVector Center=G.Nodes[I].Position;
+                const double Candidate=FVector::DistSquared(Join,Center);
+                if(Candidate<Distance && FMath::Abs(Join.Z-Center.Z)<1 && ClearRoomWalk(Join,Center))
+                {Room=I;Distance=Candidate;}
+            }
+            if(Room!=INDEX_NONE)
+            {
+                const int32 Edge=G.AddEdge(G.Nodes.Num()-1,Room,EERTacticalMove::Walk,TEXT("spawn-zone-room"),false,300);
+                if(Edge!=INDEX_NONE){TArray<FVector> Path=Zone.ExitRoute;Path.Add(G.Nodes[Room].Position);G.SetPath(Edge,MoveTemp(Path));}
+            }
+            continue;
+        }
         const auto& Link=L.RoomLinks[LinkIndex];const auto& Route=L.RoomAccessRoutes[LinkIndex];
         const bool TowardA=FVector::DistSquared(Join,Route[0])<FVector::DistSquared(Join,Route.Last());
         const int32 Edge=G.AddEdge(G.Nodes.Num()-1,TowardA ? Link.A:Link.B,EERTacticalMove::Walk,TEXT("spawn-zone-exit"),true,300);
@@ -266,6 +361,7 @@ void BuildRoomsGraph(const FERProceduralLayout& L,FERTacticalGraph& G)
         auto& Path=G.Edges[Edge].Path;Path=Zone.ExitRoute;
         if(TowardA){for(int32 J=Segment-1;J>=0;--J)Path.Add(Route[J]);}
         else {for(int32 J=Segment;J<Route.Num();++J)Path.Add(Route[J]);}
+        G.SetPath(Edge,MoveTemp(Path));
     }
 
 }
@@ -296,7 +392,7 @@ void BuildRoutesGraph(const FERProceduralLayout& L,EERMapArchetype Archetype,con
     // Courts and walled streets bound a base; open yards and fields do not.
     G.bExitsBounded=Fire || Alleys;
     G.Note=G.bExitsBounded ? TEXT("Validated routes between walls"):TEXT("Validated routes across open ground: free movement exists beside them");
-    FRouteGraph Builder(G,L,P);
+    FRouteGraph Builder(G,L,P,Fire || Village);
     if(!Village && L.Routes.IsValidIndex(1))Builder.Add(L.Routes[1],TEXT("patrol"),EERTacticalMove::Walk,true,true);
     // Village starts may stand on a gallery: its reserved exits lead down the flights.
     if(Village)for(int32 I=0;I<FMath::Min(L.Routes.Num(),2);++I)Builder.Add(L.Routes[I],FString::Printf(TEXT("exit%d"),I));
@@ -424,43 +520,53 @@ float Cheapest(const FERTacticalGraph& G,const TArray<int32>& From,const TArray<
     }
     return -1;
 }
-// Raised nodes outside the bases, highest first with node order breaking ties, so the set is stable.
+// Use distinct, spatially distributed firing positions, retaining paired samples.
 TArray<int32> VantageNodes(const FERTacticalGraph& G,const TArray<int32> (&Spawns)[2],const FERPlayabilityPolicy& P)
 {
     double Floor=TNumericLimits<double>::Max();
     for(const auto& Team:Spawns)for(int32 I:Team)Floor=FMath::Min(Floor,G.Nodes[I].Position.Z);
-    TArray<int32> Out;
-    for(int32 I=0;I<G.Nodes.Num();++I)if(!G.Nodes[I].bBase && (G.Nodes[I].Kind==EERTacticalNodeKind::Upper || G.Nodes[I].Position.Z>Floor+P.VantageHeight))Out.Add(I);
-    Out.Sort([&](int32 A,int32 B){const double Za=G.Nodes[A].Position.Z,Zb=G.Nodes[B].Position.Z;return Za!=Zb ? Za>Zb:A<B;});
-    if(Out.Num()>P.MaxVantages)Out.SetNum(P.MaxVantages);
+    TArray<int32> Candidates;
+    for(int32 I=0;I<G.Nodes.Num();++I)if(!G.Nodes[I].bBase &&
+        (G.Nodes[I].Kind==EERTacticalNodeKind::Upper || G.Nodes[I].Position.Z>Floor+P.VantageHeight))Candidates.Add(I);
+    return ERPlayability::SelectObservers(G,Candidates,P.MaxVantages);
+}
+TArray<int32> RouteObservers(const FERTacticalGraph& G,const TArray<int32>& Direct,const FERPlayabilityPolicy& P)
+{
+    TArray<int32> High,Ground;
+    const auto Near=EdgesOfNodes(G);
+    double Floor=TNumericLimits<double>::Max();
+    for(const auto& N:G.Nodes)if(N.bBase)Floor=FMath::Min(Floor,N.Position.Z);
+    for(int32 I=0;I<G.Nodes.Num();++I)if(!G.Nodes[I].bBase && !Near[I].IsEmpty() && !Direct.Contains(I))
+    {
+        if(G.Nodes[I].Kind==EERTacticalNodeKind::Upper || G.Nodes[I].Position.Z>Floor+P.VantageHeight)High.Add(I);
+        else Ground.Add(I);
+    }
+    // Reserve at least half the ray budget for street corners and side routes.
+    auto Out=ERPlayability::SelectObservers(G,High,P.MaxObservers/2);
+    Out.Append(ERPlayability::SelectObservers(G,Ground,P.MaxObservers-Out.Num()));
     return Out;
 }
-// The outer end of every edge leaving a base, evenly thinned to the bound.
+// The outer end of every edge leaving a base, spatially thinned to the bound.
 TArray<int32> ExitNodes(const FERTacticalGraph& G,const TArray<int32>& Base,const FERPlayabilityPolicy& P)
 {
     const auto InZone=Membership(G.Nodes.Num(),Base);TArray<int32> All;
     for(const auto& E:G.Edges)if(!E.bBlocked && InZone[E.A]!=InZone[E.B])All.AddUnique(InZone[E.A] ? E.B:E.A);
     All.Sort();
     if(All.Num()<=P.MaxExits)return All;
-    TArray<int32> Out;for(int32 I=0;I<P.MaxExits;++I)Out.Add(All[I*All.Num()/P.MaxExits]);
-    return Out;
+    return ERPlayability::SelectObservers(G,All,P.MaxExits);
 }
-// Evenly spaced points along a node path.
+// A common polyline supplies distance, exposure and physical confirmation.
+TArray<FVector> EdgeLine(const FERTacticalGraph& G,const FERTacticalEdge& E,bool Forward=true)
+{
+    TArray<FVector> Line{G.Nodes[E.A].Position};
+    for(const auto& Q:E.Path)if(!Line.Last().Equals(Q,.01))Line.Add(Q);
+    if(!Line.Last().Equals(G.Nodes[E.B].Position,.01))Line.Add(G.Nodes[E.B].Position);
+    if(!Forward)Algo::Reverse(Line);
+    return Line;
+}
 TArray<FVector> RouteSamples(const FERTacticalGraph& G,const TArray<int32>& Path,const FERPlayabilityPolicy& P,float& Step)
 {
-    float Total=0;for(int32 I=1;I<Path.Num();++I)Total+=FVector::Dist(G.Nodes[Path[I-1]].Position,G.Nodes[Path[I]].Position);
-    Step=FMath::Max(P.RouteStep,Total/FMath::Max(1,P.MaxRouteSamples-1));
-    TArray<FVector> Out;float Next=0,Run=0;
-    for(int32 I=1;I<Path.Num();++I)
-    {
-        const FVector A=G.Nodes[Path[I-1]].Position,B=G.Nodes[Path[I]].Position;const float Length=FVector::Dist(A,B);
-        while(Next<=Run+Length && Out.Num()<P.MaxRouteSamples)
-        {
-            Out.Add(FMath::Lerp(A,B,Length>0 ? (Next-Run)/Length:0.f));Next+=Step;
-        }
-        Run+=Length;
-    }
-    return Out;
+    return ERPlayability::SampleRoute(G,Path,P,Step);
 }
 // One bounded sight pass over the graph. Clear takes world points, so both stages share it.
 template<typename TClear>
@@ -475,12 +581,10 @@ void EvaluateRouteSight(FERPlayabilityReport& R,const FERPlayabilityPolicy& P,EE
     auto Sees=[&](FVector From,FVector To){return Clear(Frame.TransformPosition(From+Eye),Frame.TransformPosition(To+Chest));};
     const auto Raised=VantageNodes(G,Spawns,P);
     Note(V,TEXT("vantages"),Raised.Num());
-    TArray<int32> Observers=Raised;
     bool Commanded=false;double Worst=0;
     for(int32 Team=0;Team<2;++Team)
     {
         const auto Exits=ExitNodes(G,Bases[Team],P);
-        for(int32 I:Exits)Observers.AddUnique(I);
         int32 Most=0,Commander=INDEX_NONE;
         for(int32 High:Raised)
         {
@@ -494,7 +598,7 @@ void EvaluateRouteSight(FERPlayabilityReport& R,const FERPlayabilityPolicy& P,EE
         {
             Commanded=true;
             auto& Item=V.Violations.AddDefaulted_GetRef();Item.Severity=Unknown ? EERPlayabilityStatus::NotEvaluated:EERPlayabilityStatus::Warn;
-            Item.Message=FString::Printf(TEXT("One raised position sees every %s base exit"),Team ? TEXT("omega"):TEXT("alpha"));
+            Item.Message=FString::Printf(TEXT("One raised position sees every sampled %s base exit"),Team ? TEXT("omega"):TEXT("alpha"));
             Item.Nodes.Add(Commander);Item.Positions.Add(G.Nodes[Commander].Position);
         }
     }
@@ -507,11 +611,11 @@ void EvaluateRouteSight(FERPlayabilityReport& R,const FERPlayabilityPolicy& P,EE
     TArray<int32> Direct;
     if(Cheapest(G,Bases[0],Bases[1],nullptr,&Direct)<0){X.Reason=TEXT("No walk joins the bases");return;}
     float Step=P.RouteStep;const auto Samples=RouteSamples(G,Direct,P,Step);
-    if(Observers.Num()>P.MaxObservers)Observers.SetNum(P.MaxObservers);
+    const auto Observers=RouteObservers(G,Direct,P);
+    if(Observers.IsEmpty()){X.Reason=TEXT("No sampled firing position outside the measured route");return;}
     TArray<bool> Open;Open.Init(false,Samples.Num());int32 Longest=0;
     for(int32 Watcher:Observers)
     {
-        if(Direct.Contains(Watcher))continue;
         int32 Run=0;
         for(int32 I=0;I<Samples.Num();++I)
         {
@@ -522,9 +626,73 @@ void EvaluateRouteSight(FERPlayabilityReport& R,const FERPlayabilityPolicy& P,EE
     int32 Seen=0;for(bool Item:Open)Seen+=Item;
     Note(X,TEXT("samples"),Samples.Num());Note(X,TEXT("observers"),Observers.Num());
     Note(X,TEXT("open_share"),Samples.IsEmpty() ? 0.:double(Seen)/Samples.Num());
-    Note(X,TEXT("longest_open_run_m"),Longest*Step/100.);
-    X.Status=EERPlayabilityStatus::Pass;
-    X.Reason=TEXT("Measured against base exits and raised nodes: no threshold here, archetype profiles read it");
+    Note(X,TEXT("longest_open_run_m"),FMath::Max(0,Longest-1)*Step/100.);
+    X.Status=Unknown ? EERPlayabilityStatus::NotEvaluated:EERPlayabilityStatus::Pass;
+    X.Reason=Unknown ? TEXT("Unknown solids can reduce this exposure upper bound: decided by the physical stage"):
+        TEXT("Bounded samples from raised positions and ground side routes; no calibrated balance threshold");
+}
+
+// Cover is read against the same bounded threats as route exposure, including elevated fire.
+// A direct clear approach is a lower-bound local measurement, not a navigation guarantee.
+template<typename TSight,typename TWalk>
+void EvaluateCoverAccess(FERPlayabilityReport& R,const FERProceduralLayout& L,const FERPlayabilityPolicy& P,
+    EERPlayabilityStage Stage,bool Unknown,const FTransform& Frame,TSight SightClear,TWalk WalkClear)
+{
+    auto& M=Reset(R,CoverAccess,Stage);const auto& G=R.Graph;
+    Note(M,TEXT("cover_sites"),L.CoverSites.Num());
+    if(L.CoverSites.IsEmpty()){M.Reason=TEXT("No authored hiding sites; buildings and incidental cover are not classified");return;}
+    TArray<int32> Spawns[2],Bases[2];NodeSets(G,Spawns,Bases);
+    TArray<int32> Direct;
+    if(Bases[0].IsEmpty() || Bases[1].IsEmpty() || Cheapest(G,Bases[0],Bases[1],nullptr,&Direct)<0)
+    {M.Reason=TEXT("No recorded route between the bases");return;}
+    const auto Raised=VantageNodes(G,Spawns,P),Observers=RouteObservers(G,Direct,P);
+    if(Observers.IsEmpty()){M.Reason=TEXT("No sampled firing position outside the measured route");return;}
+    float Step=P.RouteStep;const auto Samples=RouteSamples(G,Direct,P,Step);
+    int32 Exposed=0,Approachable=0,Sheltered=0;double Worst=0;TSet<int32> ExaminedSites;
+    auto Sees=[&](int32 Observer,FVector Target)
+    {return SightClear(Frame.TransformPosition(G.Nodes[Observer].Position+FVector(0,0,P.EyeOffset)),Frame.TransformPosition(Target));};
+    for(const auto& Sample:Samples)
+    {
+        TArray<int32> Threats;
+        for(int32 Observer:Observers)if(Sees(Observer,Sample+FVector(0,0,10)))Threats.Add(Observer);
+        if(Threats.IsEmpty())continue;
+        ++Exposed;
+        TArray<int32> Nearest;
+        for(int32 I=0;I<L.CoverSites.Num();++I)if(FVector::Dist(Sample,L.CoverSites[I].Entry)<=P.CoverReach)Nearest.Add(I);
+        Nearest.Sort([&](int32 A,int32 B)
+        {
+            const double DA=FVector::DistSquared(Sample,L.CoverSites[A].Entry),DB=FVector::DistSquared(Sample,L.CoverSites[B].Entry);
+            return DA!=DB ? DA<DB:A<B;
+        });
+        bool Approach=false;
+        for(int32 I=0;I<FMath::Min(P.MaxCoverCandidates,Nearest.Num());++I)
+        {
+            const int32 SiteIndex=Nearest[I];const auto& Site=L.CoverSites[SiteIndex];ExaminedSites.Add(SiteIndex);
+            // Preserve the route's floor clearance while adopting the site's
+            // authored stance. A standing capsule centred at a crouch entry
+            // would penetrate the floor and falsely reject usable low cover.
+            const FVector ApproachStart=Sample+FVector(0,0,Site.HalfHeight-PawnHalfHeight);
+            if(!WalkClear(Frame.TransformPosition(ApproachStart),Frame.TransformPosition(Site.Entry),Site.HalfHeight) ||
+               !WalkClear(Frame.TransformPosition(Site.Entry),Frame.TransformPosition(Site.Hide),Site.HalfHeight))continue;
+            Approach=true;bool Protected=true;
+            for(int32 Threat:Threats)if(Sees(Threat,Site.SightTo) || Sees(Threat,Site.Hide+FVector(0,0,10)))
+            {Protected=false;break;}
+            if(!Protected)continue;
+            ++Sheltered;Worst=FMath::Max(Worst,FVector::Dist(ApproachStart,Site.Entry)+FVector::Dist(Site.Entry,Site.Hide));break;
+        }
+        Approachable+=Approach;
+    }
+    int32 RaisedExposed=0;
+    for(int32 I:ExaminedSites)for(int32 High:Raised)if(Sees(High,L.CoverSites[I].SightTo))
+    {++RaisedExposed;break;}
+    Note(M,TEXT("samples"),Samples.Num());Note(M,TEXT("exposed_samples"),Exposed);Note(M,TEXT("observers"),Observers.Num());
+    Note(M,TEXT("clear_approach_samples"),Approachable);Note(M,TEXT("sheltered_samples"),Sheltered);
+    Note(M,TEXT("sheltered_share"),Exposed>0 ? double(Sheltered)/Exposed:-1.);
+    Note(M,TEXT("max_sheltered_approach_m"),Worst/100.);Note(M,TEXT("sites_examined"),ExaminedSites.Num());
+    Note(M,TEXT("sites_exposed_from_height"),RaisedExposed);Note(M,TEXT("search_radius_m"),P.CoverReach/100.);
+    M.Status=Unknown ? EERPlayabilityStatus::NotEvaluated:EERPlayabilityStatus::Pass;
+    M.Reason=Unknown ? TEXT("Unknown solids may change sight and local access: decided by the physical stage"):
+        TEXT("Nearest authored sites with a clear direct approach, sheltered from sampled threats; no navigation or balance verdict");
 }
 
 double Rounded(double Value){return FMath::RoundToDouble(Value*100)/100;}
@@ -557,6 +725,80 @@ int32 FERTacticalGraph::AddEdge(int32 A,int32 B,EERTacticalMove Move,const FStri
     E.Length=FVector::Dist(Nodes[A].Position,Nodes[B].Position);
     return Edges.Num()-1;
 }
+void FERTacticalGraph::SetPath(int32 Edge,TArray<FVector> Path)
+{
+    if(!Edges.IsValidIndex(Edge))return;
+    auto& E=Edges[Edge];E.Path=MoveTemp(Path);E.Length=0;
+    const auto Line=EdgeLine(*this,E);
+    for(int32 I=1;I<Line.Num();++I)E.Length+=FVector::Dist(Line[I-1],Line[I]);
+}
+TArray<FVector> ERPlayability::SampleRoute(const FERTacticalGraph& G,const TArray<int32>& Path,const FERPlayabilityPolicy& P,float& Step)
+{
+    TArray<FVector> Line;
+    for(int32 I=1;I<Path.Num();++I)
+    {
+        const auto* E=G.Edges.FindByPredicate([&](const FERTacticalEdge& Edge)
+            {return !Edge.bBlocked && ((Edge.A==Path[I-1] && Edge.B==Path[I]) || (Edge.B==Path[I-1] && Edge.A==Path[I]));});
+        if(!E)continue;
+        for(const auto& Q:EdgeLine(G,*E,E->A==Path[I-1]))if(Line.IsEmpty() || !Line.Last().Equals(Q,.01))Line.Add(Q);
+    }
+    float Total=0;for(int32 I=1;I<Line.Num();++I)Total+=FVector::Dist(Line[I-1],Line[I]);
+    Step=FMath::Max(P.RouteStep,Total/FMath::Max(1,P.MaxRouteSamples-1));
+    TArray<FVector> Out;if(Step<=0)return Out;
+    float Next=0,Run=0;
+    for(int32 I=1;I<Line.Num();++I)
+    {
+        const float Length=FVector::Dist(Line[I-1],Line[I]);
+        while(Next<=Run+Length && Out.Num()<P.MaxRouteSamples)
+        {Out.Add(FMath::Lerp(Line[I-1],Line[I],Length>0 ? (Next-Run)/Length:0.f));Next+=Step;}
+        Run+=Length;
+    }
+    return Out;
+}
+TArray<int32> ERPlayability::SelectObservers(const FERTacticalGraph& G,const TArray<int32>& Candidates,int32 Limit)
+{
+    TArray<int32> Pending=Candidates;
+    Pending.Sort([&](int32 A,int32 B)
+    {
+        const FVector P=G.Nodes[A].Position,Q=G.Nodes[B].Position;
+        return P.X!=Q.X ? P.X<Q.X:P.Y!=Q.Y ? P.Y<Q.Y:P.Z!=Q.Z ? P.Z<Q.Z:A<B;
+    });
+    TArray<TArray<int32>> Groups;TSet<int32> Used;
+    for(int32 I:Pending)if(!Used.Contains(I))
+    {
+        TArray<int32> Group{I};Used.Add(I);
+        if(G.Symmetry!=EERTemplateSymmetry::None)
+        {
+            const FVector P=G.Nodes[I].Position,Other=G.Symmetry==EERTemplateSymmetry::Mirror ? FVector(P.X,-P.Y,P.Z):FVector(-P.X,-P.Y,P.Z);
+            int32 Mate=INDEX_NONE;double Best=FMath::Square(60.);
+            if(!P.Equals(Other,1.))for(int32 J:Pending)if(!Used.Contains(J))
+            {
+                const double Distance=FVector::DistSquared(G.Nodes[J].Position,Other);
+                if(Distance<Best){Best=Distance;Mate=J;}
+            }
+            if(Mate!=INDEX_NONE){Group.Add(Mate);Used.Add(Mate);}
+        }
+        Groups.Add(MoveTemp(Group));
+    }
+    TArray<int32> Out;
+    while(Out.Num()<Limit)
+    {
+        int32 Best=INDEX_NONE;double BestDistance=-1;
+        for(int32 I=0;I<Groups.Num();++I)if(!Groups[I].IsEmpty() && Out.Num()+Groups[I].Num()<=Limit)
+        {
+            double Distance=TNumericLimits<double>::Max();
+            for(int32 Node:Groups[I])
+            {
+                if(Out.IsEmpty())Distance=FMath::Min(Distance,G.Nodes[Node].Position.SizeSquared());
+                else for(int32 Selected:Out)Distance=FMath::Min(Distance,FVector::DistSquared(G.Nodes[Node].Position,G.Nodes[Selected].Position));
+            }
+            if(Distance>BestDistance){BestDistance=Distance;Best=I;}
+        }
+        if(Best==INDEX_NONE)break;
+        Out.Append(Groups[Best]);Groups[Best].Reset();
+    }
+    return Out;
+}
 double FERPlayabilityMetric::Value(const TCHAR* Name,double Default) const
 {
     for(const auto& V:Values)if(V.Key==Name)return V.Value;
@@ -576,9 +818,14 @@ EERPlayabilityStatus FERPlayabilityReport::Overall() const
     for(const auto& M:Metrics)
     {
         if(M.Status==EERPlayabilityStatus::Fail)return EERPlayabilityStatus::Fail;
-        Warned=Warned || M.Status==EERPlayabilityStatus::Warn;Passed=Passed || M.Status==EERPlayabilityStatus::Pass;
+        Warned=Warned || M.Status==EERPlayabilityStatus::Warn || M.Status==EERPlayabilityStatus::NotEvaluated;
+        Passed=Passed || M.Status==EERPlayabilityStatus::Pass;
     }
     return Warned ? EERPlayabilityStatus::Warn:Passed ? EERPlayabilityStatus::Pass:EERPlayabilityStatus::NotEvaluated;
+}
+int32 FERPlayabilityReport::UnevaluatedMetrics() const
+{
+    int32 Count=0;for(const auto& M:Metrics)Count+=M.Status==EERPlayabilityStatus::NotEvaluated;return Count;
 }
 
 EERPlayabilityMode ERPlayability::Mode()
@@ -710,7 +957,7 @@ float ERPlayability::LateralPathLength(const FERTacticalGraph& G,const TArray<in
 
 FERTacticalGraph ERPlayability::BuildGraph(const FERProceduralLayout& L,EERMapArchetype Archetype,const FERPlayabilityPolicy& P)
 {
-    FERTacticalGraph G;
+    FERTacticalGraph G;G.Symmetry=L.LayoutSymmetry;
     if(Archetype==EERMapArchetype::Rooms)BuildRoomsGraph(L,G);
     else if(Archetype!=EERMapArchetype::LegacyAssembly)BuildRoutesGraph(L,Archetype,P,G);
     else G.Note=TEXT("Legacy assemblies carry no tactical metadata");
@@ -804,6 +1051,9 @@ FERPlayabilityReport ERPlayability::Analyze(const FERProceduralLayout& L,const F
     const FLayoutSolids Solids(L);Lap(TEXT("solids"));
     EvaluateLayoutSight(R,L,Solids,P);Lap(TEXT("spawn_sight"));
     EvaluateRouteSight(R,P,EERPlayabilityStage::Layout,Solids.Unknown>0,FTransform::Identity,[&](FVector A,FVector B){return Solids.SightClear(A,B);});Lap(TEXT("route_sight"));
+    EvaluateCoverAccess(R,L,P,EERPlayabilityStage::Layout,Solids.Unknown>0,FTransform::Identity,
+        [&](FVector A,FVector B){return Solids.SightClear(A,B);},[&](FVector A,FVector B,float HalfHeight)
+        {return !Solids.Solids.ContainsByPredicate([&](const FLayoutSolids::FSolid& S){return S.bPawn && Solids.Crosses(S,A,B,FVector(PawnRadius,PawnRadius,HalfHeight));});});Lap(TEXT("cover_access"));
     return R;
 }
 void ERPlayability::ConfirmInWorld(FERPlayabilityReport& R,UWorld* World,const FTransform& Frame,const FERProceduralLayout& L,const FERPlayabilityPolicy& P)
@@ -819,11 +1069,12 @@ void ERPlayability::ConfirmInWorld(FERPlayabilityReport& R,UWorld* World,const F
     for(int32 I=0;I<R.Graph.Edges.Num();++I)
     {
         auto& E=R.Graph.Edges[I];
-        if((E.Move!=EERTacticalMove::Walk && E.Move!=EERTacticalMove::Ramp) || E.Path.Num()<2)continue;
+        if(E.Move!=EERTacticalMove::Walk && E.Move!=EERTacticalMove::Ramp)continue;
+        const auto Line=EdgeLine(R.Graph,E);
         bool Clear=true;FHitResult Hit;
         // Walking may touch a walkable slope; a wall, ceiling or steep face stops it.
-        for(int32 J=1;J<E.Path.Num() && Clear;++J)
-            Clear=!World->SweepSingleByChannel(Hit,Frame.TransformPosition(E.Path[J-1]),Frame.TransformPosition(E.Path[J]),FQuat::Identity,ECC_Pawn,Capsule,Query) || Hit.ImpactNormal.Z>=.72;
+        for(int32 J=1;J<Line.Num() && Clear;++J)
+            Clear=!World->SweepSingleByChannel(Hit,Frame.TransformPosition(Line[J-1]),Frame.TransformPosition(Line[J]),FQuat::Identity,ECC_Pawn,Capsule,Query) || Hit.ImpactNormal.Z>=.72;
         E.bConfirmed=Clear;E.bBlocked=!Clear;
         if(!Clear)
         {
@@ -856,8 +1107,10 @@ void ERPlayability::ConfirmInWorld(FERPlayabilityReport& R,UWorld* World,const F
     M.Status=Exposed ? EERPlayabilityStatus::Warn:EERPlayabilityStatus::Pass;
     M.Reason=Exposed ? TEXT("Opposing starts have an unobstructed line in the real collision"):TEXT("Real collision blocks every sampled pair. A blocked shot may still penetrate");
     Lap(TEXT("physical_spawn_sight"));
-    EvaluateRouteSight(R,P,EERPlayabilityStage::Physical,false,Frame,[&](FVector A,FVector B){FHitResult Hit;return !World->LineTraceSingleByChannel(Hit,A,B,ECC_Visibility,Query);});
-    Lap(TEXT("physical_route_sight"));
+    EvaluateRouteSight(R,P,EERPlayabilityStage::Physical,false,Frame,[&](FVector A,FVector B){FHitResult Hit;return !World->LineTraceSingleByChannel(Hit,A,B,ECC_Visibility,Query);});Lap(TEXT("physical_route_sight"));
+    EvaluateCoverAccess(R,L,P,EERPlayabilityStage::Physical,false,Frame,
+        [&](FVector A,FVector B){FHitResult Hit;return !World->LineTraceSingleByChannel(Hit,A,B,ECC_Visibility,Query);},
+        [&](FVector A,FVector B,float HalfHeight){return !World->SweepTestByChannel(A,B,FQuat::Identity,ECC_Pawn,FCollisionShape::MakeCapsule(SweepRadius,HalfHeight),Query);});Lap(TEXT("physical_cover_access"));
 }
 
 namespace
@@ -994,6 +1247,7 @@ FString ERPlayability::ToJson(const FERPlayabilityReport& R,bool bTimings)
     W->WriteValue(TEXT("report_version"),ReportVersion);W->WriteValue(TEXT("seed"),R.Seed);W->WriteValue(TEXT("expected_team_size"),R.ExpectedTeamSize);
     W->WriteValue(TEXT("archetype"),ArchetypeName(R.Archetype));W->WriteValue(TEXT("template_id"),R.TemplateId);W->WriteValue(TEXT("template_revision"),R.TemplateRevision);
     W->WriteValue(TEXT("mode"),TEXT("report_only"));W->WriteValue(TEXT("stage"),StageName(R.Stage));W->WriteValue(TEXT("overall"),StatusName(R.Overall()));
+    W->WriteValue(TEXT("evaluation_complete"),R.UnevaluatedMetrics()==0);W->WriteValue(TEXT("unevaluated_metrics"),R.UnevaluatedMetrics());
     W->WriteObjectStart(TEXT("graph"));
     W->WriteValue(TEXT("coverage"),CoverageName(R.Graph.Coverage));W->WriteValue(TEXT("exits_bounded"),R.Graph.bExitsBounded);W->WriteValue(TEXT("note"),R.Graph.Note);
     W->WriteArrayStart(TEXT("nodes"));
@@ -1046,7 +1300,7 @@ FString ERPlayability::ToJson(const FERPlayabilityReport& R,bool bTimings)
 }
 FString ERPlayability::Summary(const FERPlayabilityReport& R)
 {
-    FString Text=FString::Printf(TEXT("archetype=%s team=%d seed=%d stage=%s overall=%s"),ArchetypeName(R.Archetype),R.ExpectedTeamSize,R.Seed,StageName(R.Stage),StatusName(R.Overall()));
+    FString Text=FString::Printf(TEXT("archetype=%s team=%d seed=%d stage=%s overall=%s evaluation=%s unevaluated=%d"),ArchetypeName(R.Archetype),R.ExpectedTeamSize,R.Seed,StageName(R.Stage),StatusName(R.Overall()),R.UnevaluatedMetrics() ? TEXT("partial"):TEXT("complete"),R.UnevaluatedMetrics());
     for(const auto& M:R.Metrics)if(M.Status!=EERPlayabilityStatus::NotEvaluated || !M.Values.IsEmpty())Text+=FString::Printf(TEXT(" %s=%s"),*M.Code,StatusName(M.Status));
     for(const auto& S:R.Stress)if(S.bApplicable)Text+=FString::Printf(TEXT(" %s=%d->%d"),*S.Scenario,S.VisiblePairs,S.VisiblePairsDamaged);
     return Text;

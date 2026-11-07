@@ -136,7 +136,7 @@ void UEROnline::Continue()
         Settings.Set(FName(TEXT("RR_SERVER_NAME")), SanitizeServerName(GI->InternetServerName), EOnlineDataAdvertisementType::ViaOnlineService);
         Settings.Set(GameKey, FString(TEXT("RespawnAndRage")), EOnlineDataAdvertisementType::ViaOnlineService);
         Settings.Set(FName(TEXT("RR_HOST")), AERGameMode::SanitizeName(GI->LocalName), EOnlineDataAdvertisementType::ViaOnlineService);
-        Settings.Set(VersionKey, GI->BuildVersion, EOnlineDataAdvertisementType::ViaOnlineService);
+        Settings.Set(VersionKey, GI->GetNetworkBuildVersion(), EOnlineDataAdvertisementType::ViaOnlineService);
         Settings.Set(SETTING_MAPNAME, FString(TEXT("Lobby")), EOnlineDataAdvertisementType::ViaOnlineService);
         Operation = EOperation::Create;
         Status = TEXT("Creating Internet server...");
@@ -152,7 +152,7 @@ void UEROnline::Continue()
         Query->MaxSearchResults = 100;
         Query->TimeoutInSeconds = 30;
         Query->QuerySettings.Set(GameKey, FString(TEXT("RespawnAndRage")), EOnlineComparisonOp::Equals);
-        Query->QuerySettings.Set(VersionKey, GI->BuildVersion, EOnlineComparisonOp::Equals);
+        Query->QuerySettings.Set(VersionKey, GI->GetNetworkBuildVersion(), EOnlineComparisonOp::Equals);
         Operation = EOperation::Find;
         Status = TEXT("Searching Internet servers...");
         FindHandle = Sessions->AddOnFindSessionsCompleteDelegate_Handle(FOnFindSessionsCompleteDelegate::CreateUObject(this, &UEROnline::FindComplete));
@@ -188,7 +188,7 @@ void UEROnline::FindComplete(bool Success)
         FString Game, Version;
         Result.Session.SessionSettings.Get(GameKey, Game);
         Result.Session.SessionSettings.Get(VersionKey, Version);
-        if (Game == TEXT("RespawnAndRage") && Version == GI->BuildVersion && Result.Session.NumOpenPublicConnections > 0)
+        if (Game == TEXT("RespawnAndRage") && Version == GI->GetNetworkBuildVersion() && Result.Session.NumOpenPublicConnections > 0)
             Results.Add(Result);
     }
     Status = Results.IsEmpty() ? TEXT("No compatible Internet servers found. Check that the host is online and running the same game version, then search again.") : FString::Printf(TEXT("%d Internet server(s) found. Choose a server to join."), Results.Num());

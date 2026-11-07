@@ -20,6 +20,7 @@
 #include "Misc/App.h"
 #include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 namespace
 {
@@ -106,6 +107,7 @@ void AERSmokeCloud::BeginPlay()
     Volume->SetVisibility(true);
     Volume->SetHiddenInGame(false);
     RebuildContainment();
+    PollGeometryChanges(); // establish the local revision baseline after the initial build
     if(GetNetMode()!=NM_DedicatedServer && FApp::CanEverRender() && VolumeMaterial)
     {
         VolumeInstance=Volume->CreateDynamicMaterialInstance(0,VolumeMaterial);
@@ -120,6 +122,8 @@ void AERSmokeCloud::BeginPlay()
 
 void AERSmokeCloud::RebuildContainment()
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(ERSmoke_Containment);
+    ++ContainmentBuildCount;
     const FVector Cell=SimSize/FVector(NX,NY,NZ);
     const FVector Min=VolumeOrigin-FVector(SimSize.X*.5f,SimSize.Y*.5f,0);
     TArray<uint8> Free; Free.Init(0,SmokeCellCount); Occupancy.Init(0,SmokeCellCount);
@@ -163,6 +167,43 @@ void AERSmokeCloud::RebuildContainment()
     }
     FilledCellCount=Queue.Num();
     if(VolumeInstance) UploadDensity();
+}
+
+bool AERSmokeCloud::PollGeometryChanges()
+{
+    // Only nearby collision can change the connected containment grid. Bounds
+    // include the whole voxel sweep, including thin inflated collision shapes.
+    const FVector Center=VolumeOrigin+FVector(0,0,SimSize.Z*.5);
+    const FBox Region=(FBox(Center-SimSize*.5,Center+SimSize*.5)).ExpandBy(100);
+    bool Changed=false;
+    TArray<AERBlockRoom*,TInlineAllocator<4>> Present;
+    for(TActorIterator<AERBlockRoom> It(GetWorld());It;++It)
+    {
+        auto* Room=*It;Present.Add(Room);
+        auto* Watch=GeometryWatches.FindByPredicate([Room](const FGeometryWatch& W){return W.Room==Room;});
+        if(!Watch){Watch=&GeometryWatches.AddDefaulted_GetRef();Watch->Room=Room;Changed=true;}
+        const auto& Chunks=Room->GetCellWorld().GetChunks();
+        const uint32 LayoutDigest=Room->GetCellWorld().GetLayoutDigest();
+        const FTransform Transform=Room->GetActorTransform();
+        if(Watch->Epoch!=Room->GetMapEpoch() || Watch->LayoutDigest!=LayoutDigest || Watch->ChunkCount!=Chunks.Num() ||
+            !Watch->Transform.Equals(Transform) || Watch->Region!=Region)
+        {
+            Watch->Epoch=Room->GetMapEpoch();Watch->LayoutDigest=LayoutDigest;Watch->ChunkCount=Chunks.Num();Watch->Transform=Transform;Watch->Region=Region;
+            Watch->Chunks.Reset();Watch->Revisions.Reset();
+            const FBox Local=Region.TransformBy(Transform.Inverse());
+            for(int32 I=0;I<Chunks.Num();++I)if(Chunks[I].Bounds.Intersect(Local))
+            {Watch->Chunks.Add(I);Watch->Revisions.Add(Chunks[I].Revision);}
+            Changed=true;
+        }
+        else for(int32 I=0;I<Watch->Chunks.Num();++I)
+        {
+            const uint32 Revision=Chunks[Watch->Chunks[I]].Revision;
+            if(Watch->Revisions[I]!=Revision){Watch->Revisions[I]=Revision;Changed=true;}
+        }
+    }
+    for(int32 I=GeometryWatches.Num()-1;I>=0;--I)
+        if(!Present.Contains(GeometryWatches[I].Room.Get())){GeometryWatches.RemoveAtSwap(I);Changed=true;}
+    return Changed;
 }
 
 bool AERSmokeCloud::ContainsSmokeAt(const FVector& Position) const
@@ -312,15 +353,7 @@ void AERSmokeCloud::Tick(float DeltaSeconds)
     const double Now=GetWorld()->GetTimeSeconds();
     if(Now>=NextGeometryCheck)
     {
-        uint64 Revision=0;
-        for(TActorIterator<AERBlockRoom> It(GetWorld());It;++It)
-            {
-                Revision=HashCombineFast(Revision,It->GetMapEpoch());
-                Revision=HashCombineFast(Revision,It->HasAuthority()?It->GetMapSequence():It->GetAppliedMapSequence());
-                Revision=HashCombineFast(Revision,uint64(It->GetCellWorld().GetCellCount()));
-                Revision=HashCombineFast(Revision,uint64(It->GetCellWorld().GetRemovedCount()));
-            }
-        if(GeometryRevision!=Revision) { GeometryRevision=Revision; RebuildContainment(); }
+        if(PollGeometryChanges())RebuildContainment();
         NextGeometryCheck=Now+.75;
     }
     ShotCuts.RemoveAll([Now](const FShotCut& Cut){ return Cut.Until<Now; });

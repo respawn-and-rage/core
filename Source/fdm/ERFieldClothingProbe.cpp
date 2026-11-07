@@ -27,14 +27,14 @@
 #include "HAL/FileManager.h"
 namespace
 {
-const int32 Skins[]={0,2,3,4,15,16,17,18,19};
+const int32 FieldClothingProbeSkins[]={0,2,3,4,15,16,17,18,19};
 constexpr int32 Cases=8;
 bool AllLODs(){return FParse::Param(FCommandLine::Get(),TEXT("ERFieldClothingLODs"));}
 int32 ChosenSkin(){int32 Skin=-1;FParse::Value(FCommandLine::Get(),TEXT("ERFieldClothingSkin="),Skin);return Skin;}
-int32 SkinAt(int32 Sample){return ChosenSkin()>=0?ChosenSkin():Skins[Sample/(AllLODs()?5:Cases)];}
+int32 SkinAt(int32 Sample){return ChosenSkin()>=0?ChosenSkin():FieldClothingProbeSkins[Sample/(AllLODs()?5:Cases)];}
 int32 CaseAt(int32 Sample){return AllLODs()?2:Sample%Cases;}
 int32 LODAt(int32 Sample){return AllLODs()?Sample%5:0;}
-int32 Total(){return (ChosenSkin()>=0?1:UE_ARRAY_COUNT(Skins))*(AllLODs()?5:Cases);}
+int32 Total(){return (ChosenSkin()>=0?1:UE_ARRAY_COUNT(FieldClothingProbeSkins))*(AllLODs()?5:Cases);}
 float BodyDistance(const FVector& P,const USkeletalMeshComponent* Body,const UPhysicsAsset* Physics)
 {
     float Distance=MAX_flt;

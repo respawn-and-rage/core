@@ -17,12 +17,14 @@
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERCentralBuildingLayoutTest,"EclipseRecoil.Destruction.CentralBuildingLayout",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FERCentralBuildingLayoutTest::RunTest(const FString& Parameters)
 {
-    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central");T->Archetype=EERMapArchetype::CentralBuilding;T->CentralBuilding.CircularTerrain=false;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize=FVector(8000,10000,1600);
+    // Rectangular studies support 1-3 floors; the shared recipe defaults to
+    // the production circular villa's 1-4 range. Keep this fixture explicit.
+    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central");T->Archetype=EERMapArchetype::CentralBuilding;T->CentralBuilding.CircularTerrain=false;T->CentralBuilding.MaxFloors=3;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize=FVector(8000,10000,1600);
     T->CentralBuilding.SteelSurface=NewObject<UMaterial>(T,TEXT("TestGraySteel"));
     for(int32 I=0;I<4;++I)T->CentralBuilding.ContainerSurfaces.Add(NewObject<UMaterial>(T,*FString::Printf(TEXT("TestPaint%d"),I)));
     FERProceduralConfig C;C.TemplateAsset=T;FERBlockRoomConfig B;FERProceduralLayout L,Again;
     TSet<FString> Shapes,Compositions;TSet<int32> Rules,Floors,SecondaryFloors,Angles,Materials;int32 MinOpenCover=MAX_int32,MinOtherCover=MAX_int32;bool Tower=false,Building=false,AsymmetricPaint=false,TerracedSeen=false;TSet<float> CoreOffsets;
-    auto Key=[](FVector Center,FVector Size,uint8 M){return FString::Printf(TEXT("%d:%d:%d/%d:%d:%d/%d"),FMath::RoundToInt(Center.X*1000),FMath::RoundToInt(Center.Y*1000),FMath::RoundToInt(Center.Z*1000),FMath::RoundToInt(Size.X*1000),FMath::RoundToInt(Size.Y*1000),FMath::RoundToInt(Size.Z*1000),M);};
+    auto Key=[](FVector Center,FVector Size,uint8 M){return FString::Printf(TEXT("%d:%d:%d/%d:%d:%d/%d"),FMath::RoundToInt32(Center.X*1000),FMath::RoundToInt32(Center.Y*1000),FMath::RoundToInt32(Center.Z*1000),FMath::RoundToInt32(Size.X*1000),FMath::RoundToInt32(Size.Y*1000),FMath::RoundToInt32(Size.Z*1000),M);};
     TArray<int32> Seeds;for(int32 I=0;I<512;++I)Seeds.Add(I);Seeds.Append({7919,-17,INT32_MIN,INT32_MAX});
     for(int32 Seed:Seeds)
     {
@@ -114,7 +116,7 @@ bool FERCentralBuildingLayoutTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERCentralBuildingFinishesTest,"EclipseRecoil.Destruction.CentralBuildingFinishes",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FERCentralBuildingFinishesTest::RunTest(const FString& Parameters)
 {
-    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central.finishes");T->Archetype=EERMapArchetype::CentralBuilding;T->CentralBuilding.CircularTerrain=false;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize=FVector(8000,10000,1600);
+    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central.finishes");T->Archetype=EERMapArchetype::CentralBuilding;T->CentralBuilding.CircularTerrain=false;T->CentralBuilding.MaxFloors=3;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize=FVector(8000,10000,1600);
     FERProceduralConfig C;C.TemplateAsset=T;FERBlockRoomConfig B;
     auto& V=T->CentralBuilding;
     TSet<int32> GroundIndices;
@@ -155,7 +157,7 @@ bool FERCentralBuildingFinishesTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERCentralBuildingCollisionTest,"EclipseRecoil.Destruction.CentralBuildingCollision",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FERCentralBuildingCollisionTest::RunTest(const FString& Parameters)
 {
-    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central.physics");T->Archetype=EERMapArchetype::CentralBuilding;T->CentralBuilding.CircularTerrain=false;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize=FVector(8000,10000,1600);
+    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central.physics");T->Archetype=EERMapArchetype::CentralBuilding;T->CentralBuilding.CircularTerrain=false;T->CentralBuilding.MaxFloors=3;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize=FVector(8000,10000,1600);
     T->CentralBuilding.FenceModule=LoadObject<UStaticMesh>(nullptr,TEXT("/Game/EclipseRecoil/Art/Industrial/SM_ER_AluminiumFenceModule.SM_ER_AluminiumFenceModule"));
     if(!TestNotNull(TEXT("imported single aluminium module"),T->CentralBuilding.FenceModule.Get()))return false;
     UWorld::InitializationValues V;V.AllowAudioPlayback(false).CreateNavigation(false).CreateAISystem(false).CreateFXSystem(false).EnableTraceCollision(true);
@@ -290,7 +292,7 @@ bool FERCentralBuildingCollisionTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERCentralBuildingEvolutionTest,"EclipseRecoil.Destruction.CentralBuildingEvolution",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FERCentralBuildingEvolutionTest::RunTest(const FString& Parameters)
 {
-    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central.evolution");T->Archetype=EERMapArchetype::CentralBuilding;T->CentralBuilding.CircularTerrain=false;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize={8000,10000,1600};
+    auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.central.evolution");T->Archetype=EERMapArchetype::CentralBuilding;T->CentralBuilding.CircularTerrain=false;T->CentralBuilding.MaxFloors=3;T->Symmetry=EERTemplateSymmetry::HalfTurn;T->ArenaSize={8000,10000,1600};
     UWorld::InitializationValues V;V.AllowAudioPlayback(false).CreateNavigation(false).CreateAISystem(false).CreateFXSystem(false).EnableTraceCollision(true);
     auto* World=UWorld::CreateWorld(EWorldType::Game,false,NAME_None,nullptr,true,ERHIFeatureLevel::Num,&V);if(!World)return false;
     auto* Map=World->SpawnActor<AERProceduralMap>();Map->LayoutConfig.TemplateAsset=T;Map->LayoutConfig.CrossingOverride=2;Map->bCeilings=false;Map->Collapse.DebrisPerStep=0;

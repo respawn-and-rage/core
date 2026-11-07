@@ -7,7 +7,20 @@
 #include "ERWeaponRecoil.h"
 #include "ERAudio.h"
 #include "ERAimPunch.h"
+#include "ERFireInput.h"
 #include "ERCharacter.generated.h"
+
+USTRUCT()
+struct FERFireAcknowledgement
+{
+    GENERATED_BODY()
+    UPROPERTY() uint16 Sequence=0;
+    UPROPERTY() uint16 ShotOrdinal=0;
+    UPROPERTY() bool Firing=false;
+    UPROPERTY() TObjectPtr<class UERWeaponData> Data;
+    UPROPERTY() double ShotServerTime=-100;
+    UPROPERTY() uint32 Revision=0;
+};
 
 USTRUCT()
 struct FERProtectionSurfaceState
@@ -86,6 +99,8 @@ public:
     UPROPERTY(Replicated) FVector DeathFocusPosition = FVector::ZeroVector;
     UPROPERTY(Replicated) bool bHasDeathFocus = false;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UERHealthComponent> Health;
+    UPROPERTY(ReplicatedUsing=OnRep_NetworkReady) bool bNetworkReady=true;
+    UFUNCTION() void OnRep_NetworkReady();
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<class UERFootsteps> Footsteps;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<class UCapsuleComponent> ProneHitVolume;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<class UCameraComponent> Camera;
@@ -113,6 +128,7 @@ public:
     // Empty keeps every section visible (legacy/template viewmodel).
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="First person") TArray<int32> FirstPersonVisibleMaterialSlots;
     UPROPERTY(Replicated, BlueprintReadOnly) TObjectPtr<class AERWeapon> Weapon;
+    UPROPERTY(Replicated) uint16 WeaponSelectionRevision=0;
     UPROPERTY(Replicated) TArray<TObjectPtr<class AERWeapon>> Inventory;
     // Fixed server-authored initial facing for the minimap enemy-base bearing.
     UPROPERTY(Replicated) float SpawnFacingYaw = 0;
@@ -153,6 +169,8 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<class UStaticMeshComponent> WorldMuzzleFlash;
     // Local counter for the opt-in integration probe; never drives gameplay or replication.
     uint32 ShotFeedbackCount = 0;
+    uint32 PredictedShotFeedbackCount=0;
+    uint32 AcceptedFireMoveCount=0;
     virtual void OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
     virtual void OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
     virtual void BeginPlay() override;
@@ -168,6 +186,11 @@ public:
     bool IsWeaponStowed() const;
     virtual void FellOutOfWorld(const class UDamageType& Type) override;
     UFUNCTION(Server, Reliable) void ServerStartFire();
+    // Local player input shares the move's validated timestamp and view.
+    void SetFireInputHeld(bool Held);
+    void ApplyFireMove(uint16 Sequence,bool Held,const FERFireWeaponBinding& WeaponBinding);
+    UPROPERTY(ReplicatedUsing=OnRep_FireAcknowledgement) FERFireAcknowledgement FireAcknowledgement;
+    UFUNCTION() void OnRep_FireAcknowledgement();
     void ApplyStartFire();
     void ApplyQueuedFire();
     bool bQueuedFireStart = false, bQueuedFireStop = false;
@@ -181,10 +204,21 @@ public:
     FVector GetIronSightLocation() const;
     float GetIronAimBlend() const { return IronAimBlend*IronAimBlend*(3.f-2.f*IronAimBlend); }
     FVector GetRenderedMuzzle(bool bFirstPerson) const;
-    UFUNCTION(NetMulticast, Unreliable) void MulticastShot(FVector_NetQuantize Start, FVector_NetQuantize End, bool bTracer, class UERWeaponData* FiredData, const TArray<FVector_NetQuantize>& PelletEnds);
+    void MulticastShot(FVector_NetQuantize Start,FVector_NetQuantize End,bool bTracer,class UERWeaponData* FiredData,const TArray<FVector_NetQuantize>& PelletEnds);
+    UFUNCTION(NetMulticast, Unreliable) void MulticastConfirmedShot(FVector_NetQuantize Start,FVector_NetQuantize End,bool bTracer,class UERWeaponData* FiredData,const TArray<FVector_NetQuantize>& PelletEnds,uint16 Sequence,uint16 Ordinal);
     void ApplyDeathVisuals();
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 private:
+    FERFireInputState ServerFireInput;
+    FERShotPresentationWindow ShotPresentation;
+    uint16 ServerFireOrdinal=0,PredictedFireSequence=0,PredictedFireOrdinal=0;
+    int32 PredictedMagazineLimit=0;
+    bool bPredictingFire=false;
+    double NextPredictedFireTime=0;
+    TWeakObjectPtr<class AERWeapon> PredictedFireWeapon;
+    void UpdatePredictedFire();
+    void PlayShotPresentation(class UERWeaponData* FiredData);
+    void UpdateFireAcknowledgement();
     UFUNCTION(Client, Reliable)
     void ClientBlastRinging(float HoldSeconds, FVector_NetQuantize Origin, TSubclassOf<class AERGrenadeExplosion> Effect);
     UPROPERTY(Transient) TObjectPtr<class UAudioComponent> BlastRinging;

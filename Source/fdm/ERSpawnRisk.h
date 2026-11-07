@@ -28,6 +28,7 @@ struct FERSpawnCandidate
     FVector Location=FVector::ZeroVector;
     float Risk=0;
     int32 Seen=0; // Enemies with an open shot on this standing capsule.
+    int32 Unknown=0; // No open sample found, but not every sample was tested.
     bool bInHazard=false;
 };
 namespace ERSpawnRisk
@@ -36,7 +37,8 @@ namespace ERSpawnRisk
     FDM_API FERSpawnRiskTuning Tuning(const UWorld* World);
     // Living enemies, nearest last-known state from the server, and their live devices.
     FDM_API void GatherThreats(UWorld* World,EERTeam Team,TArray<FERSpawnThreat>& Threats,TArray<FERSpawnHazard>& Hazards);
-    // Current collision: a breached cover or a moved enemy changes the next answer.
+    // Current collision, with part of the shared budget reserved for completing
+    // promising candidates. Unchecked enemies contribute conservative sight risk.
     FDM_API int32 Score(UWorld* World,TArray<FERSpawnCandidate>& Candidates,const TArray<FERSpawnThreat>& Threats,const TArray<FERSpawnHazard>& Hazards,
         const TArray<FERSpawnEvent>& Deaths,const TArray<FERSpawnEvent>& Starts,double Now,const FERSpawnRiskTuning& Tuning);
     // Random among comparable best scores, so spawns stay unpredictable. INDEX_NONE when empty.

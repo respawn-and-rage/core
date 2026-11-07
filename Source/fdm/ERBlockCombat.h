@@ -2,6 +2,7 @@
 #include "CoreMinimal.h"
 #include "ERBlockWorld.h"
 #include "ERBlockCombat.generated.h"
+namespace ERShotTrace {struct FContext;}
 
 USTRUCT(BlueprintType)
 struct FERBlockShotSettings
@@ -57,7 +58,7 @@ namespace ERBlockCombat
 {
     FERBlockShotResult ContinueShot(UWorld* World, const FHitResult& InitialHit, const FVector& Start,
         const FVector& Direction, float Range, float Damage, const FERBlockShotSettings& Settings,
-        const FCollisionQueryParams& Query, AController* Instigator, AActor* Causer);
+        const FCollisionQueryParams& Query,AController* Instigator,AActor* Causer,ERShotTrace::FContext* Context=nullptr);
     // F(d): 1 inside InnerRadius, ((Outer-d)/(Outer-Inner))^Exponent, 0 from OuterRadius.
     double ExplosionFalloff(const FERBlockExplosionProfile& Profile, double Distance);
     // Profile damage at d times the material multiplier and exposure in [0,1].

@@ -14,7 +14,7 @@ int32 FindDamaged(const FERCellChunk& C, uint32 Index)
     return C.Damaged.IsValidIndex(I) && C.Damaged[I].Index == Index ? I : INDEX_NONE;
 }
 bool TestBit(const TArray<uint64>& Bits, int32 I) { return (Bits[I >> 6] >> (I & 63)) & 1; }
-void ClearBit(TArray<uint64>& Bits, int32 I) { Bits[I >> 6] &= ~(1ull << (I & 63)); }
+void ClearBit(FERCellAliveBits& Bits, int32 I) { Bits[I >> 6] &= ~(1ull << (I & 63)); }
 }
 
 void FERCellWorld::AddConstruction(int32 WallId, EERBlockMaterial Material, const FTransform& Slot, const FVector& S,
@@ -81,7 +81,7 @@ bool FERCellWorld::Build(const TArray<FERCellPanelDesc>& Desc, const FERCellSett
         if (Cells > (HasSkins ? 512000000:MaxCells)) { Error = TEXT("cell storage budget exceeded"); return false; }
         if(!D.Skin.IsEmpty() && (D.Skin.Num()%3 || !D.SkinCRC || D.Skin.Num()>30000)){Error=TEXT("invalid mesh skin");return false;}
         auto& P = NewPanels.AddDefaulted_GetRef();
-        static_cast<FERCellPanelDesc&>(P) = D; P.Dims = N;
+        static_cast<FERCellPanelDesc&>(P) = D; P.Dims = N;P.bSkinned=!D.Skin.IsEmpty();
         P.Bounds = FBox(FVector::ZeroVector, D.Size).TransformBy(D.Transform);
         P.ChunksX = FMath::DivideAndRoundUp(N.X, S.ChunkCells); P.ChunksZ = FMath::DivideAndRoundUp(N.Z, S.ChunkCells);
         P.FirstChunk = NewChunks.Num();
@@ -150,6 +150,27 @@ bool FERCellWorld::IsValid(const FERCellId& Id) const
     if (!Panels.IsValidIndex(Id.Panel)) return false;
     const FIntVector& N = Panels[Id.Panel].Dims;
     return Id.X >= 0 && Id.X < N.X && Id.Y >= 0 && Id.Y < N.Y && Id.Z >= 0 && Id.Z < N.Z;
+}
+FERCellWorld FERCellWorld::MakeSupportSnapshot() const
+{
+    FERCellWorld Snapshot;
+    Snapshot.ChunkCells=ChunkCells;Snapshot.CellCount=CellCount;Snapshot.RemovedCount=RemovedCount;
+    Snapshot.DetachedCount=DetachedCount;Snapshot.VoidCount=VoidCount;Snapshot.LayoutDigest=LayoutDigest;
+    Snapshot.Panels.Reserve(Panels.Num());Snapshot.Chunks.Reserve(Chunks.Num());
+    for(const auto& P:Panels)
+    {
+        auto& Copy=Snapshot.Panels.AddDefaulted_GetRef();
+        Copy.Id=P.Id;Copy.Dims=P.Dims;Copy.Cell=P.Cell;Copy.Size=P.Size;Copy.Transform=P.Transform;Copy.Bounds=P.Bounds;
+        Copy.FirstChunk=P.FirstChunk;Copy.ChunksX=P.ChunksX;Copy.ChunksZ=P.ChunksZ;Copy.bSkinned=P.bSkinned;
+        Copy.bAnchored=P.bAnchored;Copy.bIndestructible=P.bIndestructible;Copy.bAnchorBottom=P.bAnchorBottom;Copy.AnchorHeight=P.AnchorHeight;
+    }
+    for(const auto& C:Chunks)
+    {
+        auto& Copy=Snapshot.Chunks.AddDefaulted_GetRef();
+        Copy.Panel=C.Panel;Copy.X0=C.X0;Copy.Z0=C.Z0;Copy.SX=C.SX;Copy.SZ=C.SZ;Copy.Bounds=C.Bounds;
+        Copy.AliveCount=C.AliveCount;Copy.Revision=C.Revision;Copy.Alive=C.Alive;
+    }
+    return Snapshot;
 }
 int32 FERCellWorld::GetChunkIndex(int32 Panel, int32 X, int32 Z) const
 {
@@ -374,22 +395,29 @@ bool FERCellWorld::DecodeChunk(int32 Index, const TArray<uint8>& Data, TArray<ui
 }
 void FERCellWorld::SetChunkAlive(int32 Index, const TArray<uint64>& Alive, TArray<int32>& Dirty)
 {
+    TSet<int32> Marked(Dirty);
+    SetChunkAlive(Index,Alive,Marked);
+    Dirty=Marked.Array();Dirty.Sort();
+}
+void FERCellWorld::SetChunkAlive(int32 Index, const TArray<uint64>& Alive, TSet<int32>& Dirty)
+{
     auto& C = Chunks[Index];
     if (C.Alive == Alive) return;
-    const int32 NY = Panels[C.Panel].Dims.Y;
-    TSet<int32> Marked(Dirty);
-    for (int32 Z = 0; Z < C.SZ; ++Z)
-        for (int32 Y = 0; Y < NY; ++Y)
-            for (int32 X = 0; X < C.SX; ++X)
-            {
-                const int32 I = CellIndex(C, X, Y, Z);
-                if (TestBit(C.Alive, I) != TestBit(Alive, I)) MarkDirty(C.Panel, C.X0 + X, C.Z0 + Z, Marked);
-            }
+    check(C.Alive.Num()==Alive.Num());
+    for(int32 Word=0;Word<Alive.Num();++Word)
+    {
+        uint64 Changed=C.Alive[Word]^Alive[Word];
+        while(Changed)
+        {
+            const int32 Bit=Word*64+int32(FMath::CountTrailingZeros64(Changed));
+            MarkDirty(C.Panel,C.X0+Bit%C.SX,C.Z0+(Bit/C.SX)%C.SZ,Dirty);
+            Changed&=Changed-1;
+        }
+    }
     int32 Count = 0;
-    for (uint64 W : Alive) Count += FMath::CountBits(W);
+    for (uint64 W : Alive) Count += FMath::CountBits64(W);
     RemovedCount += C.AliveCount - Count;
     C.Alive = Alive; C.AliveCount = Count; C.Damaged.Reset(); ++C.Revision;
-    Dirty = Marked.Array(); Dirty.Sort();
 }
 uint32 FERCellWorld::GetAliveDigest() const
 {

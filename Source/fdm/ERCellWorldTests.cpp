@@ -348,7 +348,7 @@ bool FERCellNetTransactionTest::RunTest(const FString& Parameters)
     auto* Client = World->SpawnActor<AERBlockRoom>(); Client->SetRole(ROLE_SimulatedProxy); Client->bNetworkBegunPlay = true;
     const int32 Shards = FMath::DivideAndRoundUp(Server->GetCellWorld().GetChunks().Num(), AERCellNetShard::Capacity);
     auto& N = Client->Network;
-    N.Epoch = 1; N.Protocol = 59; N.Cells = true; N.CellSettings = Server->CellSettings; N.Blocks = Server->Config;
+    N.Epoch = 1; N.Protocol = ERCellProtocol::Version; N.Cells = true; N.CellSettings = Server->CellSettings; N.Blocks = Server->Config;
     N.BlockCount = int32(Server->GetCellWorld().GetCellCount()); N.LayoutDigest = Server->GetLayoutDigest(); N.Sequence = 1; N.PageVersions.Init(1, Shards);
     Client->OnRep_Network();
     TestTrue(TEXT("client built cells from the descriptor"), Client->GetCellWorld().GetCellCount() > 0 && !Client->bNetworkError);
@@ -373,7 +373,12 @@ bool FERCellNetTransactionTest::RunTest(const FString& Parameters)
     {
         TArray<uint8> Mask; SW.EncodeChunk(C, Mask); Bytes += Mask.Num() + 8;
         auto* S = Pages[C / AERCellNetShard::Capacity];
-        S->SetChunk(C, SW.GetChunks()[C].Revision, MoveTemp(Mask)); Versions[C / AERCellNetShard::Capacity] = 2;
+        S->SetChunk(C, SW.GetChunks()[C].Revision, MoveTemp(Mask),false); Versions[C / AERCellNetShard::Capacity] = 2;
+    }
+    for(auto* Page:Pages)
+    {
+        Page->FinalizePayload();
+        TestTrue(TEXT("one finalized shard describes all writes in the batch"),Page->IsPayloadCurrent());
     }
     AddInfo(FString::Printf(TEXT("ER_CELL_NET_DELTA chunks=%d bytes=%d removed=%lld"), Changed.Num(), Bytes, SW.GetRemovedCount()));
     TestTrue(TEXT("grenade delta stays small"), Changed.Num() > 0 && Bytes < 4096);
@@ -414,7 +419,7 @@ bool FERCellNetTransactionTest::RunTest(const FString& Parameters)
     AddExpectedError(TEXT("ER_BLOCK_NET_INCOMPATIBLE descriptor"), EAutomationExpectedErrorFlags::Contains, 1);
     Client->OnRep_Network();
     TestTrue(TEXT("protocol mismatch fails closed"), Client->bNetworkError);
-    N.Epoch=4;N.Protocol=59;N.BlockCount=8000001;
+    N.Epoch=4;N.Protocol=ERCellProtocol::Version;N.BlockCount=8000001;
     AddExpectedError(TEXT("ER_BLOCK_NET_INCOMPATIBLE descriptor"),EAutomationExpectedErrorFlags::Contains,1);
     Client->OnRep_Network();
     TestTrue(TEXT("ordinary rooms retain the 8M descriptor limit"),Client->bNetworkError);

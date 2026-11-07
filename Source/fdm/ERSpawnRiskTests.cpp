@@ -4,6 +4,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
+#include "Components/BoxComponent.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 namespace
@@ -26,6 +27,8 @@ bool FERSpawnRiskChoiceTest::RunTest(const FString&)
         for(int32 Roll=0;Roll<4;++Roll)TestEqual(TEXT("a clearly worse start is never drawn"),Pick(Pair,T,[&](int32 Options){return Roll%Options;}),0);
         Pair[0].Risk=T.SightPenalty*2;Pair[1].Risk=T.SightPenalty;
         TestEqual(TEXT("with every start exposed the least bad still spawns"),Pick(Pair,T,First),1);
+        Pair[0].Risk=Pair[1].Risk;Pair[0].Unknown=1;
+        TestEqual(TEXT("comparable risk prefers a fully checked start"),Pick(Pair,T,First),1);
     }
     {
         // Enemy position changes the answer on the next respawn.
@@ -37,7 +40,8 @@ bool FERSpawnRiskChoiceTest::RunTest(const FString&)
         Score(nullptr,C,{},{},{},{},0,T);
         TestEqual(TEXT("a dead enemy stops counting"),C[0].Risk+C[1].Risk,0.f);
         Score(nullptr,C,{{FVector(0,0,T.NearDistance+100)}},{},{},{},0,T);
-        TestEqual(TEXT("beyond protection reach is not close"),C[0].Risk,0.f);
+        TestEqual(TEXT("missing collision never proves a distant threat covered"),C[0].Unknown,1);
+        TestEqual(TEXT("beyond protection reach adds only unknown sight risk"),C[0].Risk,T.SightPenalty);
     }
     {
         // A live device: only its fan is a hazard.
@@ -63,6 +67,46 @@ bool FERSpawnRiskChoiceTest::RunTest(const FString&)
         TestEqual(TEXT("memory stays bounded"),Memory.Deaths[0].Num(),32);
         Memory.Reset();TestTrue(TEXT("a new arena forgets"),Memory.Deaths[0].IsEmpty());
     }
+    return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERSpawnRiskCrowdedTest,"EclipseRecoil.Maps.SpawnRisk.Crowded",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FERSpawnRiskCrowdedTest::RunTest(const FString&)
+{
+    UWorld::InitializationValues Values;
+    Values.AllowAudioPlayback(false).CreateNavigation(false).CreateAISystem(false).CreateFXSystem(false).EnableTraceCollision(true);
+    auto* World=UWorld::CreateWorld(EWorldType::Game,false,NAME_None,nullptr,true,ERHIFeatureLevel::Num,&Values);
+    if(!TestNotNull(TEXT("collision world"),World))return false;
+    auto* Screen=World->SpawnActor<AActor>();auto* Wall=NewObject<UBoxComponent>(Screen);
+    Screen->SetRootComponent(Wall);Screen->AddInstanceComponent(Wall);
+    Wall->SetBoxExtent(FVector(10,1000,250));Wall->SetCollisionProfileName(TEXT("BlockAll"));Wall->RegisterComponent();
+    Wall->SetWorldLocation(FVector(0,0,150));
+    FERSpawnRiskTuning Tuning;
+    TArray<FERSpawnCandidate> Starts;
+    for(int32 Index=0;Index<Tuning.MaxCandidates;++Index)Starts.Add(At(FVector(300+Index*4,0,100)));
+    TArray<FERSpawnThreat> Enemies;
+    for(int32 Index=0;Index<4;++Index)Enemies.Add({FVector(-200-Index*10,0,164)});
+    // The fifth enemy is farther away, on the unprotected side of the screen.
+    Enemies.Add({FVector(1000,0,164)});
+    const int32 Traces=ERSpawnRisk::Score(World,Starts,Enemies,{},{},{},0,Tuning);
+    TestTrue(TEXT("crowded evaluation respects its shared trace budget"),Traces<=Tuning.MaxTraces);
+    const int32 Choice=ERSpawnRisk::Pick(Starts,Tuning,[](int32){return 0;});
+    TestEqual(TEXT("final verification reaches the distant shooter"),Starts[Choice].Seen,1);
+    TestEqual(TEXT("the chosen start has complete sight information"),Starts[Choice].Unknown,0);
+    for(const auto& Start:Starts)
+        TestTrue(TEXT("unfinished starts are never called covered"),Start.Seen>0 || Start.Unknown>0);
+    Enemies.Pop();
+    ERSpawnRisk::Score(World,Starts,Enemies,{},{},{},0,Tuning);
+    for(const auto& Start:Starts)
+    {
+        TestEqual(TEXT("all remaining enemies are covered"),Start.Seen,0);
+        TestEqual(TEXT("all covered samples fit exactly in the budget"),Start.Unknown,0);
+    }
+    Tuning.MaxTraces=1;
+    ERSpawnRisk::Score(World,Starts,Enemies,{},{},{},0,Tuning);
+    TestEqual(TEXT("one blocked sample does not finish a threat"),Starts[0].Unknown,4);
+    TestTrue(TEXT("partially sampled threats retain conservative risk"),Starts[0].Risk>=4*Tuning.SightPenalty);
+    World->DestroyWorld(false);
     return !HasAnyErrors();
 }
 

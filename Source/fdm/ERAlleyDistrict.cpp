@@ -388,7 +388,13 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
         {
             const int32 N=FMath::CeilToInt(Height/40);const float Rise=Height/(2*N),Run=N*30.f;
             auto P=[&](FVector V){return Frame.TransformPosition(V+FVector(-W*.5f,-D*.5f,0));};
-            auto Solid=[&](FVector C,FVector Size){PairBox(P(C),Size,V.RoofSurface,true,Yaw);};
+            auto Solid=[&](FVector C,FVector Size)
+            {
+                const int32 First=Pieces.Num();PairBox(P(C),Size,V.RoofSurface,true,Yaw);
+                // Treads and their solid foundations remain one permanent stair
+                // route, regardless of the thickness or shared roof finish.
+                for(int32 I=First;I<Pieces.Num();++I)Pieces[I].bPermanentArchitecture=true;
+            };
             TArray<FVector> Route{P({70,90,100}),P({70,180,100})};
             for(int32 I=0;I<N;++I){const float H=(I+1)*Rise;if(I+1<N)Solid({70,200+(I+.5f)*30,H*.5f},{120,30,H});Route.Add(P({70,200+(I+.5f)*30,H+100}));}
             // Fill the rear stair bay to the lot edge. A player dropping from
@@ -605,11 +611,11 @@ bool BuildAlleyDistrict(const UERMapTemplate& T,int32 Seed,TArray<FERMapTemplate
     Pad({FVector2D(Base)-SpawnSize*.5,FVector2D(Base)+SpawnSize*.5},180);
     if(T.SizingTeamSize>0)
         PairBox(Base+FVector(0,-50,330),{1000,20,300},V.WallSurface);
-    if(T.SizingTeamSize>0)
+    if(!L.UnderpassRamps.IsEmpty())
     {
-        // A lateral mouth used to assume sea-level ground. Compact districts
-        // can bring a foundation close to it: meet the actual final terrain,
-        // then keep a short flat apron at that same height across the mouth.
+        // House foundations can change the ground beside either mouth in
+        // authored and sized districts. Meet the final terrain, then keep a
+        // short flat apron at that same height across the mouth.
         for(auto& Ramp:L.UnderpassRamps)
         {
             const FVector Direction=(Ramp.Exit-Ramp.Entry).GetSafeNormal2D();

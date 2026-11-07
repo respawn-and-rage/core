@@ -108,7 +108,7 @@ bool AERBlockRoom::Regenerate()
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(ERBlock_Regenerate);
     const double Start = FPlatformTime::Seconds();
-    if(HasAuthority())bGenerationValid=false;
+    if(HasAuthority()){bGenerationValid=false;ClearCellRecoveries();}
     if ((!CanMutateBlocks() && !bApplyingNetwork) || !BlockMesh || !GenerateLogicalWorld()) return false;
     if(HasAuthority())AERClaymore::RemoveFor(GetWorld());
     ClearCollapse();
@@ -264,6 +264,8 @@ FERBlockMemoryProfile AERBlockRoom::GetMemoryProfile() const
         Result.Quads+=ChunkQuads[I]; Result.CollisionBoxes+=ChunkBoxes[I];
     }
     Result.MappingBytes+=SkinMeshes.GetAllocatedSize()+SkinComponentPanels.GetAllocatedSize()+DirtySkinPanels.GetAllocatedSize();
+    Result.MappingBytes+=SkinClipCaches.GetAllocatedSize();
+    for(const auto& Cache:SkinClipCaches)Result.MappingBytes+=Cache.Value.GetAllocatedBytes();
     for(const auto& Entry:SkinMeshes)if(auto* Mesh=Entry.Value.Get())
     {
         FResourceSizeEx Size(EResourceSizeMode::Exclusive);Mesh->GetResourceSizeEx(Size);Result.InstanceResourceBytes+=Size.GetTotalMemoryBytes();
@@ -292,6 +294,7 @@ void AERBlockRoom::ClearOwnedEffects()
 }
 void AERBlockRoom::EndPlay(const EEndPlayReason::Type Reason)
 {
+    ClearCellRecoveries();
     for(auto& Shard:AuthorityShards)if(Shard.IsValid())Shard->Destroy();
     AuthorityShards.Empty();ReceivedShards.Empty();
     ClearCollapse();
@@ -376,7 +379,16 @@ void AERBlockRoom::StepSupport()
         // Evaluated on a timer, never inside a blast snapshot. New damage while
         // components detach is coalesced into one more check afterwards.
         SupportRevision=DamageRevision;DetachCursor=DetachOffset=0;bSupportRunning=true;
-        Support.Evaluate(CellWorld,PendingDetach);
+        PendingDetach.Reset();Support.BeginEvaluation(CellWorld);
+    }
+    if(Support.IsEvaluating())
+    {
+        const bool Complete=Support.StepEvaluation(PendingDetach,FMath::Clamp(Collapse.WorkPerStep,1,16384)*64,FMath::Clamp(double(Collapse.GraphTimeMs),.01,4.));
+        if(!Complete)
+        {
+            LastSupportWork=Support.LastSliceWork;LastSupportMs=(FPlatformTime::Seconds()-Begin)*1000;
+            PeakSupportMs=FMath::Max(PeakSupportMs,LastSupportMs);return;
+        }
         LastSupportWork=Support.LastWork;LastUnsupportedComponents=PendingDetach.Num();LastUnsupported=0;
         for (const auto& C:PendingDetach) LastUnsupported+=C.Num();
         UE_LOG(LogTemp,Display,TEXT("ER_BLOCK_SUPPORT unsupported=%d components=%d relabelled=%d graph=%.2fms revision=%llu"),LastUnsupported,LastUnsupportedComponents,Support.LastRelabelled,Support.LastMs,SupportRevision);
@@ -445,8 +457,10 @@ void AERBlockRoom::OnRep_Network()
     if(HasAuthority() || !bNetworkBegunPlay || Network.Epoch==0)return;
     if(BuiltEpoch!=Network.Epoch)
     {
+        ClearCellRecoveries();SyncStartedAt=FPlatformTime::Seconds();
         bMapReady=false;bNetworkError=false;SetMapCollision(false);
         if(!OnRepCellDescriptor())return;
     }
     TryApplyCellNetwork();
+    TryApplyCellRecovery();
 }

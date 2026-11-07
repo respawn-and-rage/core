@@ -25,7 +25,8 @@ screens inside the base courts, with the starts behind them and lateral dogleg e
 - Watchtowers 700–900cm with ladders and notched sniper parapets. Their walls, decks and
   parapets are destructible 10cm Brick with ordinary material HP; only ground rows anchor.
   Removing the supporting walls can collapse the deck. Ladder metal remains independently
-  grounded. Perimeter, terrain and stair foundations stay permanent.
+  grounded. Perimeter, terrain and stair foundations stay permanent. Stair treads retain
+  fixed collision even when their finish is shared with destructible roof slabs.
 
 ## Verify
 

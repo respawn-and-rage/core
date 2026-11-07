@@ -67,6 +67,18 @@ bool FERAlleysLayoutTest::RunTest(const FString& Parameters)
         {
             UnderpassAxes.Add(L.UnderpassAxis);
             TestTrue(TEXT("paired ramps and breachable road above a real lower route"),L.UnderpassRamps.Num()==2 && L.UnderpassBreaches.Num()==2 && L.UnderpassRoute.Num()>80);
+            for(const auto& Ramp:L.UnderpassRamps)
+            {
+                const FVector Direction=(Ramp.Exit-Ramp.Entry).GetSafeNormal2D(),Across(-Direction.Y,Direction.X,0);
+                const double HalfWidth=FMath::Abs(Direction.X)>.5 ? Ramp.Bounds.GetSize().Y*.5:Ramp.Bounds.GetSize().X*.5;
+                // Include seed73's authored mouth: later house pads must not
+                // leave a vertical step between the approach and the ramp.
+                for(double Side:{-.75,0.,.75})
+                {
+                    const FVector2D Approach(Ramp.Entry-Direction*50+Across*(HalfWidth*Side));
+                    TestTrue(*FString::Printf(TEXT("seed%d underpass mouth meets the final terrain across its width"),Seed),FMath::IsNearlyEqual(double(ERProcedural::AlleyGroundHeight(L,Approach)),Ramp.Entry.Z,.1));
+                }
+            }
             TestTrue(TEXT("low cover in the plaza and both districts"),L.CentralLowCovers>=8 && L.LowCovers.Num()-L.CentralLowCovers>=6);
             for(int32 I=0;I<L.LowCovers.Num();I+=2)
             {
@@ -160,7 +172,11 @@ bool FERAlleysCollisionTest::RunTest(const FString& Parameters)
                 for(float Z=0;Z<It->Height;Z+=50)TestTrue(TEXT("visible tower ladder rungs/handles have real collision"),It->HasRung(Z));
                 TestFalse(TEXT("tower climb line has standing body clearance"),World->SweepSingleByChannel(Hit,It->ClimbPosition(0,94),It->ClimbPosition(It->Height,94),FQuat::Identity,ECC_Pawn,Capsule,Q));
                 const auto Landing=It->Landing(94);TestFalse(TEXT("tower deck landing has headroom"),World->OverlapBlockingTestByChannel(Landing,FQuat::Identity,ECC_Pawn,Capsule,Q));
-                TestTrue(TEXT("tower landing rests on a visible deck"),World->LineTraceSingleByChannel(Hit,Landing,Landing-FVector(0,0,150),ECC_WorldStatic,Q) && FMath::IsNearlyEqual(Hit.ImpactPoint.Z,It->GetActorLocation().Z+It->DeckHeight,1));
+                const bool FoundDeck=World->LineTraceSingleByChannel(Hit,Landing,Landing-FVector(0,0,150),ECC_WorldStatic,Q);
+                const bool LandingSupported=FoundDeck && FMath::IsNearlyEqual(Hit.ImpactPoint.Z,It->GetActorLocation().Z+It->DeckHeight,1);
+                if(!LandingSupported)AddInfo(FString::Printf(TEXT("ER_ALLEY_LANDING seed=%d actor=%s location=%s rotation=%s deck_height=%.3f landing=%s found=%d component=%s impact=%s normal=%s penetrating=%d"),
+                    Seed,*It->GetName(),*It->GetActorLocation().ToString(),*It->GetActorRotation().ToString(),It->DeckHeight,*Landing.ToString(),int32(FoundDeck),*GetNameSafe(Hit.GetComponent()),*Hit.ImpactPoint.ToString(),*Hit.ImpactNormal.ToString(),int32(Hit.bStartPenetrating)));
+                TestTrue(TEXT("tower landing rests on a visible deck"),LandingSupported);
             }
         }
         for(const auto& Gate:L.TownGates)for(int32 I=1;I<Gate.Passage.Num();++I)

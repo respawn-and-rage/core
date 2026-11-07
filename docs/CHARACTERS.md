@@ -52,6 +52,9 @@ Note that the gallery counts from 1: "gallery 8" is index 7. Role assignments ar
 - Ragdolls: owned `PA_ER_{Alpha,Omega}_Ragdoll`, 16 bodies/15 joints. Corpse meshes collapse
   hidden bones in `ERCorpseMeshComponent::FinalizeBoneTransform`.
 - Prone is procedural on team rigs through `UERPostureMesh`. Its extra hit volume stops at death.
+- Procedural pose passes cache mesh ancestry, reference transforms and per-skin clearances,
+  updating branch-local transforms without copying the entire pose. Mesh changes rebuild the
+  cache; authoritative bone and shot-history refresh remains active.
 - Prone keeps the torso low, opens the thighs from the hips, and fits the arms
   forward. Ground traces set the leg height and select reachable elbow support
   points. The boot toes turn down across the shins for ground contact. Side probes

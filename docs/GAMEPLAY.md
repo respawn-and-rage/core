@@ -16,7 +16,8 @@ for keys, units and ranges. Numbers below describe Standard values.
   procedural maps the server avoids exposed starts: see
   [PROCEDURAL_MAP_PLAYABILITY.md](PROCEDURAL_MAP_PLAYABILITY.md#spawn-scoring).
   Spawn protection lasts 4s, renders the character opaque gray through one transient
-  MID, and ends on expiry or attack.
+  MID, and ends on expiry or attack. For remote map loads it starts when synchronization
+  completes; pending pawns cannot participate in combat. See [ONLINE.md](ONLINE.md).
 - Dead characters leave a replicated cosmetic ragdoll that touches only WorldStatic,
   capped at 12, removed by the server after 30s and cleared on round reset.
 - No overhead player markers; `TeamMarker` stays hidden for serialized compatibility.
@@ -67,6 +68,8 @@ the capsule sweeps toward the rung line at a bounded speed before climbing.
 
 Traversal uses `UERMovement` and saved moves. `IA_Look` scalar is 0.18. Camera bob is
 cosmetic. FPS arms, weapon and muzzle flash render as FirstPerson primitives.
+Stable capsule dimensions skip redundant collision and overlap updates; posture blending,
+floor checks and ceiling clearance remain active.
 
 ## Controls
 

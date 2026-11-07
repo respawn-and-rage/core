@@ -4,6 +4,7 @@
 #include "ERServerSettings.h"
 #include "ERLoadout.h"
 #include "ERGameplayMessages.h"
+#include "ERNetworkQuality.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/HUD.h"
@@ -18,6 +19,7 @@ public:
     UPROPERTY(BlueprintReadWrite) FString LocalName = TEXT("Recruit");
     UPROPERTY(BlueprintReadOnly) FString LastError;
     UPROPERTY(BlueprintReadOnly) FString BuildVersion;
+    FString GetNetworkBuildVersion() const {return ERNetworkProtocol::BuildSignature(BuildVersion);}
     virtual void Init() override;
     virtual void Shutdown() override;
     void Host(int32 BotCount = 0, bool bStationaryTarget = false);
@@ -130,12 +132,23 @@ public:
     bool bMenuOpen = false;
     virtual void BeginPlay() override;
     virtual void PlayerTick(float DeltaTime) override;
+    virtual void TickActor(float DeltaSeconds,ELevelTick TickType,FActorTickFunction& ThisTickFunction) override;
     virtual void OnPossess(APawn* PossessedPawn) override;
     void HoldForBlockMap(class AERBlockRoom* Room,bool Reposition=false);
     UFUNCTION(Server,Reliable) void ServerAimPunchProbeReady(class AERAimPunchProbe* Probe, int32 Stage);
     UFUNCTION(Server,Reliable) void ServerAudioProbeReady(class AERAudioProbe* Probe, uint32 Token);
     UFUNCTION(Server,Reliable) void ServerBlockProbeReport(class AERBlockNetworkProbe* Probe,int32 Stage,uint32 Epoch,uint32 Sequence,uint32 Digest,bool Passed);
-    UFUNCTION(Server,Reliable) void ServerBlockMapReady(class AERBlockRoom* Room,uint32 Epoch);
+    UFUNCTION(Server,Reliable) void ServerBlockMapReady(class AERBlockRoom* Room,uint32 Epoch,class APawn* ReadyPawn,uint32 Sequence);
+    UFUNCTION(Server,Unreliable) void ServerBlockMapProgress(class AERBlockRoom* Room,uint32 Epoch,uint64 Progress);
+    UFUNCTION(Server,Reliable) void ServerRequestCellRecovery(class AERBlockRoom* Room,uint32 Epoch);
+    UFUNCTION(Server,Reliable) void ServerAckCellRecovery(class AERBlockRoom* Room,uint32 RecoveryId);
+    UFUNCTION(Client,Reliable) void ClientCellRecoveryResult(bool Accepted);
+    void NotifyCellRecoveryApplied(class AERBlockRoom* Room,uint32 RecoveryId);
+    bool IsCellRecoveryPending() const {return bWaitingCellRecovery;}
+    UFUNCTION(Server,Unreliable) void ServerNetworkSample(uint16 Token);
+    UFUNCTION(Client,Unreliable) void ClientNetworkSample(uint16 Token,float ServerFrameMs);
+    FString GetNetworkStatusText() const;
+    FString GetMapSyncText() const;
     FString ScreenshotStatus, ScreenshotDirectory;
     double ScreenshotNoticeUntil = 0;
     UFUNCTION(Exec) void CapturePlayerScreenshots();
@@ -206,8 +219,31 @@ private:
     UPROPERTY(Transient) TObjectPtr<class UAudioComponent> MenuMusicComponent;
     void UpdateMenuMusic();
     uint32 AcknowledgedBlockEpoch=0;
+    TWeakObjectPtr<class AERBlockRoom> AcknowledgedBlockRoom;
+    TWeakObjectPtr<APawn> AcknowledgedBlockPawn;
     bool bBlockMapLoading=false;
     void UpdateBlockMapLoading();
+    void SetPawnNetworkReady(bool Ready);
+    void TickNetworkQuality(float DeltaSeconds);
+    TWeakObjectPtr<class AERBlockRoom> WaitingBlockRoom;
+    TWeakObjectPtr<APawn> WaitingBlockPawn;
+    uint32 WaitingBlockEpoch=0;
+    FERMapSyncDeadline MapSyncDeadline;
+    double NextMapProgressAt=0,NextRecoveryRequestAt=0,NextServerRecoveryAt=0;
+    double LastClientProgressAt=0;
+    uint64 LastClientProgress=0;
+    int32 RecoveryAttempts=0;
+    bool bWaitingCellRecovery=false,bCellRecoveryRequested=false;
+    double NextNetworkSampleAt=0,NextServerSampleAt=0,LastNetworkReplyAt=0;
+    float ServerFramePeriodMs=0,RemoteServerFrameMs=0;
+    uint16 NetworkSampleToken=0;
+    struct FPendingNetworkSample {uint16 Token=0;double SentAt=0;bool Pending=false;};
+    FPendingNetworkSample NetworkSamples[8];
+    FERNetworkQuality NetworkQuality;
+#if !UE_BUILD_SHIPPING
+    uint32 DebugSyncEpoch=0;
+    double DebugSyncReadyAt=0;
+#endif
     double LastForwardTap = -1;
     double LastCrouchTap = -1;
     TWeakObjectPtr<APawn> GesturePawn;

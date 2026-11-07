@@ -8,7 +8,7 @@ docs were removed after commit `d292554`, so `git show d292554:AGENTS.md` (or
 
 - Tactical multiplayer FPS, tagline **Serious guns. Questionable players**.
   Unreal Engine **5.8.3**, `RespawnAndRage.uproject`, targets `RespawnAndRage` and
-  `RespawnAndRageEditor`, build settings V7, include order `Unreal5_8`.
+  `RespawnAndRageEditor` and `RespawnAndRageServer`, build settings V7, include order `Unreal5_8`.
 - Sibling repositories under `/Users/agea/git/respawn-and-rage/`: `core` (this
   public repo), `unreal-builder` (Fargate/EC2 build infrastructure), `website`.
   `_cache` holds private LFS caches and `builds/` packaging output.

@@ -254,15 +254,21 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
     L.CrossingRoutes.Add(MoveTemp(Cross));
     // Screened bases occupy opposite ends of the ring, away from the diagonal
     // closed corners. The outer street and interiors remain independently open.
-    Wall({-HX+100,-HY+650,0},800,0,340,EERBlockMaterial::Brick,false,0);
+    // A 2.4m perimeter bypass supports opposing player traffic. The other end
+    // has its own reserved dogleg, clear of the projecting service building.
+    Wall({-HX+240,-HY+720,0},800,0,340,EERBlockMaterial::Brick,false,0);
     for(int32 I=0;I<10;++I)
     {
         const FVector P(-HX+250+(I%5)*100,-HY+250+(I/5)*120,100);
         L.AlphaSpawns.Emplace(FRotator(0,0,0),P);L.OmegaSpawns.Emplace(FRotator(0,180,0),Turn.TransformPosition(P));
     }
     L.Spawn=L.AlphaSpawns[0].GetLocation();
-    const TArray<FVector> Exit{L.Spawn,{-HX+50,-HY+450,100},{-HX+50,-HY+800,100},Left[0]};
+    const TArray<FVector> Exit{L.Spawn,{-HX+120,-HY+450,100},{-HX+120,-HY+800,100},Left[0]};
     Route(Exit);const auto MateExit=L.RoomAccessRoutes.Last();
+    const TArray<FVector> OtherExit{L.Spawn,{-HX+650,-HY+620,100},
+        {-HX+1160,-HY+620,100},{-HX+1160,-HY+800,100},Bottom[1]};
+    Route(OtherExit);
+    L.SpawnExitRoutes={Exit,MateExit,OtherExit,L.RoomAccessRoutes.Last()};
     TArray<FVector> Patrol=Left;
     for(int32 I=Bottom.Num()-2;I>=0;--I)Patrol.Add(Turn.TransformPosition(Bottom[I]));
     for(int32 I=1;I<Left.Num();++I)Patrol.Add(Turn.TransformPosition(Left[I]));

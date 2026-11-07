@@ -41,5 +41,21 @@ FTransform ERWorldWeaponPose::ClearObstacles(const UERWeaponData& Data,const AAc
             if (Clear(Candidate)) return Candidate;
         }
     }
+    // A long gun can have more than 36cm of projected half-extent, so the
+    // ordinary tuck cannot clear even a thin wall through its bounds centre.
+    // Try a small, fixed number of larger tucks derived from the same full
+    // bounds. Rotation, scale and both weapon-local palm contacts stay intact.
+    const FVector Extent=Bounds.BoxExtent*Desired.GetScale3D().GetAbs()+FVector(2);
+    const FQuat Rotation=Desired.GetRotation();
+    const double RearExtent=FMath::Abs(FVector::DotProduct(Back,Rotation.GetAxisX()))*Extent.X+
+        FMath::Abs(FVector::DotProduct(Back,Rotation.GetAxisY()))*Extent.Y+
+        FMath::Abs(FVector::DotProduct(Back,Rotation.GetAxisZ()))*Extent.Z;
+    const double MaxTuck=FMath::Clamp(RearExtent+12.,36.,96.);
+    if(MaxTuck>36.)for(int32 Step=1;Step<=4;++Step)for(int32 Lift=0;Lift<=3;++Lift)
+    {
+        FTransform Candidate=Desired;
+        Candidate.AddToTranslation(Back*FMath::Lerp(36.,MaxTuck,Step*.25)+FVector::UpVector*(Lift*12.));
+        if(Clear(Candidate))return Candidate;
+    }
     return Desired;
 }

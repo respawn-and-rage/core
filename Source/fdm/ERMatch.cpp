@@ -21,6 +21,7 @@
 #include "ERPlayerController.h"
 #include "ERWeapon.h"
 #include "ERNetworkProbe.h"
+#include "ERNetworkReadinessProbe.h"
 #include "ERBotController.h"
 #include "ERBotProbe.h"
 #include "ERSessionProbe.h"
@@ -250,6 +251,7 @@ void AERGameMode::BeginPlay()
         GetWorld()->SpawnActor<AERReconDirector>(ReconClass ? ReconClass.Get() : AERReconDirector::StaticClass());
 #if !UE_BUILD_SHIPPING
     if(FParse::Param(FCommandLine::Get(),TEXT("ERServerRulesProbe")) || FParse::Param(FCommandLine::Get(),TEXT("ERServerRulesGallery")))GetWorld()->SpawnActor<AERServerSettingsProbe>();
+    if(FParse::Param(FCommandLine::Get(),TEXT("ERNetworkReadinessProbe")))GetWorld()->SpawnActor<AERNetworkReadinessProbe>();
     if (FParse::Param(FCommandLine::Get(), TEXT("ERCapacityProbe"))) GetWorld()->SpawnActor<AERCapacityProbe>();
     int32 LobbyProbeClient = 0;
     if (FParse::Param(FCommandLine::Get(), TEXT("ERWindowInputProbe")) || FParse::Param(FCommandLine::Get(), TEXT("EROnlineUnconfiguredProbe")) || FParse::Param(FCommandLine::Get(), TEXT("ERMenuGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERSettingsWrite")) || FParse::Param(FCommandLine::Get(), TEXT("ERSettingsRead")) || FParse::Param(FCommandLine::Get(), TEXT("ERLobbyProbeHost")) || FParse::Param(FCommandLine::Get(), TEXT("ERLobbyProbeTimeout")) || FParse::Value(FCommandLine::Get(), TEXT("ERLobbyProbeClient="), LobbyProbeClient)) GetWorld()->SpawnActor<AERLobbyProbe>();

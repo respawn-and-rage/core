@@ -10,9 +10,34 @@
 #include "CanvasItem.h"
 #include "GlobalRenderResources.h"
 #include "Misc/CommandLine.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
+
+namespace
+{
+constexpr int32 DiscSegments=128;
+struct FDiscGeometry
+{
+    FVector2D Points[DiscSegments+1],Normals[DiscSegments];
+    float Limit=FMath::Cos(PI/DiscSegments);
+    FDiscGeometry()
+    {
+        for(int32 I=0;I<=DiscSegments;++I)
+        {
+            const float Angle=I*2*PI/DiscSegments;
+            Points[I]=FVector2D(FMath::Cos(Angle),FMath::Sin(Angle));
+            if(I<DiscSegments)
+            {
+                const float Mid=(I+.5f)*2*PI/DiscSegments;
+                Normals[I]=FVector2D(FMath::Cos(Mid),FMath::Sin(Mid));
+            }
+        }
+    }
+};
+}
 
 void AERReconDirector::DrawMinimap(AERHUD* HUD, AERPlayerController* PC)
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(ERRecon_Minimap);
     if (!HUD || !HUD->Canvas || !PC->Recon || PC->IsBlockMapLoading()) return;
     for (TActorIterator<AERBlockRoom> It(GetWorld()); It; ++It)
         if (!It->IsMapReady() || It->GetMapEpoch()!=Frame.GeometryEpoch) return;
@@ -33,17 +58,18 @@ void AERReconDirector::DrawMinimap(AERHUD* HUD, AERPlayerController* PC)
     const float MapScale=Frame.Span/ViewSpan;
     auto ToView = [&](const FVector2D& P) { return (P-MapOrigin)*(2.f*MapScale); };
     auto ToUV = [&](const FVector2D& P) { return P/(2.f*MapScale)+MapOrigin+FVector2D(.5); };
-    constexpr int32 DiscSegments=128;
+    static const FDiscGeometry Disc;
     const auto Color = ERRecon::TeamColor(Data.Team);
     // Use the same local heading as the owner's marker, every rendered frame.
     float Sin, Cos; FMath::SinCos(&Sin,&Cos,FMath::DegreesToRadians(ViewYaw));
     // Fog and the cached bird image retain their shared world-space grid.
     // Rotate every displayed position around the disc using the same basis.
     auto Orient = [&](const FVector2D& P) { return FVector2D(Cos*P.X+Sin*P.Y,-Sin*P.X+Cos*P.Y); };
+    TArray<FCanvasUVTri> CircleTriangles;CircleTriangles.Reserve(DiscSegments*3);
     auto Circle = [&](FVector2D At,float R,FLinearColor Ink,float Feather=1.f)
     {
         Feather*=Scale;
-        TArray<FCanvasUVTri> Tris;
+        CircleTriangles.Reset();auto& Tris=CircleTriangles;
         auto Add = [&](FVector2D A,FLinearColor CA,FVector2D B,FLinearColor CB,FVector2D C,FLinearColor CC)
         {
             FCanvasUVTri Tri;
@@ -54,8 +80,7 @@ void AERReconDirector::DrawMinimap(AERHUD* HUD, AERPlayerController* PC)
         const auto Clear=Ink.CopyWithNewOpacity(0);
         for (int32 I=0; I<DiscSegments; ++I)
         {
-            const float A=I*2*PI/DiscSegments, B=(I+1)*2*PI/DiscSegments;
-            const FVector2D DA(FMath::Cos(A),FMath::Sin(A)), DB(FMath::Cos(B),FMath::Sin(B));
+            const FVector2D DA=Disc.Points[I],DB=Disc.Points[I+1];
             const FVector2D IA=At+DA*(R-Feather), IB=At+DB*(R-Feather), OA=At+DA*R, OB=At+DB*R;
             Add(At,Ink,IA,Ink,IB,Ink);
             Add(IA,Ink,OA,Clear,OB,Clear); Add(IA,Ink,OB,Clear,IB,Ink);
@@ -68,24 +93,22 @@ void AERReconDirector::DrawMinimap(AERHUD* HUD, AERPlayerController* PC)
     Circle(Center,Radius,FLinearColor(.015,.021,.028,1),1.25);
     const bool HasImage = CapturedEpoch == Frame.Epoch && BirdView && BirdView->GetResource();
     const FTexture* Texture=HasImage ? BirdView->GetResource() : GWhiteTexture;
-    TArray<FCanvasUVTri> Tiles;
+    TArray<FCanvasUVTri> Tiles;Tiles.Reserve(1024);
     // Transform the existing world fog grid into the local fixed-scale view,
     // then clip terrain and fog together. UVs still address the whole-map capture.
-    for (int32 Cell=0; Cell<ERRecon::Grid*ERRecon::Grid; ++Cell)
+    MinimapFog.Update(Data.Explored);
+    MinimapFog.Visit(MapOrigin,MapScale,1.-1.25*Scale/Radius,[&](int32 CellX,int32 CellY,int32 Size)
     {
-        if (!ERRecon::IsExplored(Data.Explored,Cell)) continue;
-        const float X=float(Cell%ERRecon::Grid)/ERRecon::Grid-.5f;
-        const float Y=float(Cell/ERRecon::Grid)/ERRecon::Grid-.5f;
-        const float Step=1.f/ERRecon::Grid;
+        const float X=float(CellX)/ERRecon::Grid-.5f;
+        const float Y=float(CellY)/ERRecon::Grid-.5f;
+        const float Step=float(Size)/ERRecon::Grid;
         TArray<FVector2D,TInlineAllocator<16>> Polygon;
         Polygon.Append({ToView(FVector2D(X,Y)),ToView(FVector2D(X+Step,Y)),ToView(FVector2D(X+Step,Y+Step)),ToView(FVector2D(X,Y+Step))});
-        if (ToView(FVector2D(X+Step*.5,Y+Step*.5)).SizeSquared()>FMath::Square(1+Step*MapScale*1.415f)) continue;
         bool Inside=true; for (const auto& P:Polygon) Inside &= P.SizeSquared()<=.997;
         if (!Inside) for (int32 Edge=0; Edge<DiscSegments && Polygon.Num(); ++Edge)
         {
-            const float Angle=(Edge+.5f)*2*PI/DiscSegments;
-            const FVector2D Normal(FMath::Cos(Angle),FMath::Sin(Angle));
-            const float Limit=FMath::Cos(PI/DiscSegments);
+            const FVector2D Normal=Disc.Normals[Edge];
+            const float Limit=Disc.Limit;
             TArray<FVector2D,TInlineAllocator<16>> Clipped;
             for (int32 I=0; I<Polygon.Num(); ++I)
             {
@@ -107,7 +130,7 @@ void AERReconDirector::DrawMinimap(AERHUD* HUD, AERPlayerController* PC)
             Tri.V0_Color=EdgeInk(Polygon[0]); Tri.V1_Color=EdgeInk(Polygon[I]); Tri.V2_Color=EdgeInk(Polygon[I+1]);
             Tiles.Add(Tri);
         }
-    }
+    });
     if (Tiles.Num()) { FCanvasTriangleItem Item(Tiles,Texture); Item.BlendMode=SE_BLEND_Translucent; Canvas->DrawItem(Item); }
     auto Project = [&](const FVector& Position)
     {
@@ -160,11 +183,10 @@ void AERReconDirector::DrawMinimap(AERHUD* HUD, AERPlayerController* PC)
         LastHUDSample=Data.SampleTime;
         UE_LOG(LogTemp,Display,TEXT("ER_RECON_HUD epoch=%u team=%d enemies_drawn=%d age=%.2f view_yaw=%.1f"),Frame.Epoch,int32(Data.Team),LastDrawnEnemies,Now-Data.SampleTime,ViewYaw);
     }
-    TArray<FCanvasUVTri> Rim;
+    TArray<FCanvasUVTri> Rim;Rim.Reserve(DiscSegments*4);
     for (int32 I=0; I<DiscSegments; ++I)
     {
-        const float A=I*2*PI/DiscSegments, B=(I+1)*2*PI/DiscSegments;
-        const FVector2D DA(FMath::Cos(A),FMath::Sin(A)), DB(FMath::Cos(B),FMath::Sin(B));
+        const FVector2D DA=Disc.Points[I],DB=Disc.Points[I+1];
         for (int32 Band=0; Band<2; ++Band)
         {
             const float Inner=Radius+(-1.5f+Band*1.5f)*Scale, Outer=Inner+1.5f*Scale;

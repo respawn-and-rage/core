@@ -2,6 +2,7 @@
 #include "ERProceduralMap.h"
 #include "ERWeapon.h"
 #include "ERBlockTarget.h"
+#include "Components/DynamicMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
@@ -99,8 +100,71 @@ bool FERAlleyBrickTowerTest::RunTest(const FString&)
     const auto& Platform=Cells.GetPanels()[Deck];
     const FERCellId DeckCell{Deck,Platform.Dims.X/2,Platform.Dims.Y/2,Platform.Dims.Z/2};
     TestFalse(TEXT("sniper platform is not permanently anchored"),Platform.bAnchored || Platform.bAnchorBottom);
+    const FVector Landing=Ladder.TransformPosition({-100,0,Height+97});
+    FHitResult LandingHit;FCollisionQueryParams LandingQuery(SCENE_QUERY_STAT(ERAlleyTowerLanding),false);
+    const bool Lands=World->LineTraceSingleByChannel(LandingHit,Landing,Landing-FVector(0,0,150),ECC_WorldStatic,LandingQuery);
+    const bool LandsOnDeck=Lands && FMath::IsNearlyEqual(LandingHit.ImpactPoint.Z,Ladder.GetLocation().Z+Height,1.);
+    if(!LandsOnDeck)
+    {
+        const FVector Probe=Ladder.TransformPosition({-100,0,Height-5}),Local=Platform.Transform.InverseTransformPosition(Probe);
+        const FERCellId ProbeCell{Deck,FMath::FloorToInt32(Local.X/Platform.Cell.X),FMath::FloorToInt32(Local.Y/Platform.Cell.Y),FMath::FloorToInt32(Local.Z/Platform.Cell.Z)};
+        const int32 Chunk=Cells.IsValid(ProbeCell) ? Cells.GetChunkIndex(Deck,ProbeCell.X,ProbeCell.Z):INDEX_NONE;
+        AddInfo(FString::Printf(TEXT("ER_ALLEY_TOWER_DECK panel=%d id=%d size=%s frame=%s probe=%s local=%s valid=%d alive=%d chunk=%d trace=%d impact=%s"),
+            Deck,Platform.Id,*Platform.Size.ToString(),*Platform.Transform.ToString(),*Probe.ToString(),*Local.ToString(),Cells.IsValid(ProbeCell),Cells.IsAlive(ProbeCell),Chunk,Lands,*LandingHit.ImpactPoint.ToString()));
+        TArray<UPrimitiveComponent*> Components;Map->GetCellComponents(Components);
+        const FString ExpectedName=FString::Printf(TEXT("Cells_P%d_C%d"),Platform.Id,Chunk);
+        for(auto* Component:Components)if(Component->GetName()==ExpectedName)
+        {
+            const auto* Dynamic=Cast<UDynamicMeshComponent>(Component);
+            AddInfo(FString::Printf(TEXT("ER_ALLEY_TOWER_COLLISION component=%s enabled=%d response=%d bounds=%s boxes=%d"),
+                *Component->GetName(),int32(Component->GetCollisionEnabled()),int32(Component->GetCollisionResponseToChannel(ECC_WorldStatic)),*Component->Bounds.GetBox().ToString(),Dynamic ? Dynamic->GetSimpleCollisionShapes().BoxElems.Num():-1));
+        }
+    }
+    TestTrue(TEXT("tower ladder landing has physical brick deck support before damage"),LandsOnDeck);
+    TArray<FVector> PermanentTreads;
+    for(const auto& Piece:Layout.FixedPieces)
+    {
+        const FVector Size=Piece.Transform.GetScale3D()*100;
+        if(Piece.VisualOnly || Piece.Material!=EERBlockMaterial::Stone || !FMath::IsNearlyEqual(Size.X,120.) ||
+            !FMath::IsNearlyEqual(Size.Y,30.) || Size.Z>30 || Piece.Transform.GetLocation().Z<=180)continue;
+        PermanentTreads.Add(Map->GetActorTransform().TransformPosition(Piece.Transform.GetLocation()+FVector(0,0,Size.Z*.5)));
+    }
+    TestTrue(TEXT("paired thin upper stair treads remain fixed construction"),PermanentTreads.Num()>=2);
+    // Compare both evaluators on the same intact graph before any removal. A
+    // budgeted check must not change which construction pieces lack support.
+    FERCellSupport Diagnostic;
+    if(TestTrue(TEXT("intact support diagnostic graph builds"),Diagnostic.Build(Cells,Map->Collapse.GroundAnchors,Map->Collapse.GroundZ)))
+    {
+        auto Reference=Diagnostic;
+        TArray<TArray<FERCellId>> Expected,Actual;
+        Reference.EvaluateReference(Cells,Expected);Diagnostic.Evaluate(Cells,Actual);
+        TestTrue(TEXT("intact district reference and sliced support agree exactly"),Actual==Expected);
+        TestTrue(TEXT("intact district has no unsupported logical components"),Actual.IsEmpty());
+        for(int32 G=0;G<Actual.Num();++G)
+        {
+            TMap<int32,int32> Counts;FBox Bounds(ForceInit);
+            for(const auto& Id:Actual[G]){++Counts.FindOrAdd(Id.Panel);Bounds+=Cells.GetCellCenter(Id);}
+            AddInfo(FString::Printf(TEXT("ER_ALLEY_SUPPORT_GROUP group=%d cells=%d bounds=%s"),G,Actual[G].Num(),*Bounds.ToString()));
+            TArray<int32> PanelOrder;Counts.GetKeys(PanelOrder);PanelOrder.Sort();
+            for(int32 P:PanelOrder)
+            {
+                const auto& Part=Cells.GetPanels()[P];
+                AddInfo(FString::Printf(TEXT("ER_ALLEY_SUPPORT_PART group=%d panel=%d id=%d cells=%d material=%d size=%s origin=%s skin=%s anchored=%d bottom=%d"),
+                    G,P,Part.Id,Counts[P],int32(Part.Material),*Part.Size.ToString(),*Part.Transform.GetLocation().ToString(),*Part.SkinName.ToString(),Part.bAnchored,Part.bAnchorBottom));
+            }
+        }
+    }
     Map->RequestSupportCheck();for(int32 I=0;I<500 && Map->IsSupportPending();++I)Map->StepSupport();
+    TestFalse(TEXT("fresh support check completes"),Map->IsSupportPending());
     TestEqual(TEXT("intact district and tower keep all support"),Cells.GetRemovedCount(),int64(0));
+    for(const auto& Point:PermanentTreads)
+    {
+        FHitResult Hit;FERCellId Cell;
+        FCollisionQueryParams Query(SCENE_QUERY_STAT(ERAlleyPermanentStair),false);
+        const bool HitTread=World->LineTraceSingleByChannel(Hit,Point+FVector(0,0,50),Point-FVector(0,0,10),ECC_WorldStatic,Query);
+        TestTrue(TEXT("thin stair tread retains its permanent physical footing after support evaluation"),
+            HitTread && Hit.GetActor()==Map && FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Point.Z,.1) && !Map->ResolveCell(Hit,Cell));
+    }
     const FBox CutBand(Center+FVector(-400,-400,100),Center+FVector(400,400,160));
     int32 CutCount=0;for(int32 Panel:TowerPanels)CutCount+=ERAlleyDestruction::Cut(Map,Panel,CutBand);
     TestTrue(TEXT("controlled damage removes thin brick supports"),CutCount>0);

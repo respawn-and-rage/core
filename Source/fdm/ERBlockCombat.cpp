@@ -49,7 +49,7 @@ double ERBlockCombat::ExplosionFractureDistance(const FERBlockExplosionProfile& 
 }
 FERBlockShotResult ERBlockCombat::ContinueShot(UWorld* World, const FHitResult& InitialHit, const FVector& Start,
     const FVector& Direction, float Range, float Damage, const FERBlockShotSettings& Settings,
-    const FCollisionQueryParams& Query, AController* Instigator, AActor* Causer)
+    const FCollisionQueryParams& Query,AController* Instigator,AActor* Causer,ERShotTrace::FContext* Context)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(ERBlock_ContinueShot);
     const double StartTime=FPlatformTime::Seconds();
@@ -100,7 +100,7 @@ FERBlockShotResult ERBlockCombat::ContinueShot(UWorld* World, const FHitResult& 
         const auto* Gun=Cast<AERWeapon>(Causer);
         const bool Anatomical=Gun && Gun->Data && Gun->Data->bUseBodyHitZones;
         if (!(Anatomical ? ERShotTrace::Pellet(World,Hit,Cursor,Result.End,Query,
-            Cast<AERCharacter>(Gun->GetOwner()) ? ERShotTrace::BulletTime(CastChecked<AERCharacter>(Gun->GetOwner())):-1) :
+            Cast<AERCharacter>(Gun->GetOwner()) ? ERShotTrace::BulletTime(CastChecked<AERCharacter>(Gun->GetOwner())):-1,Context) :
             World->LineTraceSingleByChannel(Hit, Cursor, Result.End, ECC_GameTraceChannel1, Query))) break;
     }
     for (auto* Room : Rooms)

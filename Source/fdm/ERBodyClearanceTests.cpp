@@ -9,6 +9,39 @@
 #include "Components/CapsuleComponent.h"
 #include "Misc/AutomationTest.h"
 #if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERStablePostureTest,"EclipseRecoil.Movement.StablePosture",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FERStablePostureTest::RunTest(const FString&)
+{
+    UWorld::InitializationValues Values;
+    Values.AllowAudioPlayback(false).CreateNavigation(false).CreateAISystem(false).CreateFXSystem(false).EnableTraceCollision(true);
+    auto* World=UWorld::CreateWorld(EWorldType::Game,false,NAME_None,nullptr,true,ERHIFeatureLevel::Num,&Values);
+    if(!TestNotNull(TEXT("posture world"),World))return false;
+    auto* Pawn=World->SpawnActor<AERCharacter>(FVector(0,0,92.5),FRotator::ZeroRotator);
+    auto* Movement=CastChecked<UERMovement>(Pawn->GetCharacterMovement());
+    Movement->SetMovementMode(MOVE_Walking);
+    const FVector Standing=Pawn->GetActorLocation();
+    for(int32 Frame=0;Frame<30;++Frame)Movement->UpdateCharacterStateBeforeMovement(1.f/60);
+    TestEqual(TEXT("stable standing height"),Pawn->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight(),92.5f);
+    TestTrue(TEXT("stable posture does not drift"),Pawn->GetActorLocation().Equals(Standing,.0001));
+    Pawn->GetCapsuleComponent()->SetCapsuleHalfHeight(34);
+    Pawn->SetActorLocation(FVector(0,0,34));
+    Movement->Locomotion.HalfHeight=34;Movement->Locomotion.ProneBlend=.3f;Movement->bProneWanted=true;
+    const FVector Low=Pawn->GetActorLocation();
+    Movement->UpdateCharacterStateBeforeMovement(.1f);
+    TestTrue(TEXT("prone blend advances even when capsule reached its target"),Movement->Locomotion.ProneBlend>.3f);
+    TestEqual(TEXT("blend update retains the settled capsule"),Pawn->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight(),34.f);
+    for(int32 Frame=0;Frame<90;++Frame)Movement->UpdateCharacterStateBeforeMovement(1.f/60);
+    TestEqual(TEXT("prone blend finishes"),Movement->Locomotion.ProneBlend,1.f);
+    TestTrue(TEXT("settled prone feet do not move"),Pawn->GetActorLocation().Equals(Low,.0001));
+    Movement->bProneWanted=false;
+    for(int32 Frame=0;Frame<120;++Frame)Movement->UpdateCharacterStateBeforeMovement(1.f/60);
+    TestEqual(TEXT("standing transition remains available"),Pawn->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight(),92.5f);
+    TestEqual(TEXT("standing transition clears prone blend"),Movement->Locomotion.ProneBlend,0.f);
+    TestTrue(TEXT("standing transition preserves the feet"),FMath::IsNearlyEqual(Pawn->GetActorLocation().Z,92.5,.001));
+    World->DestroyWorld(false);
+    return !HasAnyErrors();
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERBodyClearanceTest,"EclipseRecoil.Movement.BodyClearance",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FERBodyClearanceTest::RunTest(const FString&)
 {

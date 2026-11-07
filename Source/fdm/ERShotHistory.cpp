@@ -4,19 +4,24 @@
 #include "Engine/World.h"
 #include "PhysicsEngine/BodyInstance.h"
 
+FERShotPose& FERShotHistory::Append(double Time,const FVector& Origin)
+{
+    if(Count>0 && (Time<Frame(Count-1).Time || FVector::DistSquared(Origin,Frame(Count-1).Origin)>FMath::Square(200.)))Reset();
+    if(Count>0 && Frame(Count-1).Time==Time)--Count;
+    while(Count>1 && (Time-Frame(1).Time>MaxRewind+.1 || Count>=Capacity))
+    {First=(First+1)%Capacity;--Count;}
+    const int32 Slot=(First+Count)%Capacity;
+    if(Slot>=Frames.Num())Frames.SetNum(Slot+1);
+    ++Count;
+    auto& Pose=Frames[Slot];Pose.Time=Time;Pose.Origin=Origin;Pose.ReferencePoint=FVector::ZeroVector;Pose.Bodies.Reset();
+    return Pose;
+}
 void FERShotHistory::Record(USkeletalMeshComponent* Body)
 {
-    const double Now=Body->GetWorld()->GetTimeSeconds();
-    const FVector Position=Body->GetComponentLocation();
     // Never interpolate across a skin rebuild, teleport, or world-clock reset.
-    if(Asset.Get()!=Body->GetSkeletalMeshAsset() || (!Frames.IsEmpty() &&
-        (Now<Frames.Last().Time || FVector::DistSquared(Position,Frames.Last().Origin)>FMath::Square(200.))))
-        Frames.Reset();
+    if(Asset.Get()!=Body->GetSkeletalMeshAsset())Reset();
+    auto& Pose=Append(Body->GetWorld()->GetTimeSeconds(),Body->GetComponentLocation());
     Asset=Body->GetSkeletalMeshAsset();
-    if(!Frames.IsEmpty() && Frames.Last().Time==Now)Frames.Pop(EAllowShrinking::No);
-    while(Frames.Num()>1 && (Now-Frames[1].Time>MaxRewind+.1 || Frames.Num()>=128))
-        Frames.RemoveAt(0,1,EAllowShrinking::No);
-    FERShotPose& Pose=Frames.AddDefaulted_GetRef();Pose.Time=Now;Pose.Origin=Position;
     Pose.ReferencePoint=Body->GetBoneLocation(TEXT("spine_03"));
     Pose.Bodies.Reserve(Body->Bodies.Num());
     for(const auto* Instance:Body->Bodies)
@@ -24,11 +29,11 @@ void FERShotHistory::Record(USkeletalMeshComponent* Body)
 }
 bool FERShotHistory::Sample(double Time,TArray<FTransform>& Out,FVector* ReferencePoint) const
 {
-    if(Frames.IsEmpty() || Time<Frames[0].Time)return false;
-    for(int32 I=1;I<Frames.Num();++I)
+    if(Count==0 || Time<Frame(0).Time)return false;
+    for(int32 I=1;I<Count;++I)
     {
-        if(Frames[I].Time<Time)continue;
-        const auto& A=Frames[I-1];const auto& B=Frames[I];
+        if(Frame(I).Time<Time)continue;
+        const auto& A=Frame(I-1);const auto& B=Frame(I);
         if(A.Bodies.Num()!=B.Bodies.Num())return false;
         const float Alpha=float(FMath::Clamp((Time-A.Time)/FMath::Max(.000001,B.Time-A.Time),0.,1.));
         if(ReferencePoint)*ReferencePoint=FMath::Lerp(A.ReferencePoint,B.ReferencePoint,Alpha);
@@ -36,14 +41,19 @@ bool FERShotHistory::Sample(double Time,TArray<FTransform>& Out,FVector* Referen
         for(int32 J=0;J<Out.Num();++J)Out[J].Blend(A.Bodies[J],B.Bodies[J],Alpha);
         return true;
     }
-    if(ReferencePoint)*ReferencePoint=Frames.Last().ReferencePoint;
-    Out=Frames.Last().Bodies;return true;
+    if(ReferencePoint)*ReferencePoint=Frame(Count-1).ReferencePoint;
+    Out=Frame(Count-1).Bodies;return true;
 }
 bool FERShotHistory::Trace(USkeletalMeshComponent* Body,FHitResult& Hit,const FVector& Start,const FVector& End,
     const FCollisionQueryParams& Query,double Time,float Margin) const
 {
     TArray<FTransform> Pose;
     const bool bHistorical=Time>=0 && Time<Body->GetWorld()->GetTimeSeconds() && Sample(Time,Pose) && Pose.Num()==Body->Bodies.Num();
+    return TracePose(Body,Hit,Start,End,Query,bHistorical ? &Pose:nullptr,Margin);
+}
+bool FERShotHistory::TracePose(USkeletalMeshComponent* Body,FHitResult& Hit,const FVector& Start,const FVector& End,
+    const FCollisionQueryParams& Query,const TArray<FTransform>* Pose,float Margin) const
+{
     const double Length=FVector::Distance(Start,End);
     if(Length<UE_SMALL_NUMBER)return false;
     // Exact intersections win over forgiving edges, so tolerance cannot steal a chest hit for the head.
@@ -55,7 +65,7 @@ bool FERShotHistory::Trace(USkeletalMeshComponent* Body,FHitResult& Hit,const FV
             const auto* Instance=Body->Bodies[I];
             if(!Instance || !Instance->IsValidBodyInstance())continue;
             const FTransform Current=Instance->GetUnrealWorldTransform();
-            const FTransform Historical=bHistorical ? Pose[I]:Current;
+            const FTransform Historical=Pose && Pose->Num()==Body->Bodies.Num() ? (*Pose)[I]:Current;
             const auto ToCurrent=[&](const FVector& P){return Current.TransformPositionNoScale(Historical.InverseTransformPositionNoScale(P));};
             FHitResult Candidate;
             const bool FoundBody=Pass==0 ? Instance->LineTrace(Candidate,ToCurrent(Start),ToCurrent(End),Query.bTraceComplex,Query.bReturnPhysicalMaterial):

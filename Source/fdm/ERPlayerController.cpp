@@ -53,6 +53,7 @@
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "Misc/NetworkVersion.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -97,6 +98,7 @@ void UERGameInstance::Init()
     if (!FFileHelper::LoadFileToString(BuildVersion, *(FPaths::ProjectDir() / TEXT("Build/GameVersion.txt"))))
         BuildVersion = TEXT("unversioned");
     BuildVersion.TrimStartAndEndInline();
+    FNetworkVersion::SetProjectVersion(*GetNetworkBuildVersion());
     UE_LOG(LogTemp, Display, TEXT("ER_BUILD_VERSION %s"), *BuildVersion);
     FInternationalization::Get().SetCurrentLanguage(TEXT("en"));
 #if PLATFORM_MAC
@@ -421,7 +423,6 @@ void AERPlayerController::PlayerTick(float DeltaTime)
     Super::PlayerTick(DeltaTime);
     TickPlayerScreenshots();
     UpdateWindowInput();
-    UpdateBlockMapLoading();
     if (IsLocalController() && bShowingLobby && !IsMenuLevel()) { MenuPage = 0; ShowMenu(false); }
     if (IsLocalController() && IsMenuLevel() && bShowingLobby != IsInLobby())
     { MenuPage = 0; ShowMenu(true); }
@@ -742,17 +743,16 @@ void AERPlayerController::Look(const FInputActionValue& Value)
 }
 void AERPlayerController::FirePressed()
 {
-    if (bMenuOpen) return;
+    if (bMenuOpen || bBlockMapLoading) return;
     // Started fires once per physical press. Returning here consumes the respawn click.
     if (bAwaitingRespawn) { ServerRequestRespawn(); return; }
     if (auto* PlayerCharacter = Cast<AERCharacter>(GetPawn()))
     {
         PlayerCharacter->SetGrenadeInputHeld(true);
-        CastChecked<UERMovement>(PlayerCharacter->GetCharacterMovement())->SendMoveThisFrame();
-        PlayerCharacter->ServerStartFire();
+        PlayerCharacter->SetFireInputHeld(true);
     }
 }
-void AERPlayerController::FireReleased() { if (auto* PlayerCharacter = Cast<AERCharacter>(GetPawn())) { PlayerCharacter->SetGrenadeInputHeld(false);PlayerCharacter->ServerStopFire(); } }
+void AERPlayerController::FireReleased() { if (auto* PlayerCharacter = Cast<AERCharacter>(GetPawn())) { PlayerCharacter->SetGrenadeInputHeld(false);PlayerCharacter->SetFireInputHeld(false); } }
 void AERPlayerController::JumpPressed()
 {
     if (bMenuOpen) return;
@@ -781,7 +781,7 @@ void AERPlayerController::CrouchPressed()
     UpdateSprintInput();
 }
 void AERPlayerController::CrouchReleased() { if (auto* C = Cast<AERCharacter>(GetPawn())) C->UnCrouch(); }
-void AERPlayerController::ReloadPressed() { if (!bMenuOpen) if (auto* PlayerCharacter = Cast<AERCharacter>(GetPawn())) PlayerCharacter->ServerReload(); }
+void AERPlayerController::ReloadPressed() { if (!bMenuOpen) if (auto* PlayerCharacter = Cast<AERCharacter>(GetPawn())) { PlayerCharacter->SetFireInputHeld(false);PlayerCharacter->ServerReload(); } }
 void AERPlayerController::ScoreboardPressed() { bShowScoreboard = true; }
 void AERPlayerController::ScoreboardReleased() { bShowScoreboard = false; }
 void AERPlayerController::MenuPressed()
@@ -794,7 +794,7 @@ void AERPlayerController::SelectSlot(int32 Slot)
 {
     if (bMenuOpen) return;
     if (auto* C = Cast<AERCharacter>(GetPawn()); C && C->Weapon) C->Weapon->ServerClearScope();
-    if (auto* C = Cast<AERCharacter>(GetPawn())) C->ServerSelectWeapon(C->bPresetInventory ? C->FindCatalogSlot(Slot):Slot);
+    if (auto* C = Cast<AERCharacter>(GetPawn())) { C->SetFireInputHeld(false);C->ServerSelectWeapon(C->bPresetInventory ? C->FindCatalogSlot(Slot):Slot); }
 }
 void AERPlayerController::SelectNumber(int32 Index)
 {
@@ -826,7 +826,7 @@ void AERPlayerController::ScrollWeapon(int32 Direction)
         const int32 Slot=(Current+Direction*Step+C->Inventory.Num())%C->Inventory.Num();
         const auto* W=C->Inventory[Slot].Get();
         if(W && W->Data && (W->Data->Payload==EERPayload::Bullet || W->Data->Payload==EERPayload::Melee || W->MagazineAmmo+W->ReserveAmmo>0))
-        { C->ServerSelectWeapon(Slot);break; }
+        { C->SetFireInputHeld(false);C->ServerSelectWeapon(Slot);break; }
     }
 }
 void AERPlayerController::ServerSetSkins_Implementation(int32 Alpha, int32 Omega)
@@ -980,6 +980,7 @@ void AERPlayerController::UpdateWindowInput()
     if (InputWindow.Pin() != Window || InputViewportSize != Size || InputWindowPosition != Position ||
         InputWindowMode != Mode || bInputWindowActive != Active)
     {
+        if(bInputWindowActive && !Active)if(auto* C=Cast<AERCharacter>(GetPawn()))C->SetFireInputHeld(false);
         InputWindow = Window; InputViewportSize = Size; InputWindowPosition = Position;
         InputWindowMode = Mode; bInputWindowActive = Active;
         InputWindowStableAt = Now;
@@ -1187,7 +1188,7 @@ void AERHUD::DrawHUD()
     auto Text = [this,&Layout](const FString& Value, float X, float Y, FLinearColor Color = FLinearColor::White, float Scale = 1.3f) { const auto P=Layout.Position(X,Y); DrawHUDText(Value, P.X, P.Y, Color, Scale); };
     for (TActorIterator<AERBlockRoom> It(GetWorld()); It; ++It)
     {
-        if(PC->IsBlockMapLoading())Text(TEXT("Synchronizing map..."),30,83,FLinearColor::Yellow,1);
+        if(PC->IsBlockMapLoading())Text(PC->GetMapSyncText(),30,83,FLinearColor::Yellow,1);
         if(const auto* Map=Cast<AERProceduralMap>(*It))if(Map->LayoutConfig.TemplateAsset && !FParse::Param(FCommandLine::Get(),TEXT("ERBlockDebug")))continue;
         Text(TEXT("DESTRUCTION LAB 5cm CELLS | ERBlockGrenade / ERBlockShot 100 36 / ERBlockDamage 25 / ERBlockCollapseDemo"), 30, 105, FLinearColor::Yellow, 1);
         if (const auto* Map=Cast<AERProceduralMap>(*It)) Text(Map->LayoutConfig.TemplateAsset ? TEXT("ERMapGenerate 42 8 1 | template seed"):TEXT("ERMapGenerate 42 6 3 | seed / rooms 6..10 / floors 1..3"), 30, 185, FLinearColor::Yellow, 1);
@@ -1235,6 +1236,8 @@ void AERHUD::DrawHUD()
         Status = GS->Winner == EERTeam::None ? TEXT("DRAW") : TEXT("ROUND OVER");
     if (bLab && Character) Status = FString::Printf(TEXT("%.1f km/h   |   Feet height: %.0f cm"), Character->GetVelocity().Size2D()*.036f, Character->GetActorLocation().Z-Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()-2.1f);
     DrawHUDText(Status, W/2, Layout.Position(640,59).Y, FLinearColor(.8f,.82f,.85f), .9f, true);
+    const FString NetworkStatus=PC->GetNetworkStatusText();
+    if(!NetworkStatus.IsEmpty())DrawHUDText(NetworkStatus,W/2,Layout.Position(640,86).Y,FLinearColor(.72f,.76f,.82f),.45f,true);
     if (TActorIterator<AERReconDirector> It(GetWorld()); It) It->DrawMinimap(this,PC);
     if (bLab)
     {
@@ -1432,7 +1435,7 @@ void AERPlayerController::OnPossess(APawn* PossessedPawn)
 }
 void AERPlayerController::HoldForBlockMap(AERBlockRoom* Room,bool Reposition)
 {
-    if(!HasAuthority() || !Room || GetNetMode()==NM_Standalone)return;
+    if(!HasAuthority() || !Room || Room->GetWorld()!=GetWorld() || GetNetMode()==NM_Standalone)return;
     auto* C=Cast<AERCharacter>(GetPawn());if(!C)return;
     if(Reposition)
     {
@@ -1444,30 +1447,14 @@ void AERPlayerController::HoldForBlockMap(AERBlockRoom* Room,bool Reposition)
         if(IsLocalController() && !C->Health->bDead)C->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
         C->GetCharacterMovement()->ForceClientAdjustment();
     }
-    if(!IsLocalController() && AcknowledgedBlockEpoch!=Room->GetMapEpoch())C->GetCharacterMovement()->SetMovementMode(MOVE_None);
-}
-void AERPlayerController::ServerBlockMapReady_Implementation(AERBlockRoom* Room,uint32 Epoch)
-{
-    if(!Room || !Room->CanMutateBlocks() || Epoch==0 || Room->GetMapEpoch()!=Epoch)return;
-    AcknowledgedBlockEpoch=Epoch;
-    if(auto* C=Cast<AERCharacter>(GetPawn()))if(!C->Health->bDead){C->GetCharacterMovement()->SetMovementMode(MOVE_Walking);C->GetCharacterMovement()->ForceClientAdjustment();}
-    UE_LOG(LogTemp,Display,TEXT("ER_BLOCK_NET_PLAYER_READY name=%s epoch=%u"),*GetPlayerState<AERPlayerState>()->GetPlayerName(),Epoch);
-}
-void AERPlayerController::UpdateBlockMapLoading()
-{
-    if(!IsLocalController() || GetNetMode()!=NM_Client)return;
-    TActorIterator<AERBlockRoom> Room(GetWorld());
-    const bool Lab=GetWorld()->GetMapName().Contains(TEXT("L_CentralBuilding")) || GetWorld()->GetMapName().Contains(TEXT("L_ProceduralLab")) || GetWorld()->GetMapName().Contains(TEXT("L_DestructionLab")) || GetWorld()->GetMapName().Contains(TEXT("L_Killhouse")) || GetWorld()->GetMapName().Contains(TEXT("L_DustMirror"));
-    const bool Loading=Room ? !Room->IsMapReady():Lab;
-    if(Loading!=bBlockMapLoading)
+    const bool Ready=!bWaitingCellRecovery && Room->IsMapReady() && (IsLocalController() || (AcknowledgedBlockRoom.Get()==Room && AcknowledgedBlockEpoch==Room->GetMapEpoch()));
+    if(!Ready && (WaitingBlockRoom.Get()!=Room || WaitingBlockEpoch!=Room->GetMapEpoch() || WaitingBlockPawn.Get()!=C))
     {
-        bBlockMapLoading=Loading;SetIgnoreMoveInput(Loading);
-        if(auto* C=Cast<AERCharacter>(GetPawn()))C->GetCharacterMovement()->SetComponentTickEnabled(!Loading);
+        if(WaitingBlockRoom.Get()!=Room || WaitingBlockEpoch!=Room->GetMapEpoch())bWaitingCellRecovery=false;
+        WaitingBlockRoom=Room;WaitingBlockEpoch=Room->GetMapEpoch();WaitingBlockPawn=C;
+        MapSyncDeadline.Reset(FPlatformTime::Seconds());
     }
-    // A pawn can arrive after the loading gate was already entered.
-    if(Loading)if(auto* C=Cast<AERCharacter>(GetPawn()))C->GetCharacterMovement()->SetComponentTickEnabled(false);
-    if(Room && !Loading && GetPawn() && AcknowledgedBlockEpoch!=Room->GetMapEpoch())
-    {AcknowledgedBlockEpoch=Room->GetMapEpoch();if(auto* C=Cast<AERCharacter>(GetPawn()))C->GetCharacterMovement()->SetComponentTickEnabled(true);ServerBlockMapReady(*Room,AcknowledgedBlockEpoch);}
+    SetPawnNetworkReady(Ready);
 }
 
 void AERPlayerController::ServerBlockProbeReport_Implementation(AERBlockNetworkProbe* Probe,int32 Stage,uint32 Epoch,uint32 Sequence,uint32 Digest,bool Passed)

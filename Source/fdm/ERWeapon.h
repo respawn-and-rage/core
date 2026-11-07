@@ -191,6 +191,7 @@ public:
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     void StartFire();
     void StopFire();
+    bool IsFiring() const {return bWantsFire;}
     void Reload();
     void Cancel();
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
