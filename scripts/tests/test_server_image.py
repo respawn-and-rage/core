@@ -104,10 +104,10 @@ def hub(login_code=200, repo_code=200, private=False):
 
 
 class EngineTests(unittest.TestCase):
-    def test_launcher_style_engine_without_server_is_rejected_with_guidance(self):
+    def test_launcher_style_engine_without_server_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             engine = windows_engine(Path(temporary), server=False)
-            with self.assertRaisesRegex(ValueError, '-ServerEngine'):
+            with self.assertRaisesRegex(ValueError, 'Epic Launcher'):
                 image.check_engine(engine)
 
     def test_installed_server_support_needs_its_required_file(self):

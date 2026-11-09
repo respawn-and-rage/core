@@ -97,9 +97,8 @@ def check_engine(engine):
                and entry.get('ProjectType', 'Any') in ('Any', 'Code')]
     if not enabled or not any(not entry.get('RequiredFile') or
                               (engine / entry['RequiredFile'].replace('\\', '/')).is_file() for entry in matches):
-        raise ValueError('This Installed Build cannot build Linux Development Server targets (Epic Launcher builds never '
-                         'can). Pass -ServerEngine with a UE 5.8.3 source engine, or skip the server with '
-                         '-TargetPlatform Windows,Linux.')
+        raise ValueError('Installed Build without Linux Development Server targets (Epic Launcher builds never '
+                         'have them)')
     if not (engine / 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe').is_file():
         raise ValueError('Installed engine lacks Win64 UnrealEditor-Cmd.exe for cooking')
     if not list((engine / 'Engine/Binaries/Win64').rglob('UnrealEditor-LinuxTargetPlatform*.dll')):

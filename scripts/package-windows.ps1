@@ -130,8 +130,21 @@ function Find-Engine {
     throw 'Install UE 5.8.3 in Epic Launcher, or specify -Engine ''D:\Epic Games\UE_5.8''.'
 }
 
-function Test-ServerEngine([string]$EngineRoot) {
-    try { Invoke-Native 'python.exe' @($serverImageScript, 'check-engine', '--engine', $EngineRoot); return $true } catch { return $false }
+function Get-ServerEngineProblem([string]$EngineRoot) {
+    # $null when the engine can build the Linux server, otherwise the reason (output stays quiet).
+    $python = Get-Command -Name 'python.exe' -CommandType Application -ErrorAction Stop | Select-Object -First 1
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(& $python.Source $serverImageScript 'check-engine' '--engine' $EngineRoot 2>&1 | ForEach-Object { [string]$_ })
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($code -eq 0) { return $null }
+    $reason = (@($output | Where-Object { $_.Trim() }) -join ' ').Trim()
+    if (-not $reason) { $reason = "check-engine failed (exit $code)" }
+    return $reason
 }
 
 function Find-ServerEngine([string]$ClientEngine) {
@@ -140,8 +153,9 @@ function Find-ServerEngine([string]$ClientEngine) {
     if (-not $explicit) { $explicit = $env:UE_SERVER_ENGINE_ROOT }
     if ($explicit) {
         $path = [IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($explicit)).TrimEnd('\', '/')
-        if (Test-ServerEngine $path) { return $path }
-        throw "Server engine $path cannot build UE 5.8.3 Linux Development Server targets (see the message above)."
+        $problem = Get-ServerEngineProblem $path
+        if (-not $problem) { return $path }
+        throw "Server engine $path cannot build the Linux server: $problem. Use a UE 5.8.3 source engine (after Setup.bat), or skip the server with -TargetPlatform Windows,Linux."
     }
     # The client engine first (no second workspace), then engines registered by
     # UnrealVersionSelector, which is where source builds appear.
@@ -161,8 +175,9 @@ function Find-ServerEngine([string]$ClientEngine) {
         if (-not (Test-Path -LiteralPath $versionFile -PathType Leaf)) { continue }
         $version = Get-Content -LiteralPath $versionFile -Raw | ConvertFrom-Json
         if ("$($version.MajorVersion).$($version.MinorVersion).$($version.PatchVersion)" -ne '5.8.3') { continue }
-        Write-Host "Server engine candidate: $path"
-        if (Test-ServerEngine $path) { return $path }
+        $problem = Get-ServerEngineProblem $path
+        if (-not $problem) { return $path }
+        Write-Host "Server engine skipped: $path ($problem)"
     }
     throw ('No UE 5.8.3 engine able to build Linux Server targets (Epic Launcher engines never can). Pass -ServerEngine ' +
         'or set UE_SERVER_ENGINE_ROOT to a source engine (after Setup.bat), register it with UnrealVersionSelector, ' +

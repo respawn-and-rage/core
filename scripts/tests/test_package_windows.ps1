@@ -207,7 +207,10 @@ try {
     }
     $serverCapable = @()
     $checkedEngines = New-Object 'System.Collections.Generic.List[string]'
-    function Test-ServerEngine([string]$EngineRoot) { $checkedEngines.Add($EngineRoot); return $serverCapable -contains $EngineRoot }
+    function Get-ServerEngineProblem([string]$EngineRoot) {
+        $checkedEngines.Add($EngineRoot)
+        if ($serverCapable -notcontains $EngineRoot) { 'no Linux Server targets' }
+    }
     function Get-ItemProperty { param($Path, $ErrorAction)
         if ($Path -like '*Unreal Engine\Builds') {
             [pscustomobject]@{ '{OLD-GUID}' = $oldEngine; '{SOURCE-GUID}' = ($sourceEngine + '\'); PSPath = 'registry' }
@@ -225,7 +228,7 @@ try {
         Assert-True ((Find-ServerEngine $launcherEngine) -eq $launcherEngine) 'A server-capable client engine avoids a second workspace'
         $serverCapable = @($sourceEngine)
         $env:UE_SERVER_ENGINE_ROOT = $launcherEngine
-        Assert-Throws { Find-ServerEngine $launcherEngine } 'cannot build'
+        Assert-Throws { Find-ServerEngine $launcherEngine } 'no Linux Server targets'
         $env:UE_SERVER_ENGINE_ROOT = $sourceEngine
         Assert-True ((Find-ServerEngine $launcherEngine) -eq $sourceEngine) 'UE_SERVER_ENGINE_ROOT is honored'
         $ServerEngine = $oldEngine
@@ -235,7 +238,7 @@ try {
         $ServerEngine = $null
     } finally {
         $env:UE_SERVER_ENGINE_ROOT = $savedServerRoot
-        Remove-Item Function:Test-ServerEngine
+        Remove-Item Function:Get-ServerEngineProblem
         function Get-ItemProperty { param($Path, $ErrorAction) return $null }
     }
 
