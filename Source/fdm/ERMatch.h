@@ -38,6 +38,22 @@ public:
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 };
 
+USTRUCT()
+struct FERKillFeedEntry
+{
+    GENERATED_BODY()
+    UPROPERTY() FString Killer;
+    UPROPERTY() FString Victim;
+    UPROPERTY() EERTeam KillerTeam = EERTeam::None;
+    UPROPERTY() EERTeam VictimTeam = EERTeam::None;
+    // ERLoadouts::WeaponAssetName index, or -1 when the death has no weapon (fall, world).
+    UPROPERTY() int8 WeaponKey = -1;
+    UPROPERTY() bool bHeadshot = false;
+    UPROPERTY() bool bFall = false;
+    // Local receipt time; never replicated.
+    double ReceivedAt = 0;
+};
+
 UCLASS()
 class FDM_API AERGameState : public AGameState
 {
@@ -69,6 +85,13 @@ public:
     UPROPERTY(Replicated, BlueprintReadOnly) double MatchEndServerTime = 0;
     UPROPERTY(Replicated, BlueprintReadOnly) double RestartServerTime = 0;
     UPROPERTY(Replicated, BlueprintReadOnly) EERTeam Winner = EERTeam::None;
+    // Server time when the frozen pre-match countdown ends; 0 while it has not started.
+    UPROPERTY(Replicated, BlueprintReadOnly) double CountdownEndServerTime = 0;
+    // True while players are spawned but frozen before the match clock starts.
+    bool IsPreMatchCountdown() const;
+    // Every machine keeps the last kills it received for the HUD feed.
+    TArray<FERKillFeedEntry> KillFeed;
+    UFUNCTION(NetMulticast, Reliable) void MulticastKillFeed(const FERKillFeedEntry& Entry);
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 };
 
@@ -102,7 +125,8 @@ public:
     virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
     virtual void RestartPlayer(AController* Player) override;
     virtual void HandleMatchHasStarted() override;
-    void RecordDeath(class AERCharacter* Victim, AController* Killer);
+    void RecordDeath(class AERCharacter* Victim, AController* Killer, const struct FERMessageDamage* Facts = nullptr);
+    float PreMatchCountdownSeconds() const;
     void RequestRespawn(AController* Player);
     int32 GetNumTestBots() const { return TestBots.Num(); }
     int32 GetMaxPlayers() const { return MaxHumanPlayers; }

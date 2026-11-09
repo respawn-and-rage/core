@@ -65,10 +65,25 @@ void AERNetworkProbe::HostShot()
 void AERNetworkProbe::ClientStep()
 {
     auto* PC = Cast<AERPlayerController>(UGameplayStatics::GetPlayerController(GetWorld(),0));
+    // Lethal beat: shortly after the first death the owner is still in first person,
+    // with the lethal punch applied, and the kill camera has not started yet.
+    if (const auto* Victim = PC ? Cast<AERCharacter>(PC->GetPawn()) : nullptr; Victim && Victim->Health->bDead && !bClientLethalBeatChecked)
+    {
+        if (ClientDeathSeenAt < 0) ClientDeathSeenAt = GetWorld()->GetTimeSeconds();
+        else if (GetWorld()->GetTimeSeconds() - ClientDeathSeenAt >= .1)
+        {
+            bClientLethalBeatChecked = true;
+            const FRotator Punch = Victim->GetLethalPunch();
+            UE_LOG(LogTemp, Display, TEXT("ER_MESSAGE_CLIENT_%s lethal_beat_before_killer_camera beat=%d camera=%d punch=%s"),
+                Victim->IsInDeathBeat() && !Victim->IsDeathCameraActive() && !Punch.IsNearlyZero(.1f) ? TEXT("PASS") : TEXT("FAIL"),
+                Victim->IsInDeathBeat(), Victim->IsDeathCameraActive(), *Punch.ToString());
+        }
+    }
     if (!PC || !PC->IsLocalController() || !PC->GetPawn() || ClientPhase == Phase) return;
     auto* Pawn = Cast<AERCharacter>(PC->GetPawn()); if (!Pawn || !Pawn->Weapon) return;
     // Probe phase and pawn properties travel on different actor channels.
-    if (Phase == 5 && (!Pawn->Health->bDead || !Pawn->bHasDeathFocus || PC->KillConfirmations.IsEmpty())) return;
+    // The kill camera starts after the owner's lethal beat.
+    if (Phase == 5 && (!Pawn->Health->bDead || !Pawn->bHasDeathFocus || !Pawn->IsDeathCameraActive() || PC->KillConfirmations.IsEmpty())) return;
     if (Phase == 7 && Pawn->Health->bDead) return;
     ClientPhase = Phase;
     UE_LOG(LogTemp, Display, TEXT("ER_CLIENT_PHASE %d hp=%.0f ammo=%d"),Phase,Pawn->Health->Health,Pawn->Weapon->MagazineAmmo);
@@ -275,7 +290,9 @@ void AERNetworkProbe::Tick(float DeltaTime)
             H->ServerStartFire(); Advance(14,.7f); break;
         case 14:
             H->ServerStopFire();
-            Check(C->Health->bDead && Host->GetPlayerState<AERPlayerState>()->Kills==1 && Host->GetPlayerState<AERPlayerState>()->TeamKills==1 && GS->AlphaScore+GS->OmegaScore==1,TEXT("T11_friendly_fire_no_enemy_score"));
+            Check(C->Health->bDead && Host->GetPlayerState<AERPlayerState>()->Kills==1 && Host->GetPlayerState<AERPlayerState>()->TeamKills==1 &&
+                (Host->GetPlayerState<AERPlayerState>()->Team==EERTeam::Alpha ? GS->AlphaScore : GS->OmegaScore)==0 &&
+                (Host->GetPlayerState<AERPlayerState>()->Team==EERTeam::Alpha ? GS->OmegaScore : GS->AlphaScore)==0,TEXT("T11_friendly_fire_no_enemy_score_team_penalty"));
             Check(!Host->KillConfirmations.IsEmpty() && Host->KillConfirmations.Last().Title.Contains(TEXT("TEAMKILL ·")), TEXT("Messages_teamkill_always_confirmed"));
             Client->GetPlayerState<AERPlayerState>()->Team=Host->GetPlayerState<AERPlayerState>()->Team==EERTeam::Alpha ? EERTeam::Omega : EERTeam::Alpha;
             GS->AlphaScore=GS->OmegaScore=0;

@@ -249,7 +249,7 @@ FVector AERWeapon::GetLaunchVelocity(const FVector& Direction) const
     // Launcher sights indicate the target; the barrel gives the grenade a small lob.
     FRotator LaunchAim=Direction.Rotation();
     if(Tuned()->Payload==EERPayload::LaunchedHE)
-        LaunchAim.Pitch=FMath::Clamp(LaunchAim.Pitch+6.f,-89.f,89.f);
+        LaunchAim.Pitch=FMath::Clamp(LaunchAim.Pitch+LauncherLobDegrees,-89.f,89.f);
     FVector Velocity=LaunchAim.Vector()*Tuned()->ProjectileSpeed;
     const float Range=FMath::Clamp(Tuned()->LaunchRangeMultiplier,1.f,2.f) *
         (ScopeLevel ? FMath::Clamp(Tuned()->ScopedLaunchRangeMultiplier,1.f,2.f) : 1.f);

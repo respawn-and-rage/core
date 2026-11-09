@@ -171,6 +171,8 @@ public:
     float GetScopeSettle() const;
     float GetScopeFOV() const;
     bool HasOpticalScope() const { return Data && Data->ScopeMode == 2; }
+    // Launcher rounds leave this many degrees above the sight line.
+    static constexpr float LauncherLobDegrees = 12.f;
     FVector GetLaunchVelocity(const FVector& Direction) const;
     float GetSpreadDegrees() const;
     float GetBloomDegrees() const;

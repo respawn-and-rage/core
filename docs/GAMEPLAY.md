@@ -8,7 +8,15 @@ for keys, units and ranges. Numbers below describe Standard values.
 ## Match
 
 - Two teams, **Alpha** (CT role in reference maps, blue) and **Omega** (T role, orange).
-- Team deathmatch: 600s, first to 50, 1 point per enemy kill, 10s intermission.
+- Team deathmatch: 600s, first to 50, 1 point per enemy kill, -1 per teamkill (`Match.TeamKillPoints`,
+  applied to the killer's team, which may go below zero), 10s intermission.
+- Pre-match countdown (`Match.Countdown`, 10s): once the map is ready and a player is
+  present, the server sets `AERGameState::CountdownEndServerTime` and stays in
+  `WaitingToStart`. Players spawn but `UERMovement` freezes travel, sprint, jump, ladder
+  and mantle (posture may change); weapons and grenades stay locked because combat requires
+  `IsMatchInProgress`. The match clock starts when the countdown ends, so it is not part
+  of the match duration. Non-shipping runs with an `-ER*Probe*`/`-ER*Gallery*` switch use
+  0s unless `-ERMatchCountdown=<s>` is given.
 - Server voting and rotation use production maps only. Rounds consume every template
   once in random order before reshuffling, avoiding a repeat across the boundary.
 - A lobby READY needs a strict majority of humans present (`Match.ReadyPercent`).
@@ -122,6 +130,10 @@ the lobby. See [MAPS.md](MAPS.md).
 catalog, preserved byte for byte (72 events, 720 variants). `UERGameplayMessages` loads
 it and dispatches the 40 connected events; the rest need extra telemetry.
 
+Every death is also broadcast to all players through the reliable multicast
+`AERGameState::MulticastKillFeed` (names, teams and weapon catalog key by value) for the
+HUD kill feed: see [HUD.md](HUD.md).
+
 Every confirmed kill sends a private reliable RPC to both players, bypassing
 cooldown and priority. Teamkills, self-inflicted and unattributed deaths are labelled.
 Canvas shows up to three confirmations for 6s plus one bonus toast, top left, silent.
@@ -129,8 +141,10 @@ Runtime durations double the catalog values. Shuffle bags use a separate RNG, pe
 player/event/audience. Thresholds keep the catalog suggestions: 40m longshot, ≤10HP,
 5/10/15/20/25 streaks, four unanswered kills, 4s rapid chain gap.
 
-The death camera moves from above the body toward the killer, zooming 90→60° and
-framing the body at about 65% height, with sphere sweeps. It is purely cosmetic.
+The death camera starts after the lethal beat ([WEAPON_TUNING.md](WEAPON_TUNING.md)), then moves
+from above the body toward the killer, zooming 90→60° and framing the killer at about 65% height,
+with sphere sweeps. It is purely cosmetic. The HUD shows the killer's name and health and armor
+vitals icons in one row above the killer's head ([HUD.md](HUD.md)).
 
 ## Original scope
 

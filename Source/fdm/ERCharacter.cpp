@@ -289,7 +289,7 @@ float UERHealthComponent::ReceiveDamage(float Amount, AController* Killer, float
         bDead = true;
         if (Character->Weapon) Character->Weapon->Cancel();
         OnRep_Dead();
-        Mode->RecordDeath(Character, Killer);
+        Mode->RecordDeath(Character, Killer, &Facts);
     }
     return Before - Health;
 }
@@ -808,7 +808,7 @@ void AERCharacter::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult)
     {
         OutResult.Location.Z += DeathViewDrop;
         OutResult.FOV = 90.f;
-        if (bHasDeathFocus)
+        if (bHasDeathFocus && !IsInDeathBeat())
         {
             const bool KillerPresent = IsValid(DeathFocus);
             const FVector Focus = KillerPresent ? DeathFocus->GetActorLocation() :
@@ -850,6 +850,27 @@ void AERCharacter::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult)
             OutResult.Rotation = (Focus - OutResult.Location).Rotation();
         }
     }
+    if (IsLocallyControlled() && !IsDeathCameraActive()) OutResult.Rotation += GetLethalPunch();
+}
+void AERCharacter::StartDeathBeat()
+{
+    if (DeathBeatStart < 0) DeathBeatStart = GetWorld()->GetTimeSeconds();
+}
+bool AERCharacter::IsInDeathBeat() const
+{
+    return DeathBeatStart >= 0 && GetWorld()->GetTimeSeconds() - DeathBeatStart < DeathBeatSeconds;
+}
+bool AERCharacter::IsDeathCameraActive() const
+{
+    return Health && Health->bDead && bHasDeathFocus && !IsInDeathBeat();
+}
+FRotator AERCharacter::GetLethalPunch() const
+{
+    if (LethalPunchTime < 0) return FRotator::ZeroRotator;
+    // 50ms attack, then a .14s half-life: gone well within the beat.
+    const double Age = GetWorld()->GetTimeSeconds() - LethalPunchTime;
+    const float Envelope = Age < .05 ? float(Age / .05) : float(FMath::Exp(-(Age - .05) * UE_LN2 / .14));
+    return Envelope < .01f ? FRotator::ZeroRotator : LethalPunch * Envelope;
 }
 void AERCharacter::EndPlay(const EEndPlayReason::Type Reason)
 {
@@ -925,6 +946,13 @@ float AERCharacter::TakeDamage(float Damage, const FDamageEvent& Event, AControl
             Projectile->Payload == EERPayload::LaunchedHE || Projectile->Payload == EERPayload::Rocket);
         Facts.Grenade = Facts.Explosion && (Projectile->Payload == EERPayload::HE || Projectile->Payload == EERPayload::LaunchedHE);
     }
+    // Kill feed icon: catalog key of the weapon, grenade or mine that applied this damage.
+    if (const auto* Gun = Cast<AERWeapon>(Causer); Gun && Gun->Data)
+    { for (int32 Key = 0; Key < 11; ++Key) if (Gun->Data->GetFName() == ERLoadouts::WeaponAssetName(Key)) { Facts.WeaponKey = Key; break; } }
+    else if (const auto* Projectile = Cast<AERProjectile>(Causer))
+        Facts.WeaponKey = Projectile->Payload == EERPayload::HE ? 8 : Projectile->Payload == EERPayload::Smoke ? 9 :
+            (Projectile->Payload == EERPayload::LaunchedHE || Projectile->Payload == EERPayload::Rocket) ? 7 : -1;
+    else if (Cast<AERClaymore>(Causer)) Facts.WeaponKey = 10;
     FHitResult WoundHit;
     if(bBullet)
     {
@@ -967,11 +995,11 @@ float AERCharacter::TakeDamage(float Damage, const FDamageEvent& Event, AControl
             UE_LOG(LogTemp,Display,TEXT("ER_AIMPUNCH_STATE pawn=%s seq=%u time=%.6f real=%.6f pitch=%.6f half_life=%.6f"),
                 *GetName(),AuthorityPunch.Sequence,AuthorityPunch.ServerTime,FPlatformTime::Seconds(),AuthorityPunch.Angle.X,AuthorityPunch.HalfLife);
 #endif
-        ClientDamageFeedback(Applied,LastHitDirection,AuthorityPunch,bBullet);
+        ClientDamageFeedback(Applied,LastHitDirection,AuthorityPunch,bBullet,Health->bDead);
     }
     return Before - Health->Health;
 }
-void AERCharacter::ClientDamageFeedback_Implementation(float Amount, FVector_NetQuantizeNormal Direction, const FERAimPunchState& Snapshot, bool bBullet)
+void AERCharacter::ClientDamageFeedback_Implementation(float Amount, FVector_NetQuantizeNormal Direction, const FERAimPunchState& Snapshot, bool bBullet, bool bLethal)
 {
     if (!IsLocallyControlled() || !Controller || !Controller->IsPlayerController()) return;
     if(!HasAuthority())
@@ -986,6 +1014,23 @@ void AERCharacter::ClientDamageFeedback_Implementation(float Amount, FVector_Net
         UE_LOG(LogTemp,Display,TEXT("ER_AIMPUNCH_RECEIVED pawn=%s seq=%u real=%.6f pitch=%.6f ping_ms=%.3f"),*GetName(),Snapshot.Sequence,FPlatformTime::Seconds(),GetAimPunchRotation().Pitch,GetPlayerState()?GetPlayerState()->GetPingInMilliseconds():0.f);
 #endif
     if(Amount<=0){DamageVisuals.Reset();DamageViewKick=CosmeticDamagePitch=FVector::ZeroVector;return;}
+    if(bLethal)
+    {
+        // The death may replicate before or after this RPC; either one starts the beat.
+        StartDeathBeat();
+        const FVector Travel=FVector(Direction);
+        const FVector Local=FRotationMatrix(FRotator(0,GetViewRotation().Yaw,0)).GetTransposed().TransformVector(Travel);
+        if(!bBullet && Travel.Z<-.9f) LethalPunch=FRotator(-9.f,0,0);
+        else
+        {
+            // The head follows the hit: snapped back from the front, forward from behind,
+            // turned and rolled toward the travel side. Blasts and heavy hits punch harder.
+            const float Base=(bBullet?5.f:8.f)+FMath::Clamp(Amount/50.f,0.f,1.f)*3.f;
+            const float Pitch=Local.X<=0.f?FMath::Max(.5f,-float(Local.X)):-FMath::Max(.5f,float(Local.X));
+            LethalPunch=FRotator(Base*Pitch,float(Local.Y)*5.f,float(Local.Y)*10.f);
+        }
+        LethalPunchTime=GetWorld()->GetTimeSeconds();
+    }
     if(!Health->bDead)
     {
         if(DamageVisuals.Num()>=4)DamageVisuals.RemoveAt(0);
@@ -994,7 +1039,7 @@ void AERCharacter::ClientDamageFeedback_Implementation(float Amount, FVector_Net
     if(!bBullet)CosmeticDamagePitch=(CosmeticDamagePitch+FVector(Direction)*FMath::Clamp(Amount/25.f,.5f,1.2f)).GetClampedToMaxSize(1.5f);
     DamageViewKick = (DamageViewKick + FVector(Direction) * FMath::Clamp(Amount / 25.f, .5f, 1.2f)).GetClampedToMaxSize(1.5f);
     if (HitSound) UGameplayStatics::PlaySoundAtLocation(this, HitSound,
-        Camera->GetComponentLocation() - FVector(Direction) * 140.f, .65f, 1.f, 0.f, HitAttenuation);
+        Camera->GetComponentLocation() - FVector(Direction) * 140.f, bLethal ? 1.f : .65f, 1.f, 0.f, HitAttenuation);
     UE_LOG(LogTemp, Display, TEXT("ER_DAMAGE_FEEDBACK amount=%.1f direction=%s sound=%d"), Amount, *FVector(Direction).ToString(), HitSound != nullptr);
 }
 bool AERCharacter::CanJumpInternal_Implementation() const
@@ -1019,7 +1064,7 @@ void AERCharacter::Landed(const FHitResult& Hit)
     {
         FERMessageDamage Facts; Facts.Fall = true;
         const float Applied=Health->ReceiveDamage(Damage,nullptr,2.f,Facts);
-        if(Applied>0){++AuthorityPunch.Sequence;ClientDamageFeedback(Applied,FVector(0,0,-1),AuthorityPunch,false);}
+        if(Applied>0){++AuthorityPunch.Sequence;ClientDamageFeedback(Applied,FVector(0,0,-1),AuthorityPunch,false,Health->bDead);}
         UE_LOG(LogTemp,Display,TEXT("ER_FALL_DAMAGE amount=%.2f applied=%.2f hp=%.2f"),Damage,Applied,Health->Health);
     }
 }
@@ -1035,6 +1080,7 @@ void AERCharacter::ApplyDeathVisuals()
 {
     if (bDeathVisualsApplied) return;
     bDeathVisualsApplied = true;
+    if (IsLocallyControlled()) StartDeathBeat();
     bPredictingFire=false;
     StopBlastRinging();
     ResetAimPunch();
@@ -1171,7 +1217,8 @@ void AERCharacter::SetGrenadeInputHeld(bool bHeld)
         if(bLocalGrenadeInputHeld) LocalGrenadeHideUntil=GetWorld()->GetTimeSeconds()+.35;
         bLocalGrenadeInputHeld=false;return;
     }
-    if(Health->bDead || !Weapon || !Weapon->Data || !AERWeapon::IsHandGrenade(Weapon->Data->Payload) ||
+    const auto* RoundState=GetWorld()->GetGameState<AERGameState>();
+    if(Health->bDead || !RoundState || !RoundState->IsMatchInProgress() || !Weapon || !Weapon->Data || !AERWeapon::IsHandGrenade(Weapon->Data->Payload) ||
         Weapon->MagazineAmmo<=0 || Weapon->bReloading || Weapon->IsGrenadeHandHidden() || Cast<UERMovement>(GetCharacterMovement())->bHighClimb) return;
     bLocalGrenadeInputHeld=true;
     LocalGrenadeCookDeadline=GetWorld()->GetTimeSeconds()+Weapon->Tuned()->FuseDuration;

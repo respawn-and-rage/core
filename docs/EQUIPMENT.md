@@ -31,7 +31,7 @@ catalog, and Apply affects the next spawn only. `?ERLegacyArsenal=1` and
   WorldStatic exposure samples against intact cover. Armor absorbs per `ArmorRatio`.
 - Fuse 3.5s from press for all hand grenades and launcher rounds; they bounce and
   tumble (server bounce .18–.25, friction .4). Cooking can detonate in hand; death drops
-  live ordnance. Launcher fires 6° above aim, 1750cm/s; scope multiplies horizontal
+  live ordnance. Launcher fires `AERWeapon::LauncherLobDegrees` (12°) above aim, 1750cm/s; scope multiplies horizontal
   speed ×1.5. Contact with a pawn: launched HE deals 25% base damage once per target.
 - Hand throw (`ERGrenadeBallistics`): `normalize(aim+Z*.35)*ProjectileSpeed` (880cm/s)
   with horizontal ×1.2, scaled by `1+.2*clamp(pitch/45,-1,1)`, then character velocity

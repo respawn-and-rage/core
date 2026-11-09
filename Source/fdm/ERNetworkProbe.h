@@ -15,6 +15,8 @@ public:
 private:
     UPROPERTY(Replicated) int32 Phase = 0;
     int32 ClientPhase = -1;
+    double ClientDeathSeenAt = -1;
+    bool bClientLethalBeatChecked = false;
     double Deadline = 0;
     double EmptyClipTimeout = 0;
     UPROPERTY() TObjectPtr<class AERPlayerController> Host;

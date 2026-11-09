@@ -106,6 +106,8 @@ CS2 seeds or spray paths: never claim CS2 parity.
 Only Assault (iron), Carbine and Sniper (optical) opt in through `ScopeMode`. Right click
 toggles; optical cycles 40/10/off FOV. Launcher has iron-style ADS at 75 FOV.
 Iron aim moves the complete FPS rig over .2s, smoothstepped, with integration capped at 50ms.
+Assault and Launcher hold the gun low (`iron_sight_drop`) with its barrel converging on the
+screen centre, leaving the reticle clear; Assault also sits closer (`iron_sight_eye_distance`).
 Optical rifles hide the centre reticle, keeping the ammo ring. Carbine keeps zoom after
 shots; Sniper unscopes (`bUnscopeAfterShot`). `scope_profiles.py` preserves values through
 setup scripts.

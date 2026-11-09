@@ -50,7 +50,9 @@ const TArray<FERServerSetting>& ERServer::Settings()
         Add(TEXT("Match.Duration"),TEXT("Match"),TEXT("Match duration"),TEXT("s"),600.f,10.f,86400.f,false,false);
         Add(TEXT("Match.ScoreLimit"),TEXT("Match"),TEXT("Score to win"),TEXT("points"),50.f,1.f,100000.f,false,true);
         Add(TEXT("Match.Intermission"),TEXT("Match"),TEXT("Time between matches"),TEXT("s"),10.f,1.f,120.f,true,false);
+        Add(TEXT("Match.Countdown"),TEXT("Match"),TEXT("Frozen countdown before each match"),TEXT("s"),10.f,0.f,60.f,true,false);
         Add(TEXT("Match.KillPoints"),TEXT("Match"),TEXT("Points per enemy kill"),TEXT("points"),1.f,0.f,100.f,true,true);
+        Add(TEXT("Match.TeamKillPoints"),TEXT("Match"),TEXT("Team score change per teamkill"),TEXT("points"),-1.f,-100.f,0.f,true,true);
         Add(TEXT("Move.Walk"),TEXT("Movement"),TEXT("Walking speed"),TEXT("km/h"),7.5f,0.1f,50.f,false,false);
         Add(TEXT("Move.Run"),TEXT("Movement"),TEXT("Running speed"),TEXT("km/h"),15.f,0.1f,75.f,false,false);
         Add(TEXT("Move.Sprint"),TEXT("Movement"),TEXT("Sprint speed"),TEXT("km/h"),27.f,0.1f,100.f,false,false);

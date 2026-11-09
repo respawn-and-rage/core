@@ -1,6 +1,6 @@
 # HUD and minimap
 
-**Code:** `ERHUDLayout.h`, `ERInterfaceStyle.h`, `ERVitalsHUD.cpp`, `ERWeaponHUD.cpp`, `ERDamageHUD.cpp`, `ERPlayerController`.
+**Code:** `ERHUDLayout.h`, `ERInterfaceStyle.h`, `ERVitalsHUD.cpp`, `ERWeaponHUD.cpp`, `ERDamageHUD.cpp`, `ERMatchHUD.cpp`, `ERPlayerController`.
 
 ## HUD layout
 
@@ -20,6 +20,21 @@ without pixel caps, recomputed from the live viewport. Font: Teko SemiBold throu
   in Teko 9 above it. Online clients show ping, RTT variation, packet loss and server frame
   period below the timer; pending destruction adds snapshot age. Synchronization shows
   verified-page progress before entering combat.
+- **Pre-match countdown** (`ERMatchHUD`): "MATCH STARTS IN" and the remaining seconds in the
+  centre; the top timer holds the full match duration until the match starts.
+- **Kill feed** (`ERMatchHUD`): top left above the kill confirmations, up to five rows for 8s
+  with a .6s fade: killer name, cropped weapon icon (`AERHUD::DrawWeaponIcon`, same art and
+  crops as the inventory), victim name, both in team colours. TK and HS tags mark teamkills and
+  headshots; deaths without a catalog weapon show FELL, DIED or KILLED. Rows involving the local
+  player have a darker backing and a white edge. Hidden on the results screen.
+- **Kill camera** (`ERMatchHUD`): one row above the killer's head with the name in team colour and
+  the killer's replicated health and armor drawn with the vitals icons (`AERHUD::DrawVitalIcon`,
+  same art and 16-sector rule, 30 units). It is kept below the top-centre score, timer and network
+  status, and hidden if the killer dies.
+- **Scoreboard** (Tab, and automatically after the match): two team panels side by side in the
+  300–980 reference band, each with a team-coloured header (name, score), K/D/TK
+  columns and rows sorted by kills then fewest deaths; the local player row is tinted, bots are
+  tagged, and overflow collapses into "+N more".
 - **Inflicted damage**: red HP and green AP text under the reticle, up to five rows, 1s hold,
   .2s fade, attacker only. Rejected, zero and self damage are not shown.
 - Damage arcs and edge flashes: see [WEAPON_TUNING.md](WEAPON_TUNING.md).
@@ -36,4 +51,6 @@ into larger quads; boundary cells retain clipping and feathering, and unknown ce
 
 ## Verify
 
-`test-hud.py` (`--render`, `--render --weapons`). Native: `EclipseRecoil.Player.HUDViewportLayout`.
+`test-hud.py` (`--render`, `--render --weapons`); the render gallery seeds sample kill feed rows.
+Running the gallery with `-ERMatchCountdown=12` also holds forward and jump through the countdown
+and logs `ER_HUD_COUNTDOWN_FROZEN moved=<cm>`, which must be 0. Native: `EclipseRecoil.Player.HUDViewportLayout`.

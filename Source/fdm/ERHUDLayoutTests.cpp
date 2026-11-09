@@ -3,6 +3,7 @@
 #include "ERRecon.h"
 #include "ERCharacter.h"
 #include "ERWeapon.h"
+#include "ERMatch.h"
 #include "Engine/Canvas.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/CommandLine.h"
@@ -16,6 +17,22 @@ void AERHUD::TickHUDLayoutGallery()
 #if !UE_BUILD_SHIPPING
     if (!FParse::Param(FCommandLine::Get(),TEXT("ERHUDGallery"))) return;
     auto* PC=Cast<AERPlayerController>(PlayerOwner);
+    // With -ERMatchCountdown=<s>, push travel and jump input through the frozen
+    // countdown and report how far the pawn actually moved once it ends.
+    if(auto* GS=GetWorld()->GetGameState<AERGameState>(); GS && PC)
+    {
+        auto* C=Cast<AERCharacter>(PC->GetPawn());
+        if(GS->IsPreMatchCountdown() && C)
+        {
+            if(!bGalleryCountdownSeen){bGalleryCountdownSeen=true;GalleryCountdownStart=C->GetActorLocation();}
+            C->AddMovementInput(C->GetActorForwardVector(),1.f);C->Jump();
+        }
+        else if(bGalleryCountdownSeen && !bGalleryCountdownReported && GS->IsMatchInProgress() && C)
+        {
+            bGalleryCountdownReported=true;
+            UE_LOG(LogTemp,Display,TEXT("ER_HUD_COUNTDOWN_FROZEN moved=%.2f"),FVector::Dist(GalleryCountdownStart,C->GetActorLocation()));
+        }
+    }
     if (!PC || !PC->Recon || !PC->Recon->Snapshot.Epoch || GetWorld()->GetTimeSeconds()<HUDGalleryNextAt) return;
     const FIntPoint Sizes[]={{640,360},{1280,720},{1920,1080},{3840,2160},{2560,1080},{1024,768},{720,1280}};
     const int32 Index=HUDGalleryStep/3, Phase=HUDGalleryStep%3;
@@ -40,6 +57,24 @@ void AERHUD::TickHUDLayoutGallery()
             }
         }
         PC->bShowScoreboard=false;
+        // Sample kill feed rows: both teams, teamkill, headshot, explosive and a fall.
+        if(auto* GS=GetWorld()->GetGameState<AERGameState>())
+        {
+            const FString Self=PC->PlayerState?PC->PlayerState->GetPlayerName():TEXT("HUD");
+            const double Now=GetWorld()->GetTimeSeconds();
+            auto Add=[&](const FString& Killer,EERTeam KillerTeam,const FString& Victim,EERTeam VictimTeam,int8 Key,bool Headshot,bool Fall)
+            {
+                FERKillFeedEntry& E=GS->KillFeed.AddDefaulted_GetRef();
+                E.Killer=Killer;E.KillerTeam=KillerTeam;E.Victim=Victim;E.VictimTeam=VictimTeam;
+                E.WeaponKey=Key;E.bHeadshot=Headshot;E.bFall=Fall;E.ReceivedAt=Now;
+            };
+            GS->KillFeed.Reset();
+            Add(Self,EERTeam::Alpha,TEXT("Omega Rifleman"),EERTeam::Omega,4,true,false);
+            Add(TEXT("Night Owl"),EERTeam::Omega,TEXT("Bot 3"),EERTeam::Alpha,6,false,false);
+            Add(TEXT("Grenadier With A Long Name"),EERTeam::Omega,TEXT("Bot 7"),EERTeam::Omega,8,false,false);
+            Add(TEXT("Bot 2"),EERTeam::Alpha,Self,EERTeam::Alpha,10,false,false);
+            Add(FString(),EERTeam::None,TEXT("Clumsy"),EERTeam::Omega,-1,false,true);
+        }
         PC->ConsoleCommand(FString::Printf(TEXT("r.SetRes %dx%dw"),Sizes[Index].X,Sizes[Index].Y));
     }
     else

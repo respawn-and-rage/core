@@ -98,6 +98,12 @@ public:
     UPROPERTY(Replicated) TObjectPtr<AERCharacter> DeathFocus;
     UPROPERTY(Replicated) FVector DeathFocusPosition = FVector::ZeroVector;
     UPROPERTY(Replicated) bool bHasDeathFocus = false;
+    // Owner-only cosmetic lethal-hit beat: first person with a short punch, keeping the
+    // listener at the body so the shot or blast is heard before the kill camera starts.
+    static constexpr double DeathBeatSeconds = .8;
+    bool IsInDeathBeat() const;
+    bool IsDeathCameraActive() const;
+    FRotator GetLethalPunch() const;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UERHealthComponent> Health;
     UPROPERTY(ReplicatedUsing=OnRep_NetworkReady) bool bNetworkReady=true;
     UFUNCTION() void OnRep_NetworkReady();
@@ -157,7 +163,7 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Damage feedback") TObjectPtr<class USoundBase> HitSound;
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Damage feedback") TObjectPtr<class USoundAttenuation> HitAttenuation;
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Death") TSubclassOf<class AERCorpse> CorpseClass;
-    UFUNCTION(Client, Reliable) void ClientDamageFeedback(float Amount, FVector_NetQuantizeNormal Direction, const FERAimPunchState& Snapshot, bool bBullet = false);
+    UFUNCTION(Client, Reliable) void ClientDamageFeedback(float Amount, FVector_NetQuantizeNormal Direction, const FERAimPunchState& Snapshot, bool bBullet = false, bool bLethal = false);
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Shot feedback") TObjectPtr<class UAnimSequence> FirstPersonFireAnimation;
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Shot feedback") TObjectPtr<class USoundBase> FireSound;
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Shot feedback") TObjectPtr<class USoundAttenuation> FireAttenuation;
@@ -250,6 +256,10 @@ private:
     uint32 PunchPelletShot = MAX_uint32;
     TArray<FERDamageVisual> DamageVisuals;
     float DeathViewDrop = 0;
+    double DeathBeatStart = -1;
+    FRotator LethalPunch = FRotator::ZeroRotator;
+    double LethalPunchTime = -1;
+    void StartDeathBeat();
     bool bDeathCameraInitialized = false;
     FVector DeathCameraLocation = FVector::ZeroVector;
     FVector DeathCameraAway = FVector::BackwardVector;

@@ -8,18 +8,45 @@
 #include "Engine/Texture2D.h"
 #include "CanvasItem.h"
 
+namespace
+{
+    // Crop transparent margins through UVs only; source images remain untouched.
+    const FIntRect IconBounds[]={ {131,159,893,353},{216,86,808,425},{121,93,903,418},
+        {58,152,965,359},{61,108,963,403},{66,116,957,396},{41,132,983,379},
+        {76,121,947,391},{357,72,667,439},{420,72,603,439},{436,100,1338,806} };
+    // Similar apparent grip size across firearms, rather than equal overall widths.
+    const float IconScales[]={.11f,.14f,.145f,.17f,.16f,.16f,.19f,.16f,.095f,.095f,.05f};
+}
+
+float AERHUD::WeaponIconWidth(int32 Key, float Height) const
+{
+    if(Key<0 || Key>=int32(UE_ARRAY_COUNT(IconBounds)) || !WeaponIcons.IsValidIndex(Key) || !WeaponIcons[Key])return 0;
+    const FIntRect B=IconBounds[Key];
+    // Uniform kill feed height, bounded so long rifles do not dominate the row.
+    return FMath::Min(Height*B.Width()/float(FMath::Max(1,B.Height())),Height*4.2f);
+}
+
+float AERHUD::DrawWeaponIcon(int32 Key, FVector2D Position, float Height, FLinearColor Color)
+{
+    const float Width=WeaponIconWidth(Key,Height);
+    if(!Canvas || Width<=0)return 0;
+    const auto* Texture=WeaponIcons[Key].Get();
+    const FIntRect B=IconBounds[Key];
+    const float DrawHeight=Width*B.Height()/float(FMath::Max(1,B.Width()));
+    FCanvasTileItem Tile(FVector2D(Position.X,Position.Y-DrawHeight*.5f),Texture->GetResource(),FVector2D(Width,DrawHeight),
+        FVector2D(float(B.Min.X)/Texture->GetSizeX(),float(B.Min.Y)/Texture->GetSizeY()),
+        FVector2D(float(B.Max.X)/Texture->GetSizeX(),float(B.Max.Y)/Texture->GetSizeY()),Color);
+    Tile.BlendMode=SE_BLEND_Translucent;Canvas->DrawItem(Tile);
+    return Width;
+}
+
 void AERHUD::DrawWeaponInventory(const AERCharacter* Character)
 {
     const FERHUDLayout Layout(FVector2D(Canvas->SizeX,Canvas->SizeY));
     const float S=Layout.Scale;
     const FVector2D Edge=Layout.Edge();
     const float Right=Canvas->SizeX-Edge.X, Bottom=Canvas->SizeY-Edge.Y;
-    // Crop transparent margins through UVs only; source images remain untouched.
-    const FIntRect Bounds[]={ {131,159,893,353},{216,86,808,425},{121,93,903,418},
-        {58,152,965,359},{61,108,963,403},{66,116,957,396},{41,132,983,379},
-        {76,121,947,391},{357,72,667,439},{420,72,603,439},{436,100,1338,806} };
-    // Similar apparent grip size across firearms, rather than equal overall widths.
-    const float IconScales[]={.11f,.14f,.145f,.17f,.16f,.16f,.19f,.16f,.095f,.095f,.05f};
+    const auto& Bounds=IconBounds;
     const auto* PlayerState=Character->GetPlayerState<AERPlayerState>();
     const FLinearColor TeamColor=PlayerState?ERRecon::TeamColor(PlayerState->Team):FLinearColor::White;
     int32 Row=0;

@@ -30,6 +30,22 @@ AERHUD::AERHUD()
         }
 }
 
+void AERHUD::DrawVitalIcon(int32 Icon, FVector2D TopLeft, float Diameter, float Fraction)
+{
+    auto DrawLayer=[&](int32 Layer)
+    {
+        const int32 Index=Icon*17+Layer;
+        if(!VitalsTextures.IsValidIndex(Index) || !VitalsTextures[Index]) return;
+        FCanvasTileItem Tile(TopLeft,VitalsTextures[Index]->GetResource(),FVector2D(Diameter,Diameter),FLinearColor::White);
+        Tile.BlendMode=SE_BLEND_Translucent;
+        Canvas->DrawItem(Tile);
+    };
+    DrawLayer(0);
+    // Authored sectors start clockwise from twelve; darken N..15 at 1/16 steps.
+    const int32 Filled=FMath::RoundToInt32(FMath::Clamp(Fraction,0.f,1.f)*16.f);
+    for(int32 Sector=Filled;Sector<16;++Sector) DrawLayer(Sector+1);
+}
+
 void AERHUD::DrawVitals(const AERCharacter* Character)
 {
     const auto* Movement=Cast<UERMovement>(Character->GetCharacterMovement());
@@ -40,22 +56,7 @@ void AERHUD::DrawVitals(const AERCharacter* Character)
     const float Diameter=66.f*Scale, Step=70.f*Scale;
     const float Top=Canvas->SizeY-Edge.Y-Diameter;
     const float Fractions[]={Character->Health->Health/ERServer::Get(GetWorld(),"Health.Max"),Character->Health->Armor/FMath::Max(1.f,ERServer::Get(GetWorld(),"Health.Armor")),Movement->GetStaminaFraction()};
-    for(int32 Icon=0;Icon<3;++Icon)
-    {
-        auto DrawLayer=[&](int32 Layer)
-        {
-            const int32 Index=Icon*17+Layer;
-            if(!VitalsTextures.IsValidIndex(Index) || !VitalsTextures[Index]) return;
-            FCanvasTileItem Tile(FVector2D(Edge.X+Icon*Step,Top),VitalsTextures[Index]->GetResource(),
-                FVector2D(Diameter,Diameter),FLinearColor::White);
-            Tile.BlendMode=SE_BLEND_Translucent;
-            Canvas->DrawItem(Tile);
-        };
-        DrawLayer(0);
-        // Authored sectors start clockwise from twelve; darken N..15 at 1/16 steps.
-        const int32 Filled=FMath::RoundToInt(FMath::Clamp(Fractions[Icon],0.f,1.f)*16.f);
-        for(int32 Sector=Filled;Sector<16;++Sector) DrawLayer(Sector+1);
-    }
+    for(int32 Icon=0;Icon<3;++Icon) DrawVitalIcon(Icon,FVector2D(Edge.X+Icon*Step,Top),Diameter,Fractions[Icon]);
     if(Movement->bProneWanted || Movement->IsProne())
         DrawHUDTextAnchored(TEXT("PRONE  |  C / Ctrl to stand up"),FVector2D(Edge.X,Top-6.f*Scale),FLinearColor::White,.85f,FVector2D(0,1));
 }

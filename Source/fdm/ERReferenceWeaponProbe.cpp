@@ -616,7 +616,7 @@ void AERReferenceWeaponProbe::TickScopes()
                 Check(!It->ReleasedFrom.Equals(Eye+Aim.RotateVector(FVector(45,12,-12)),1.f),TEXT("scoped_launcher_does_not_use_hip_origin"));
             }
             FRotator LaunchAim=W->LastShotDirection.Rotation();
-            LaunchAim.Pitch=FMath::Clamp(LaunchAim.Pitch+6.f,-89.f,89.f);
+            LaunchAim.Pitch=FMath::Clamp(LaunchAim.Pitch+AERWeapon::LauncherLobDegrees,-89.f,89.f);
             const FVector Base=LaunchAim.Vector()*W->Data->ProjectileSpeed;
             Check(Base.Z>W->LastShotDirection.Z*W->Data->ProjectileSpeed,TEXT("launcher_lobs_above_reticle"));
             const float Ratio=Phase==121?1.5f:1.f;

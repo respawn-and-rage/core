@@ -57,6 +57,15 @@ unavoidable interval exists before the owner hears about a hit: never claim zero
 Reset on death and possession. `ERDamageHUD.cpp` draws directional arcs (.65s) and edge
 flashes (.45s). Non-bullet damage keeps its cosmetic response.
 
+**Lethal hit:** the server marks the final `ClientDamageFeedback` as lethal. The owner then gets
+a cosmetic camera punch (`LethalPunch`, 50ms attack, .14s half-life) that follows the hit: back
+from the front, forward from behind, turned and rolled toward the travel side; blasts punch
+harder and falls pitch down. It plays during the .8s death beat (`AERCharacter::DeathBeatSeconds`),
+which starts from the lethal feedback or the replicated death, whichever arrives first. The
+view stays in first person and the impact sound plays at full volume. The audio listener
+stays at the body, so the shot report and any explosion are heard in place before the kill
+camera starts (`IsDeathCameraActive`). It never touches `AuthorityPunch` or gameplay aim.
+
 ## Verify
 
 `test-network.py --accuracy`, `test-network.py --recoil`, `test-aim-punch.py --automation`

@@ -1,0 +1,207 @@
+#include "ERPlayerController.h"
+#include "ERMatch.h"
+#include "ERCharacter.h"
+#include "ERServerSettings.h"
+#include "Components/CapsuleComponent.h"
+#include "ERRecon.h"
+#include "ERHUDLayout.h"
+#include "Engine/Canvas.h"
+#include "CanvasItem.h"
+
+namespace
+{
+    constexpr double KillFeedSeconds = 8.0;
+    constexpr double KillFeedFade = .6;
+
+    FString ShortName(const FString& Name, int32 Length = 18)
+    {
+        return Name.Len() > Length ? Name.Left(Length - 1) + TEXT("…") : Name;
+    }
+
+    FLinearColor NameColor(EERTeam Team)
+    {
+        return Team == EERTeam::None ? FLinearColor(.85f,.87f,.9f) : ERRecon::TeamColor(Team);
+    }
+}
+
+void AERHUD::DrawPreMatchCountdown(const AERGameState* GS)
+{
+    if (!GS || !GS->IsPreMatchCountdown() || !Canvas) return;
+    const FERHUDLayout Layout(FVector2D(Canvas->SizeX,Canvas->SizeY));
+    const int32 Seconds = FMath::Max(0, FMath::CeilToInt32(GS->CountdownEndServerTime - GS->GetServerWorldTimeSeconds()));
+    const float CX = Canvas->SizeX * .5f;
+    DrawHUDTextAnchored(TEXT("MATCH STARTS IN"), FVector2D(CX, Layout.Position(0,210).Y), FLinearColor(.82f,.85f,.9f), 1.f, FVector2D(.5f,0));
+    DrawHUDTextAnchored(Seconds > 0 ? FString::FromInt(Seconds) : TEXT("GO"), FVector2D(CX, Layout.Position(0,236).Y),
+        Seconds <= 3 ? FLinearColor(1.f,.55f,.25f) : FLinearColor(1.f,.82f,.42f), 3.4f, FVector2D(.5f,0));
+    DrawHUDTextAnchored(TEXT("Movement and weapons unlock when the countdown ends"), FVector2D(CX, Layout.Position(0,330).Y),
+        FLinearColor(.72f,.76f,.82f), .7f, FVector2D(.5f,0));
+}
+
+void AERHUD::DrawKillFeed(const AERGameState* GS, float X, float& Y)
+{
+    if (!GS || !Canvas || GS->KillFeed.IsEmpty()) return;
+    const float S = FERHUDLayout(FVector2D(Canvas->SizeX,Canvas->SizeY)).Scale;
+    const double Now = GetWorld()->GetTimeSeconds();
+    const auto* Self = PlayerOwner ? PlayerOwner->GetPlayerState<AERPlayerState>() : nullptr;
+    const FString SelfName = Self ? Self->GetPlayerName() : FString();
+    const float RowHeight = 25.f * S, Pad = 7.f * S, Gap = 6.f * S, TextScale = .74f, IconHeight = 15.f * S;
+    bool bDrew = false;
+    for (const FERKillFeedEntry& Entry : GS->KillFeed)
+    {
+        const double Age = Now - Entry.ReceivedAt;
+        if (Age < 0 || Age >= KillFeedSeconds) continue;
+        const float Opacity = float(FMath::Clamp((KillFeedSeconds - Age) / KillFeedFade, 0.0, 1.0));
+        const bool bSuicide = Entry.Killer.IsEmpty();
+        const bool bTeamKill = !bSuicide && Entry.KillerTeam == Entry.VictimTeam && Entry.KillerTeam != EERTeam::None;
+        const FString Killer = ShortName(Entry.Killer), Victim = ShortName(Entry.Victim);
+        // Measure first so the backing box hugs the row.
+        const float KillerWidth = bSuicide ? 0.f : MeasureHUDText(Killer, TextScale).X;
+        const float TagWidth = bTeamKill ? MeasureHUDText(TEXT("TK"), .55f).X + Gap : 0.f;
+        const float IconWidth = WeaponIconWidth(Entry.WeaponKey, IconHeight);
+        // Without a catalog icon (fall, world, unknown weapon) a short word takes its place.
+        const FString Cause = IconWidth > 0 ? FString() : Entry.bFall ? TEXT("FELL") : bSuicide ? TEXT("DIED") : TEXT("KILLED");
+        const float CauseWidth = Cause.IsEmpty() ? 0.f : MeasureHUDText(Cause, .6f).X;
+        const float HeadshotWidth = Entry.bHeadshot ? MeasureHUDText(TEXT("HS"), .55f).X + Gap : 0.f;
+        const float VictimWidth = MeasureHUDText(Victim, TextScale).X;
+        const float Width = Pad * 2 + (bSuicide ? 0.f : KillerWidth + Gap + TagWidth) + FMath::Max(IconWidth, CauseWidth) + Gap + HeadshotWidth + VictimWidth;
+        const bool bMine = !SelfName.IsEmpty() && (Entry.Killer == SelfName || Entry.Victim == SelfName);
+        DrawRect(FLinearColor(0,0,0,(bMine ? .62f : .42f) * Opacity), X, Y, Width, RowHeight);
+        if (bMine) DrawRect(FLinearColor(1,1,1,.55f * Opacity), X, Y, 2.f * S, RowHeight);
+        const float MidY = Y + RowHeight * .5f;
+        float Cursor = X + Pad;
+        if (!bSuicide)
+        {
+            DrawHUDTextAnchored(Killer, FVector2D(Cursor, MidY), NameColor(Entry.KillerTeam).CopyWithNewOpacity(Opacity), TextScale, FVector2D(0,.5f));
+            Cursor += KillerWidth + Gap;
+            if (bTeamKill)
+            {
+                DrawHUDTextAnchored(TEXT("TK"), FVector2D(Cursor, MidY), FLinearColor(1.f,.8f,.3f,Opacity), .55f, FVector2D(0,.5f));
+                Cursor += TagWidth;
+            }
+        }
+        const float SlotWidth = FMath::Max(IconWidth, CauseWidth);
+        if (IconWidth > 0)
+        {
+            DrawWeaponIcon(Entry.WeaponKey, FVector2D(Cursor, MidY), IconHeight, FLinearColor(1,1,1,.92f * Opacity));
+            Cursor += SlotWidth;
+        }
+        else
+        {
+            DrawHUDTextAnchored(Cause, FVector2D(Cursor, MidY), FLinearColor(.7f,.72f,.76f,Opacity), .6f, FVector2D(0,.5f));
+            Cursor += SlotWidth;
+        }
+        Cursor += Gap;
+        if (Entry.bHeadshot)
+        {
+            DrawHUDTextAnchored(TEXT("HS"), FVector2D(Cursor, MidY), FLinearColor(1.f,.45f,.35f,Opacity), .55f, FVector2D(0,.5f));
+            Cursor += HeadshotWidth;
+        }
+        DrawHUDTextAnchored(Victim, FVector2D(Cursor, MidY), NameColor(Entry.VictimTeam).CopyWithNewOpacity(Opacity), TextScale, FVector2D(0,.5f));
+        Y += RowHeight + 3.f * S;
+        bDrew = true;
+    }
+    if (bDrew) Y += 6.f * S;
+}
+
+void AERHUD::DrawScoreboard(const AERGameState* GS)
+{
+    if (!GS || !Canvas) return;
+    const float W = Canvas->SizeX, H = Canvas->SizeY;
+    const FERHUDLayout Layout(FVector2D(W,H));
+    const float S = Layout.Scale;
+    const float Bottom = H - Layout.Edge().Y;
+    const auto* Self = PlayerOwner ? PlayerOwner->GetPlayerState<AERPlayerState>() : nullptr;
+    // Two team panels side by side inside the 300-980 reference band, clear of the
+    // post-match message column and the minimap; each sorted by kills then fewest deaths.
+    const float PanelWidth = 330.f * S, Spacing = 20.f * S;
+    const float Top = Layout.Position(0,135).Y;
+    const float HeaderHeight = 46.f * S, ColumnHeight = 26.f * S, RowHeight = 29.f * S;
+    for (const EERTeam Team : {EERTeam::Alpha, EERTeam::Omega})
+    {
+        TArray<const AERPlayerState*> Players;
+        for (const APlayerState* Item : GS->PlayerArray)
+            if (const auto* State = Cast<AERPlayerState>(Item); State && State->Team == Team) Players.Add(State);
+        Players.Sort([](const AERPlayerState& A, const AERPlayerState& B)
+        {
+            if (A.Kills != B.Kills) return A.Kills > B.Kills;
+            if (A.Deaths != B.Deaths) return A.Deaths < B.Deaths;
+            return A.GetPlayerName() < B.GetPlayerName();
+        });
+        const bool bAlpha = Team == EERTeam::Alpha;
+        const FLinearColor Color = ERRecon::TeamColor(Team);
+        const float Left = W * .5f + (bAlpha ? -Spacing * .5f - PanelWidth : Spacing * .5f);
+        const int32 Fit = FMath::Max(1, FMath::FloorToInt32((Bottom - Top - HeaderHeight - ColumnHeight) / RowHeight));
+        const int32 Shown = FMath::Min(Players.Num(), Players.Num() > Fit ? Fit - 1 : Fit);
+        const int32 Rows = Shown + (Players.Num() > Shown ? 1 : 0);
+        const float PanelHeight = HeaderHeight + ColumnHeight + FMath::Max(1, Rows) * RowHeight + 6.f * S;
+        DrawRect(FLinearColor(.015f,.025f,.04f,.9f), Left, Top, PanelWidth, PanelHeight);
+        // Header: team name and score on a team-coloured band.
+        DrawRect(FLinearColor(Color.R*.55f, Color.G*.55f, Color.B*.55f, .95f), Left, Top, PanelWidth, HeaderHeight);
+        DrawRect(Color, Left, Top + HeaderHeight - 3.f * S, PanelWidth, 3.f * S);
+        const float HeaderMid = Top + HeaderHeight * .5f;
+        DrawHUDTextAnchored(bAlpha ? TEXT("ALPHA") : TEXT("OMEGA"), FVector2D(Left + 16.f * S, HeaderMid), FLinearColor::White, 1.25f, FVector2D(0,.5f));
+        DrawHUDTextAnchored(FString::FromInt(bAlpha ? GS->AlphaScore : GS->OmegaScore), FVector2D(Left + PanelWidth - 16.f * S, HeaderMid),
+            FLinearColor::White, 1.6f, FVector2D(1,.5f));
+        // Column captions; numbers are centred under their captions.
+        const float Columns[] = {226.f, 266.f, 306.f};
+        const float CaptionY = Top + HeaderHeight + ColumnHeight * .5f;
+        const FLinearColor Caption(.6f,.64f,.7f);
+        DrawHUDTextAnchored(TEXT("PLAYER"), FVector2D(Left + 18.f * S, CaptionY), Caption, .6f, FVector2D(0,.5f));
+        const TCHAR* Captions[] = {TEXT("K"), TEXT("D"), TEXT("TK")};
+        for (int32 I = 0; I < 3; ++I)
+            DrawHUDTextAnchored(Captions[I], FVector2D(Left + Columns[I] * S, CaptionY), Caption, .6f, FVector2D(.5f,.5f));
+        float Y = Top + HeaderHeight + ColumnHeight;
+        if (Players.IsEmpty())
+            DrawHUDTextAnchored(TEXT("No players"), FVector2D(Left + 18.f * S, Y + RowHeight * .5f), FLinearColor(.5f,.53f,.58f), .7f, FVector2D(0,.5f));
+        for (int32 Index = 0; Index < Shown; ++Index)
+        {
+            const AERPlayerState* State = Players[Index];
+            const bool bSelf = State == Self;
+            if (bSelf) DrawRect(FLinearColor(Color.R, Color.G, Color.B, .22f), Left, Y, PanelWidth, RowHeight);
+            else if ((Index % 2) != 0) DrawRect(FLinearColor(1,1,1,.035f), Left, Y, PanelWidth, RowHeight);
+            DrawRect(Color.CopyWithNewOpacity(bSelf ? 1.f : .7f), Left, Y + 3.f * S, 4.f * S, RowHeight - 6.f * S);
+            const float Mid = Y + RowHeight * .5f;
+            const FVector2D NameSize = DrawHUDTextAnchored(ShortName(State->GetPlayerName(), State->IsABot() ? 14 : 18), FVector2D(Left + 18.f * S, Mid),
+                bSelf ? FLinearColor::White : FLinearColor(.88f,.9f,.94f), .8f, FVector2D(0,.5f));
+            if (State->IsABot())
+                DrawHUDTextAnchored(TEXT("BOT"), FVector2D(Left + 24.f * S + NameSize.X, Mid), FLinearColor(.55f,.58f,.64f), .5f, FVector2D(0,.5f));
+            const int32 Values[] = {State->Kills, State->Deaths, State->TeamKills};
+            for (int32 I = 0; I < 3; ++I)
+                DrawHUDTextAnchored(FString::FromInt(Values[I]), FVector2D(Left + Columns[I] * S, Mid),
+                    I == 2 && Values[I] > 0 ? FLinearColor(1.f,.8f,.3f) : FLinearColor::White, .8f, FVector2D(.5f,.5f));
+            Y += RowHeight;
+        }
+        if (Players.Num() > Shown)
+            DrawHUDTextAnchored(FString::Printf(TEXT("+%d more"), Players.Num() - Shown), FVector2D(Left + 18.f * S, Y + RowHeight * .5f),
+                FLinearColor(.6f,.64f,.7f), .7f, FVector2D(0,.5f));
+    }
+}
+
+void AERHUD::DrawKillerHealth(const AERCharacter* Victim)
+{
+    const AERCharacter* Killer = Victim ? Victim->DeathFocus.Get() : nullptr;
+    if (!Canvas || !IsValid(Killer) || !Killer->Health || Killer->Health->bDead) return;
+    const FERHUDLayout Layout(FVector2D(Canvas->SizeX,Canvas->SizeY));
+    const float S = Layout.Scale;
+    const FVector Head = Killer->GetActorLocation() + FVector(0,0,Killer->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 10.f);
+    const FVector Screen = Canvas->Project(Head, true);
+    if (Screen.Z <= 0) return;
+    // Same health and armor icons and sector rules as the owner's vitals, at a smaller size.
+    const float HealthFraction = Killer->Health->Health / FMath::Max(1.f, ERServer::Get(GetWorld(),"Health.Max"));
+    const float ArmorFraction = Killer->Health->Armor / FMath::Max(1.f, ERServer::Get(GetWorld(),"Health.Armor"));
+    const float Diameter = 30.f * S, IconGap = 3.f * S, Gap = 8.f * S;
+    const auto* KillerState = Killer->GetPlayerState<AERPlayerState>();
+    const FString Name = KillerState ? KillerState->GetPlayerName().Left(20) : FString();
+    const float NameWidth = Name.IsEmpty() ? 0.f : MeasureHUDText(Name, .72f).X + Gap;
+    const float RowWidth = NameWidth + 2.f * Diameter + IconGap;
+    // One row just above the head, kept below the top-centre score, timer and network
+    // status, and inside the screen edges.
+    const float MidY = FMath::Clamp(float(Screen.Y) - 8.f * S - Diameter * .5f, Layout.Position(0,118).Y, Canvas->SizeY - 120.f * S);
+    float X = FMath::Clamp(float(Screen.X) - RowWidth * .5f, 8.f * S, Canvas->SizeX - RowWidth - 8.f * S);
+    DrawRect(FLinearColor(0,0,0,.45f), X - 6.f * S, MidY - Diameter * .5f - 3.f * S, RowWidth + 12.f * S, Diameter + 6.f * S);
+    if (KillerState)
+        DrawHUDTextAnchored(Name, FVector2D(X, MidY), ERRecon::TeamColor(KillerState->Team), .72f, FVector2D(0,.5f));
+    X += NameWidth;
+    DrawVitalIcon(0, FVector2D(X, MidY - Diameter * .5f), Diameter, HealthFraction);
+    DrawVitalIcon(1, FVector2D(X + Diameter + IconGap, MidY - Diameter * .5f), Diameter, ArmorFraction);
+}

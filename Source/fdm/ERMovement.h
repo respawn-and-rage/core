@@ -76,7 +76,9 @@ public:
     virtual void MoveAutonomous(float ClientTimeStamp,float DeltaTime,uint8 Flags,const FVector& NewAccel) override;
     virtual void ServerMove_PerformMovement(const FCharacterNetworkMoveData& MoveData) override;
     virtual void ServerMove_HandleMoveData(const FCharacterNetworkMoveDataContainer& MoveData) override;
-    virtual bool CanAttemptJump() const override {return IsOnLadder() || Super::CanAttemptJump();}
+    virtual bool CanAttemptJump() const override {return !IsPreMatchFrozen() && (IsOnLadder() || Super::CanAttemptJump());}
+    // Replicated match phase: owner prediction and authority agree on the freeze.
+    bool IsPreMatchFrozen() const;
     virtual bool DoJump(bool bReplayingMoves, float DeltaTime) override;
     UFUNCTION() void OnRep_Locomotion();
     virtual float GetMaxSpeed() const override;

@@ -1149,7 +1149,7 @@ void AERHUD::DrawHUDText(const FString& Value, float X, float Y, FLinearColor Co
     DrawHUDTextAnchored(Value,FVector2D(X,Y),Color,Scale,FVector2D(Centered ? .5f : 0.f,0));
 }
 
-FVector2D AERHUD::DrawHUDTextAnchored(const FString& Value, FVector2D Position, FLinearColor Color, float Scale, FVector2D Anchor)
+FVector2D AERHUD::MeasureHUDText(const FString& Value, float Scale)
 {
     if (!Canvas || !Canvas->Canvas) return FVector2D::ZeroVector;
     const float ViewScale = FERHUDLayout(FVector2D(Canvas->SizeX,Canvas->SizeY)).Scale;
@@ -1162,7 +1162,15 @@ FVector2D AERHUD::DrawHUDTextAnchored(const FString& Value, FVector2D Position, 
     }
     const FSlateFontInfo Font(HUDTypeface,FMath::Max(1,FMath::RoundToInt(24.f*Scale*ViewScale)),TEXT("SemiBold"));
     const float DPI=Canvas->Canvas->GetDPIScale();
-    const FVector2D Size=FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Value,Font,DPI)/DPI;
+    return FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Value,Font,DPI)/DPI;
+}
+
+FVector2D AERHUD::DrawHUDTextAnchored(const FString& Value, FVector2D Position, FLinearColor Color, float Scale, FVector2D Anchor)
+{
+    if (!Canvas || !Canvas->Canvas) return FVector2D::ZeroVector;
+    const float ViewScale = FERHUDLayout(FVector2D(Canvas->SizeX,Canvas->SizeY)).Scale;
+    const FVector2D Size=MeasureHUDText(Value,Scale);
+    const FSlateFontInfo Font(HUDTypeface,FMath::Max(1,FMath::RoundToInt(24.f*Scale*ViewScale)),TEXT("SemiBold"));
     Position-=Size*Anchor;
     FCanvasTextItem Item(FVector2D(FMath::RoundToFloat(Position.X),FMath::RoundToFloat(Position.Y)),FText::FromString(Value),Font,Color);
     // Keep the shadow close to the glyphs at every viewport resolution.
@@ -1234,6 +1242,12 @@ void AERHUD::DrawHUD()
     }
     else if (GS->GetMatchState() == MatchState::WaitingPostMatch)
         Status = GS->Winner == EERTeam::None ? TEXT("DRAW") : TEXT("ROUND OVER");
+    else if (GS->IsPreMatchCountdown())
+    {
+        // The countdown is outside the match: the clock waits at its full duration.
+        const int32 Seconds = FMath::Max(0, FMath::CeilToInt32(ERServer::Get(GetWorld(),"Match.Duration")));
+        Status = FString::Printf(TEXT("%02d:%02d"), Seconds/60, Seconds%60);
+    }
     if (bLab && Character) Status = FString::Printf(TEXT("%.1f km/h   |   Feet height: %.0f cm"), Character->GetVelocity().Size2D()*.036f, Character->GetActorLocation().Z-Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()-2.1f);
     DrawHUDText(Status, W/2, Layout.Position(640,59).Y, FLinearColor(.8f,.82f,.85f), .9f, true);
     const FString NetworkStatus=PC->GetNetworkStatusText();
@@ -1323,33 +1337,16 @@ void AERHUD::DrawHUD()
         if(Character->Weapon && Character->Weapon->bPlacingClaymore)DrawHUDText(TEXT("PLACING CLAYMORE..."),W/2,Layout.Position(640,570).Y,FLinearColor(.4f,.8f,1),1.f,true);
         if (Character->Health->IsProtected()) DrawHUDText(TEXT("SPAWN PROTECTION"), W/2,Layout.Position(640,601).Y,FLinearColor(.4f,.8f,1),1.3f,true);
     }
+    if (Character && Character->IsDeathCameraActive()) DrawKillerHealth(Character);
     if (PC->bAwaitingRespawn)
     {
         const int32 Seconds = FMath::Max(0, FMath::CeilToInt(PC->RespawnAllowedAt-GS->GetServerWorldTimeSeconds()));
-        const bool KillerView = Character && Character->bHasDeathFocus;
+        const bool KillerView = Character && Character->IsDeathCameraActive();
         DrawHUDText(Seconds > 0 ? FString::Printf(TEXT("Respawn available in %d"),Seconds) : TEXT("Press fire or jump to respawn"),
             W/2,KillerView ? Layout.Position(640,620).Y : Layout.Position(640,420).Y,FLinearColor(1,.6f,.3f),KillerView ? 1.2f : 1.6f,true);
     }
-    if (PC->bShowScoreboard || GS->GetMatchState() == MatchState::WaitingPostMatch)
-    {
-        const float Left=Layout.Position(300,130).X, Top=Layout.Position(300,130).Y;
-        const float PanelWidth=Layout.Position(680,0).X;
-        DrawRect(FLinearColor(.015f,.025f,.04f,.92f),Left,Top,PanelWidth,FMath::Min(H-Top-EdgeMargin.Y,(65+GS->PlayerArray.Num()*36)*HUDScale));
-        const auto Row = [&](const FString& Team, const FString& Name, const FString& K, const FString& D, const FString& TK, float Y)
-        {
-            const FString Values[]={Team,Name,K,D,TK};
-            const float Columns[]={20,140,490,545,600};
-            for(int32 I=0;I<5;++I) DrawHUDText(Values[I],Left+PanelWidth*Columns[I]/680.f,Y,FLinearColor::White,1.05f);
-        };
-        Row(TEXT("TEAM"),TEXT("PLAYER"),TEXT("K"),TEXT("D"),TEXT("TK"),Top+12*HUDScale);
-        float Y = Top+54*HUDScale;
-        for (APlayerState* Item : GS->PlayerArray) if (const auto* State = Cast<AERPlayerState>(Item))
-        {
-            if(Y+36*HUDScale>H-EdgeMargin.Y) break;
-            Row(State->Team == EERTeam::Alpha ? TEXT("Alpha") : TEXT("Omega"),State->GetPlayerName().Left(24),FString::FromInt(State->Kills),FString::FromInt(State->Deaths),FString::FromInt(State->TeamKills),Y);
-            Y += 36*HUDScale;
-        }
-    }
+    DrawPreMatchCountdown(GS);
+    if (PC->bShowScoreboard || GS->GetMatchState() == MatchState::WaitingPostMatch) DrawScoreboard(GS);
     const double Now = GetWorld()->GetTimeSeconds();
     if (GS->GetMatchState() == MatchState::WaitingPostMatch && PC->GameplayToast.Expires > Now)
     {
@@ -1376,6 +1373,7 @@ void AERHUD::DrawHUD()
             }
             DrawHUDText(Value, X, AtY, Color, Scale);
         };
+        if (!Results) DrawKillFeed(GS, X, Y);
         for (int32 I = 0; I < PC->KillConfirmations.Num(); ++I)
         {
             const auto& Item = PC->KillConfirmations[I];

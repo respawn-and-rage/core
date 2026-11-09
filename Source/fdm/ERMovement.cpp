@@ -4,6 +4,7 @@
 #include "ERWeapon.h"
 #include "ERLadder.h"
 #include "ERProceduralMap.h"
+#include "ERMatch.h"
 #include "EngineUtils.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/GameStateBase.h"
@@ -161,10 +162,17 @@ void UERMovement::ApplyServerSettings()
 }
 double UERMovement::SprintDuration() const { return ERServer::Get(GetWorld(),"Move.SprintDuration"); }
 double UERMovement::RecoveryDuration() const { return ERServer::Get(GetWorld(),"Move.Recovery"); }
+bool UERMovement::IsPreMatchFrozen() const
+{
+    const UWorld* World=GetWorld();
+    const auto* State=World?World->GetGameState<AERGameState>():nullptr;
+    return State && State->IsPreMatchCountdown();
+}
 float UERMovement::GetMaxSpeed() const
 {
     const auto* C=Cast<AERCharacter>(CharacterOwner);
     if(C && C->Weapon && C->Weapon->bPlacingClaymore)return 0;
+    if(IsPreMatchFrozen())return 0;
     if (IsOnLadder()) return LadderSpeed();
     if (IsMantling()) return 0;
     if (IsChangingPosture()) return ERServer::Get(GetWorld(),"Move.Posture")/.036f;
@@ -252,6 +260,14 @@ void UERMovement::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
     {
         bProneWanted=false;bWantsToCrouch=Placer->Weapon->IsClaymorePlacementLow();
         bSprintHeld=false;Velocity=FVector::ZeroVector;Acceleration=FVector::ZeroVector;
+        UpdateSprint();
+        UpdatePosture(DeltaSeconds);return;
+    }
+    if(IsPreMatchFrozen())
+    {
+        // Pre-match countdown: posture may change in place, but no travel,
+        // sprint, ladder entry or mantle starts until the match begins.
+        bSprintHeld=false;Velocity.X=Velocity.Y=0;Acceleration=FVector::ZeroVector;
         UpdateSprint();
         UpdatePosture(DeltaSeconds);return;
     }

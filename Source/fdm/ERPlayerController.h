@@ -331,11 +331,26 @@ private:
     void DrawDamageFeedback(const class AERCharacter* Character);
     void DrawInflictedDamage();
     void DrawVitals(const class AERCharacter* Character);
+    // One circular vitals icon (0 health, 1 armor, 2 stamina) with 16 darkened sectors.
+    void DrawVitalIcon(int32 Icon, FVector2D TopLeft, float Diameter, float Fraction);
     void DrawWeaponInventory(const class AERCharacter* Character);
+    // Draws a cropped catalog weapon icon with its left edge at Position.X, vertically
+    // centred on Position.Y; returns the drawn width (0 when the key has no icon).
+    float DrawWeaponIcon(int32 Key, FVector2D Position, float Height, FLinearColor Color);
+    float WeaponIconWidth(int32 Key, float Height) const;
+    void DrawPreMatchCountdown(const class AERGameState* GS);
+    // Top-left kill feed; advances Y below the drawn rows.
+    void DrawKillFeed(const class AERGameState* GS, float X, float& Y);
+    void DrawScoreboard(const class AERGameState* GS);
+    // Kill camera: killer name with the HUD health and armor icons above the head.
+    void DrawKillerHealth(const class AERCharacter* Victim);
+    FVector2D MeasureHUDText(const FString& Value, float Scale);
     UPROPERTY() TArray<TObjectPtr<class UTexture2D>> WeaponIcons;
     UPROPERTY() TObjectPtr<class UTexture2D> DroneIcon;
     void TickHUDLayoutGallery();
     int32 HUDGalleryStep = 0;
+    bool bGalleryCountdownSeen = false, bGalleryCountdownReported = false;
+    FVector GalleryCountdownStart = FVector::ZeroVector;
     double HUDGalleryNextAt = 6;
     FVector2D DrawHUDTextAnchored(const FString& Value, FVector2D Position, FLinearColor Color,
         float Scale, FVector2D Anchor);

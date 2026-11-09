@@ -105,6 +105,7 @@ try:
         for label, passed in [
             ('messages_owner_death_and_killer_camera', 'ER_MESSAGE_CLIENT_PASS mandatory_death_and_killer_camera' in remote and 'ER_MESSAGE_CLIENT_FAIL' not in remote),
             ('messages_killer_full_figure', 'ER_MESSAGE_CLIENT_PASS killer_full_figure' in remote),
+            ('messages_lethal_beat_before_killer_camera', 'ER_MESSAGE_CLIENT_PASS lethal_beat_before_killer_camera' in remote),
             ('messages_respawn_camera_reset', 'ER_MESSAGE_CLIENT_PASS respawn_clears_killer_camera' in remote),
             ('messages_remote_teamkill_always_received', any('confirmation=1 title=TEAMKILLED BY' in line for line in remote.splitlines())),
             ('messages_private_kill_recipients', 'confirmation=1 title=KILLED BY' not in output and 'confirmation=1 title=KILLED ·' not in remote),

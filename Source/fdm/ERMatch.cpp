@@ -100,7 +100,18 @@ void AERGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
     DOREPLIFETIME(AERGameState, LobbyAlphaBots); DOREPLIFETIME(AERGameState, LobbyOmegaBots);
     DOREPLIFETIME(AERGameState, AlphaScore); DOREPLIFETIME(AERGameState, OmegaScore);
     DOREPLIFETIME(AERGameState, MatchEndServerTime); DOREPLIFETIME(AERGameState, RestartServerTime);
-    DOREPLIFETIME(AERGameState, Winner);
+    DOREPLIFETIME(AERGameState, Winner); DOREPLIFETIME(AERGameState, CountdownEndServerTime);
+}
+bool AERGameState::IsPreMatchCountdown() const
+{
+    return !bLobby && CountdownEndServerTime > 0 && GetMatchState() == MatchState::WaitingToStart;
+}
+void AERGameState::MulticastKillFeed_Implementation(const FERKillFeedEntry& Entry)
+{
+    if (GetNetMode() == NM_DedicatedServer) return;
+    FERKillFeedEntry& Added = KillFeed.Add_GetRef(Entry);
+    Added.ReceivedAt = GetWorld()->GetTimeSeconds();
+    while (KillFeed.Num() > 5) KillFeed.RemoveAt(0);
 }
 void AERGameState::OnRep_ServerRules()
 {
@@ -388,9 +399,37 @@ void AERGameMode::HandleStartingNewPlayer_Implementation(APlayerController* Play
 bool AERGameMode::ReadyToStartMatch_Implementation()
 {
     if (GetMatchState() != MatchState::WaitingToStart || GetWorld()->GetMapName().Contains(TEXT("L_MainMenu"))) return false;
+    auto* State = GetGameState<AERGameState>();
+    bool bWorldReady = GetNumPlayers() > 0;
     for(TActorIterator<AERProceduralMap> Map(GetWorld());Map;++Map)
-        if(Map->LayoutConfig.TemplateAsset && !Map->IsMapReady())return false;
-    return GetNumPlayers() > 0;
+        if(Map->LayoutConfig.TemplateAsset && !Map->IsMapReady())bWorldReady=false;
+    if (!State) return bWorldReady;
+    if (!bWorldReady) { State->CountdownEndServerTime = 0; return false; }
+    // Players spawn into the loaded world but stay frozen until the countdown ends.
+    // The match clock starts afterwards, in HandleMatchHasStarted.
+    const double Now = State->GetServerWorldTimeSeconds();
+    if (State->CountdownEndServerTime <= 0)
+    {
+        // Strictly positive: 0 means "not started", and the server clock can read 0 on the first frame.
+        State->CountdownEndServerTime = FMath::Max(Now + PreMatchCountdownSeconds(), UE_KINDA_SMALL_NUMBER);
+        State->ForceNetUpdate();
+        UE_LOG(LogTemp, Display, TEXT("ER_MATCH_COUNTDOWN seconds=%.1f"), State->CountdownEndServerTime - Now);
+    }
+    return Now >= State->CountdownEndServerTime;
+}
+float AERGameMode::PreMatchCountdownSeconds() const
+{
+    float Seconds = ERServer::Get(GetWorld(),"Match.Countdown");
+#if !UE_BUILD_SHIPPING
+    // Automated probes and galleries time themselves from match start; an explicit
+    // -ERMatchCountdown=<s> still overrides this for tests of the countdown itself.
+    if (FParse::Value(FCommandLine::Get(), TEXT("ERMatchCountdown="), Seconds)) return FMath::Clamp(Seconds, 0.f, 60.f);
+    TArray<FString> Tokens, Switches;
+    FCommandLine::Parse(FCommandLine::Get(), Tokens, Switches);
+    for (const FString& Switch : Switches)
+        if (Switch.StartsWith(TEXT("ER")) && (Switch.Contains(TEXT("Probe")) || Switch.Contains(TEXT("Gallery")))) return 0;
+#endif
+    return Seconds;
 }
 void AERGameMode::RestartPlayer(AController* Player)
 {
@@ -467,6 +506,7 @@ void AERGameMode::HandleMatchHasStarted()
     auto* State = GetGameState<AERGameState>();
     State->AlphaScore = State->OmegaScore = 0;
     State->Winner = EERTeam::None;
+    State->CountdownEndServerTime = 0;
     State->MatchEndServerTime = State->GetServerWorldTimeSeconds() + MatchDuration;
     for (APlayerState* Item : State->PlayerArray) if (auto* PS = Cast<AERPlayerState>(Item)) PS->Kills = PS->Deaths = PS->TeamKills = 0;
     GetWorld()->GetSubsystem<UERGameplayMessages>()->MatchStarted();
@@ -562,15 +602,29 @@ void AERGameMode::ResetRound(bool AllowMapTravel)
         if(Cast<AERPlayerController>(*It) || Cast<AERBotController>(*It))RestartPlayer(*It);
     auto* State = GetGameState<AERGameState>();
     State->AlphaScore = State->OmegaScore = 0; State->MatchEndServerTime = 0; State->RestartServerTime = 0; State->Winner = EERTeam::None;
+    State->CountdownEndServerTime = 0;
     if (ReadyToStartMatch()) StartMatch();
     for (TActorIterator<AERReconDirector> It(GetWorld()); It; ++It) It->ResetRecon();
 }
-void AERGameMode::RecordDeath(AERCharacter* Victim, AController* Killer)
+void AERGameMode::RecordDeath(AERCharacter* Victim, AController* Killer, const FERMessageDamage* Facts)
 {
-    const auto* Scores = GetGameState<AERGameState>();
+    auto* Scores = GetGameState<AERGameState>();
     const int32 OldAlpha = Scores->AlphaScore, OldOmega = Scores->OmegaScore;
     auto* VictimPS = Victim->GetPlayerState<AERPlayerState>();
     auto* KillerPS = Killer ? Killer->GetPlayerState<AERPlayerState>() : nullptr;
+    if (VictimPS)
+    {
+        // Names and teams travel by value: either player may leave before the row expires.
+        FERKillFeedEntry Entry;
+        Entry.Victim = VictimPS->GetPlayerName(); Entry.VictimTeam = VictimPS->Team;
+        if (KillerPS && KillerPS != VictimPS) { Entry.Killer = KillerPS->GetPlayerName(); Entry.KillerTeam = KillerPS->Team; }
+        if (Facts)
+        {
+            Entry.WeaponKey = int8(FMath::Clamp(Facts->WeaponKey, -1, 10));
+            Entry.bHeadshot = Facts->Headshot; Entry.bFall = Facts->Fall;
+        }
+        Scores->MulticastKillFeed(Entry);
+    }
     if (VictimPS) ++VictimPS->Deaths;
     if (VictimPS && VictimPS->Team != EERTeam::None)
     {
@@ -580,8 +634,13 @@ void AERGameMode::RecordDeath(AERCharacter* Victim, AController* Killer)
     }
     if (VictimPS && KillerPS && KillerPS != VictimPS)
     {
-        if (VictimPS->Team == KillerPS->Team) ++KillerPS->TeamKills;
-        else { ++KillerPS->Kills; auto* GS = GetGameState<AERGameState>(); if (KillerPS->Team == EERTeam::Alpha) GS->AlphaScore+=int32(ERServer::Get(GetWorld(),"Match.KillPoints")); else GS->OmegaScore+=int32(ERServer::Get(GetWorld(),"Match.KillPoints")); }
+        // Enemy kills add Match.KillPoints; teamkills apply Match.TeamKillPoints (default -1)
+        // to the killer's team, which may go below zero.
+        const bool bTeamKill = VictimPS->Team == KillerPS->Team;
+        if (bTeamKill) ++KillerPS->TeamKills; else ++KillerPS->Kills;
+        const int32 Points = FMath::RoundToInt32(ERServer::Get(GetWorld(), bTeamKill ? FName("Match.TeamKillPoints") : FName("Match.KillPoints")));
+        if (KillerPS->Team == EERTeam::Alpha) Scores->AlphaScore += Points;
+        else if (KillerPS->Team == EERTeam::Omega) Scores->OmegaScore += Points;
     }
     if (auto* PC = Cast<AERPlayerController>(Victim->Controller))
     {
