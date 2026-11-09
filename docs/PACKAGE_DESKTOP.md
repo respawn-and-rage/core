@@ -1,15 +1,17 @@
-# Windows and Linux packaging
+# Windows, Linux and dedicated server packaging
 
 Isolated build projects are written under `../builds/`.
 
-**Code:** `scripts/package-windows.ps1`, `scripts/archive-linux-project.py`,
+**Code:** `scripts/package-windows.ps1`, `scripts/server-image.py`, `scripts/archive-linux-project.py`,
 `scripts/build-server-linux.py`, `scripts/run-server-linux.py`,
 `Source/RespawnAndRageServer.Target.cs`.
 
-## Windows and Linux (from Windows)
+## Windows, Linux and server image (from Windows)
 
-Run from `core` in 64-bit PowerShell, with Unreal closed. The default builds Windows
-x64 and Linux x86_64 and uploads both. `-InitAssets` is only needed the first time.
+Run from `core` in 64-bit PowerShell, with Unreal closed. The default builds the Windows
+x64 and Linux x86_64 clients and uploads them with Butler, then builds the Linux x64
+dedicated server as a Docker image and pushes it to Docker Hub. `-InitAssets` is only
+needed the first time.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -InitAssets
@@ -19,10 +21,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-windows.ps
 | Option | Effect |
 | --- | --- |
 | `-Check` | Preflight only (includes a Linux compiler smoke and Butler status). Not with `-InitAssets`. |
-| `-TargetPlatform Windows\|Linux` | One platform; Linux still builds the Windows Editor for cooking. |
-| `-NoUpload` | Keep packages local, skip Butler and its authentication. |
-| `-Configuration Shipping` | Default is Development. |
+| `-TargetPlatform Windows,Linux,Server` | Any subset. `All` (default) is all three, `Both` the two clients. Linux still builds the Windows Editor for cooking. |
+| `-NoUpload` | Keep packages local; the server image is still built into the local Docker daemon. Skips Butler, Docker Hub and their authentication. |
+| `-Configuration Shipping` | Clients only; default is Development. The server is always Development. |
 | `-Engine`, `-LinuxToolchain`, `-OutputRoot`, `-Butler`, `-ButlerIdentity` | Override discovered paths. |
+| `-ServerEngine <UE 5.8.3 root>` | Engine for the server; discovered automatically when omitted (see below). |
+| `-Docker`, `-DockerCredentials`, `-DockerRepository` | Docker CLI, credentials file (default `.secrets\dockerhub.json`), `namespace/name` override. |
 | `-UploadOnly <run or platform dir>` | Retry pending uploads without compiling; filter with `-TargetPlatform`, validate with `-Check`. |
 
 Requirements:
@@ -37,6 +41,8 @@ Requirements:
   `LINUX_MULTIARCH_ROOT` must point to the version root that contains
   `ToolchainVersion.txt`, not its `bin` folder. No VM or WSL is needed.
 - Butler on PATH with one `butler login`; `BUTLER_API_KEY` is also accepted.
+- Server only: a UE 5.8.3 engine that can build **Linux Development Server** targets,
+  Docker Desktop in Linux-container mode with buildx, and Docker Hub credentials.
 
 Every selected target is checked before Unreal starts: tools, asset mounts and LFS
 pointers, a closed Editor, 10 GiB free on the source drive and 60 GiB on the workspace
@@ -48,6 +54,55 @@ and `upload.log`. Linux must produce a real ELF x86_64 executable and pushes wit
 `--fix-permissions`. A failed platform is recorded separately while the other can
 finish; any failure returns exit code 1. Successful uploads delete their attempt
 directory, and the whole run once all platforms have uploaded.
+
+### Dedicated server image
+
+Epic Launcher engines cannot build `Server` targets. The server needs a UE 5.8.3 source
+engine (a clone of the `5.8.3-release` tag after `Setup.bat`) or an Installed Build made
+with server support (`BuildGraph ... -set:WithServer=true -set:WithLinux=true`).
+`server-image.py check-engine` reads its `InstalledPlatformConfigurations` and never
+overrides them. The engine is chosen in this order:
+
+1. `-ServerEngine <root>`, else the `UE_SERVER_ENGINE_ROOT` environment variable. An
+   explicit choice that fails the check stops the preflight; there is no fallback.
+2. Otherwise the first UE 5.8.3 that passes the check among the client engine and the
+   engines registered by UnrealVersionSelector (`HKCU\SOFTWARE\Epic Games\Unreal Engine\Builds`,
+   where a source engine's `Setup.bat` or *Switch Unreal Engine version* registers it). When it differs from `-Engine`, the server gets its own workspace
+(`<run>\server-project`, Fab plugins still copied from `-Engine` as source) and its own
+Editor build, so the first source-engine run compiles the engine. The Linux toolchain
+is the same v26 one.
+
+UAT runs `BuildCookRun -target=RespawnAndRageServer -server -noclient` for Linux x64
+Development with `MapsToCook`. `server-image.py stage` then applies the same package
+validation as the native Linux helper below (ELF, `.pak`, Server target receipt), adds
+`run-server-linux.py`, `server-settings.json` and a generated `Dockerfile`, and checks
+that the staged `GameVersion.txt` matches. The image is `debian:bookworm-slim` with
+Python and tini, runs as uid/gid 10001 (Unreal refuses root), exposes `7777/udp`, omits
+`*.debug` symbols and uses `run-server-linux.py` as entry point. It is built for
+`linux/amd64` and tagged `<repository>:<GameVersion>` and `:latest`.
+
+Credentials live in the ignored `core/.secrets/dockerhub.json` (never commit it):
+
+```json
+{"username": "dockerhub-user", "token": "dckr_pat_...", "repository": "dockerhub-user/respawn-and-rage-server"}
+```
+
+Use a Docker Hub personal access token with Read & Write scope. Preflight logs in to the
+Docker Hub API and requires the repository to **exist and be public**: the server image
+is published publicly, and a push to a missing repository would take the account's
+default visibility. The push logs in through stdin
+inside a temporary Docker config, so the token never reaches arguments, logs, receipts
+or your own `docker login`. Built images stay in the local Docker daemon; prune them there.
+
+Run the image with:
+
+```sh
+docker run --rm -p 7777:7777/udp <repository>:latest
+docker run --rm -p 7777:7777/udp <repository>:latest --map '/Game/EclipseRecoil/Maps/L_Town?Seed=73' -- -log
+```
+
+Arguments are those of `run-server-linux.py` (see below); keep `--port` and the published
+port equal.
 
 Common preflight problems:
 
@@ -134,10 +189,12 @@ The 60 Hz setting is a cap, not a measured guarantee under load.
 
 ```sh
 python3 -m unittest discover -s scripts/tests -p test_build_server_linux.py
+python3 -m unittest discover -s scripts/tests -p test_server_image.py
 ```
 
 These tests use structural fixtures and prove CLI, capability rejection, map-list,
-ELF validation and launcher contracts only. No dedicated Linux cook or runtime is
+ELF validation, launcher, Dockerfile, tag and credential-handling contracts only. They
+call neither Unreal, Docker nor Docker Hub. No dedicated Linux cook or runtime is
 established by them. On a supported Linux host, complete the real package, start it,
 connect compatible clients by IP, check the `ER_TRANSPORT LAN/IP` log, and exercise
 spawn, movement, hits across skins/stances, destruction and map travel. Record measured

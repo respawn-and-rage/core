@@ -163,6 +163,81 @@ try {
     Assert-True ($invocations[1].arguments -contains '-platform=Win64' -and $invocations[1].arguments -contains '-prereqs') 'Windows build must stage Windows prerequisites'
     Assert-True ($invocations[2].arguments -contains '-platform=Linux' -and $invocations[2].arguments -contains '-clientarchitecture=x64') 'Linux build must target x64'
     Assert-True (-not ($invocations[2].arguments -contains '-prereqs')) 'Linux package must not stage Windows prerequisites'
+    $invocations.Clear()
+    $serverEngine = Join-Path $temporary 'Source engine'
+    Invoke-ServerPackageBuild $serverEngine $projectFile $archiveFolder
+    $serverArguments = $invocations[0].arguments
+    Assert-True ($invocations[0].path -eq (Join-Path $serverEngine 'Engine\Build\BatchFiles\RunUAT.bat')) 'Server must cook with the server engine'
+    Assert-True ($serverArguments -contains '-target=RespawnAndRageServer' -and $serverArguments -contains '-server' -and
+        $serverArguments -contains '-noclient' -and $serverArguments -contains '-serverconfig=Development' -and
+        $serverArguments -contains '-serverplatform=Linux' -and $serverArguments -contains '-serverarchitecture=x64') 'Server must build Linux x64 Development only'
+    Assert-True (-not ($serverArguments -match '^-map=')) 'Server must use MapsToCook'
+    Assert-True (-not ($serverArguments -contains '-installed')) 'A source engine must not be treated as installed'
+    New-Item -ItemType Directory -Path (Join-Path $serverEngine 'Engine\Build') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $serverEngine 'Engine\Build\InstalledBuild.txt') -Value ''
+    $invocations.Clear()
+    Invoke-ServerPackageBuild $serverEngine $projectFile $archiveFolder
+    Assert-True ($invocations[0].arguments -contains '-installed') 'An Installed Build with server support needs -installed'
+    $DockerCredentials = Join-Path $temporary 'secrets\dockerhub.json'
+    $DockerRepository = $null
+    $NoUpload = $true
+    Assert-True ((Get-DockerRepository) -eq 'local/respawn-and-rage-server') 'Local-only images need no credentials'
+    $NoUpload = $false
+    Assert-Throws { Get-DockerRepository } 'credentials missing'
+    New-Item -ItemType Directory -Path (Split-Path $DockerCredentials -Parent) -Force | Out-Null
+    @{ username = 'rr'; token = 'dckr_pat_never_logged'; repository = 'rr/respawn-and-rage-server' } | ConvertTo-Json |
+        Set-Content -LiteralPath $DockerCredentials
+    Assert-True ((Get-DockerRepository) -eq 'rr/respawn-and-rage-server') 'Repository comes from the credentials file'
+    $dockerArguments = @(Get-DockerArguments -Upload)
+    Assert-True ($dockerArguments -contains $DockerCredentials -and -not ($dockerArguments -contains 'dckr_pat_never_logged')) 'The token is passed only as a file path'
+    $DockerRepository = 'rr/override'
+    Assert-True ((Get-DockerRepository) -eq 'rr/override') '-DockerRepository overrides the file'
+
+    # Server engine discovery: explicit choices never fall back; otherwise the
+    # client engine first, then UnrealVersionSelector registrations.
+    $savedServerRoot = $env:UE_SERVER_ENGINE_ROOT
+    $env:UE_SERVER_ENGINE_ROOT = $null
+    $launcherEngine = Join-Path $temporary 'Launcher UE_5.8'
+    $sourceEngine = Join-Path $temporary 'Source UE_5.8'
+    $oldEngine = Join-Path $temporary 'Source UE_5.7'
+    foreach ($item in @(@($launcherEngine, 3), @($sourceEngine, 3), @($oldEngine, 2))) {
+        New-Item -ItemType Directory -Path (Join-Path $item[0] 'Engine\Build') -Force | Out-Null
+        @{ MajorVersion = 5; MinorVersion = 8; PatchVersion = $item[1] } | ConvertTo-Json |
+            Set-Content -LiteralPath (Join-Path $item[0] 'Engine\Build\Build.version')
+    }
+    $serverCapable = @()
+    $checkedEngines = New-Object 'System.Collections.Generic.List[string]'
+    function Test-ServerEngine([string]$EngineRoot) { $checkedEngines.Add($EngineRoot); return $serverCapable -contains $EngineRoot }
+    function Get-ItemProperty { param($Path, $ErrorAction)
+        if ($Path -like '*Unreal Engine\Builds') {
+            [pscustomobject]@{ '{OLD-GUID}' = $oldEngine; '{SOURCE-GUID}' = ($sourceEngine + '\'); PSPath = 'registry' }
+        }
+    }
+    try {
+        $ServerEngine = $null
+        Assert-Throws { Find-ServerEngine $launcherEngine } 'UE_SERVER_ENGINE_ROOT'
+        Assert-True (-not ($checkedEngines -contains $oldEngine)) 'Other engine versions must not be checked'
+        $serverCapable = @($sourceEngine)
+        $checkedEngines.Clear()
+        Assert-True ((Find-ServerEngine $launcherEngine) -eq $sourceEngine) 'Registered source engine must be found'
+        Assert-True ($checkedEngines[0] -eq $launcherEngine) 'The client engine is tried first'
+        $serverCapable = @($launcherEngine, $sourceEngine)
+        Assert-True ((Find-ServerEngine $launcherEngine) -eq $launcherEngine) 'A server-capable client engine avoids a second workspace'
+        $serverCapable = @($sourceEngine)
+        $env:UE_SERVER_ENGINE_ROOT = $launcherEngine
+        Assert-Throws { Find-ServerEngine $launcherEngine } 'cannot build'
+        $env:UE_SERVER_ENGINE_ROOT = $sourceEngine
+        Assert-True ((Find-ServerEngine $launcherEngine) -eq $sourceEngine) 'UE_SERVER_ENGINE_ROOT is honored'
+        $ServerEngine = $oldEngine
+        $checkedEngines.Clear()
+        Assert-Throws { Find-ServerEngine $launcherEngine } 'cannot build'
+        Assert-True ($checkedEngines.Count -eq 1) '-ServerEngine overrides the environment and never falls back'
+        $ServerEngine = $null
+    } finally {
+        $env:UE_SERVER_ENGINE_ROOT = $savedServerRoot
+        Remove-Item Function:Test-ServerEngine
+        function Get-ItemProperty { param($Path, $ErrorAction) return $null }
+    }
 
     $assetSetup = Join-Path $temporary 'Repo with spaces\scripts\setup-assets.py'
     $invocations.Clear()

@@ -33,3 +33,6 @@ __pycache__/
 
 # Generated from the locally licensed UE installation; never publish Epic source.
 /Plugins/OnlineSubsystemEOS/
+
+# Local build/publish credentials (e.g. .secrets/dockerhub.json). Never commit.
+/.secrets/

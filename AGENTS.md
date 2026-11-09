@@ -45,7 +45,7 @@ as `ERCharacter.cpp` by range.
 | LAN, EOS, capacity | [ONLINE](docs/ONLINE.md) |
 | Setup, compile, versions | [BUILD](docs/BUILD.md) |
 | macOS package or release | [PACKAGE_MAC](docs/PACKAGE_MAC.md) |
-| Windows or Linux package | [PACKAGE_DESKTOP](docs/PACKAGE_DESKTOP.md) |
+| Windows or Linux package, dedicated server image | [PACKAGE_DESKTOP](docs/PACKAGE_DESKTOP.md) |
 | Submodules, licences, cleanup, publication | [ASSETS](docs/ASSETS.md) |
 | Unsure what a test proves | [TESTING](docs/TESTING.md) |
 

@@ -1,15 +1,20 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-Build Windows and Linux x64 on Windows, then upload both with Butler.
+Build Windows and Linux x64 clients and the Linux dedicated server on Windows.
+Clients are uploaded with Butler, the server as a Docker image to Docker Hub.
 .EXAMPLE
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -InitAssets
 .EXAMPLE
-.\scripts\package-windows.ps1 -Check -Engine 'D:\Epic Games\UE_5.8'
+.\scripts\package-windows.ps1 -Check -Engine 'D:\Epic Games\UE_5.8' -ServerEngine 'D:\UnrealSource\UE_5.8'
+.EXAMPLE
+.\scripts\package-windows.ps1 -TargetPlatform Windows,Linux
 .NOTES
 Uses an external build workspace with shared Content; close Unreal Editor first.
 Creates/validates asset junctions automatically after tool checks pass.
-Uploads with Butler unless -NoUpload is passed. -Check never builds or uploads.
+Uploads unless -NoUpload is passed. -Check never builds or uploads.
+Server engine: -ServerEngine, else UE_SERVER_ENGINE_ROOT, else the first UE 5.8.3 able to
+build Linux Server among the client engine and engines registered by UnrealVersionSelector.
 #>
 [CmdletBinding()]
 param(
@@ -22,8 +27,12 @@ param(
     [string]$ButlerIdentity,
     [switch]$NoUpload,
     [string]$UploadOnly,
-    [ValidateSet('Both', 'Windows', 'Linux')][string]$TargetPlatform = 'Both',
-    [string]$LinuxToolchain
+    [ValidateSet('All', 'Both', 'Windows', 'Linux', 'Server')][string[]]$TargetPlatform = @('All'),
+    [string]$LinuxToolchain,
+    [string]$ServerEngine,
+    [string]$Docker = 'docker.exe',
+    [string]$DockerCredentials,
+    [string]$DockerRepository
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,9 +42,15 @@ $uproject = Join-Path $projectRoot 'RespawnAndRage.uproject'
 $problems = New-Object 'System.Collections.Generic.List[string]'
 $logFile = $null
 $resolvedEngine = $null
+$resolvedServerEngine = $null
 $previousLinuxRoot = $env:LINUX_MULTIARCH_ROOT
-$platforms = @('Windows', 'Linux')
-if ($TargetPlatform -ne 'Both') { $platforms = @($TargetPlatform) }
+$serverImageScript = Join-Path $PSScriptRoot 'server-image.py'
+if (-not $DockerCredentials) { $DockerCredentials = Join-Path $projectRoot '.secrets\dockerhub.json' }
+# 'Both' keeps its historical meaning (the two clients); 'All' adds the server.
+$selected = @(foreach ($item in $TargetPlatform) {
+    switch ($item) { 'All' { 'Windows', 'Linux', 'Server' } 'Both' { 'Windows', 'Linux' } default { $item } }
+})
+$platforms = @(@('Windows', 'Linux', 'Server') | Where-Object { $_ -in $selected })
 
 function Test-Dependency([string]$Name, [scriptblock]$Action) {
     try {
@@ -113,6 +128,45 @@ function Find-Engine {
         }
     }
     throw 'Install UE 5.8.3 in Epic Launcher, or specify -Engine ''D:\Epic Games\UE_5.8''.'
+}
+
+function Test-ServerEngine([string]$EngineRoot) {
+    try { Invoke-Native 'python.exe' @($serverImageScript, 'check-engine', '--engine', $EngineRoot); return $true } catch { return $false }
+}
+
+function Find-ServerEngine([string]$ClientEngine) {
+    # An explicit choice (parameter or UE_SERVER_ENGINE_ROOT) never falls back silently.
+    $explicit = $ServerEngine
+    if (-not $explicit) { $explicit = $env:UE_SERVER_ENGINE_ROOT }
+    if ($explicit) {
+        $path = [IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($explicit)).TrimEnd('\', '/')
+        if (Test-ServerEngine $path) { return $path }
+        throw "Server engine $path cannot build UE 5.8.3 Linux Development Server targets (see the message above)."
+    }
+    # The client engine first (no second workspace), then engines registered by
+    # UnrealVersionSelector, which is where source builds appear.
+    $candidates = @()
+    if ($ClientEngine) { $candidates += $ClientEngine }
+    $builds = Get-ItemProperty 'HKCU:\SOFTWARE\Epic Games\Unreal Engine\Builds' -ErrorAction SilentlyContinue
+    if ($builds) {
+        $candidates += @($builds.PSObject.Properties | Where-Object { $_.Name -notlike 'PS*' -and $_.Value } |
+            ForEach-Object { [string]$_.Value })
+    }
+    $tried = @()
+    foreach ($candidate in $candidates) {
+        try { $path = [IO.Path]::GetFullPath($candidate).TrimEnd('\', '/') } catch { continue }
+        if ($tried -contains $path) { continue }
+        $tried += $path
+        $versionFile = Join-Path $path 'Engine\Build\Build.version'
+        if (-not (Test-Path -LiteralPath $versionFile -PathType Leaf)) { continue }
+        $version = Get-Content -LiteralPath $versionFile -Raw | ConvertFrom-Json
+        if ("$($version.MajorVersion).$($version.MinorVersion).$($version.PatchVersion)" -ne '5.8.3') { continue }
+        Write-Host "Server engine candidate: $path"
+        if (Test-ServerEngine $path) { return $path }
+    }
+    throw ('No UE 5.8.3 engine able to build Linux Server targets (Epic Launcher engines never can). Pass -ServerEngine ' +
+        'or set UE_SERVER_ENGINE_ROOT to a source engine (after Setup.bat), register it with UnrealVersionSelector, ' +
+        'or skip the server with -TargetPlatform Windows,Linux.')
 }
 
 function Assert-FreeSpace([string]$Path, [double]$MinimumGiB) {
@@ -212,7 +266,7 @@ function Assert-EnabledPlugins([string]$EngineRoot, [string]$ProjectRoot) {
         if (($descriptor.FullName -match '[/\\]Marketplace[/\\]' -or $descriptor -in $projectPlugins) -and $plugin.Modules) {
             if (-not (Test-Path -LiteralPath (Join-Path $descriptor.DirectoryName 'Source'))) { throw "Plugin source required: $($reference.Name)." }
         }
-        if ($platforms -contains 'Linux' -and $plugin.SupportedTargetPlatforms -and 'Linux' -notin $plugin.SupportedTargetPlatforms) {
+        if (($platforms -contains 'Linux' -or $platforms -contains 'Server') -and $plugin.SupportedTargetPlatforms -and 'Linux' -notin $plugin.SupportedTargetPlatforms) {
             throw "Plugin $($reference.Name) does not support Linux. Install a compatible source version."
         }
         if ($reference.Name -eq 'PCGExtendedToolkit') {
@@ -241,6 +295,62 @@ function Invoke-PackageBuild([string]$EngineRoot, [string]$ProjectPath, [string]
         '-build', '-cook', '-stage', '-package', '-pak', '-iostore', '-skipbuildeditor',
         # Use ProjectPackagingSettings.MapsToCook; -map overrides that list.
         '-archive', "-archivedirectory=$ArchivePath") + $extra)
+}
+
+function Invoke-ServerPackageBuild([string]$EngineRoot, [string]$ProjectPath, [string]$ArchivePath) {
+    # The dedicated server is always Linux x64 Development (server-image.py and
+    # run-server-linux.py validate exactly that receipt and executable).
+    $arguments = @('BuildCookRun', "-project=$ProjectPath", '-target=RespawnAndRageServer',
+        '-platform=Linux', '-serverplatform=Linux', '-server', '-noclient', '-serverconfig=Development',
+        '-serverarchitecture=x64', '-nop4', '-unattended', '-utf8output',
+        '-build', '-cook', '-stage', '-package', '-pak', '-skipbuildeditor',
+        # Use ProjectPackagingSettings.MapsToCook; -map overrides that list.
+        '-archive', "-archivedirectory=$ArchivePath")
+    # A source engine must not be treated as an Installed Build.
+    if (Test-Path -LiteralPath (Join-Path $EngineRoot 'Engine\Build\InstalledBuild.txt')) { $arguments += '-installed' }
+    Invoke-Native (Join-Path $EngineRoot 'Engine\Build\BatchFiles\RunUAT.bat') $arguments
+}
+
+function Get-DockerRepository {
+    if ($DockerRepository) { return $DockerRepository }
+    # Read only the public repository name; the token stays inside server-image.py.
+    if (Test-Path -LiteralPath $DockerCredentials -PathType Leaf) {
+        $repository = (Get-Content -LiteralPath $DockerCredentials -Raw | ConvertFrom-Json).repository
+        if ($repository) { return [string]$repository }
+    }
+    if ($NoUpload) { return 'local/respawn-and-rage-server' }
+    if (-not (Test-Path -LiteralPath $DockerCredentials -PathType Leaf)) {
+        throw "Docker Hub credentials missing: $DockerCredentials (see docs/PACKAGE_DESKTOP.md), or pass -NoUpload."
+    }
+    throw "Set ""repository"" in $DockerCredentials or pass -DockerRepository namespace/name."
+}
+
+function Get-DockerArguments([switch]$Upload) {
+    @('--docker', $Docker, '--repository', (Get-DockerRepository))
+    if ($Upload) {
+        '--credentials'
+        $DockerCredentials
+    }
+}
+
+function Assert-DockerServer([switch]$Upload) {
+    $arguments = @($serverImageScript, 'check-docker') + @(Get-DockerArguments -Upload:$Upload)
+    try { Invoke-Native 'python.exe' $arguments } catch {
+        throw 'Docker check failed (see the message above). Docker Desktop with Linux containers is required for the server image.'
+    }
+}
+
+function Assert-ServerPackage([string]$ArchivePath, [string]$ExpectedVersion) {
+    # Validates launcher, settings, executable and Docker context; no Docker call.
+    Invoke-Native 'python.exe' @($serverImageScript, 'validate', '--archive', $ArchivePath, '--version', $ExpectedVersion)
+}
+
+function Invoke-ServerImagePush([string]$ArchivePath, [string]$ExpectedVersion, [string]$Commit) {
+    $arguments = @($serverImageScript, 'publish', '--archive', $ArchivePath, '--version', $ExpectedVersion) +
+        @(Get-DockerArguments -Upload)
+    if ($Commit) { $arguments += @('--commit', $Commit) }
+    Invoke-Native 'python.exe' $arguments
+    Write-Host "DOCKER_PUSH_PASS: $(Get-DockerRepository):$ExpectedVersion" -ForegroundColor Green
 }
 
 function Assert-Elf64([string]$Path) {
@@ -391,7 +501,7 @@ function Remove-UploadedBuild([string]$Directory, [switch]$CompletedRetry) {
     if ($CompletedRetry) {
         $summaryPath = Join-Path $Directory 'summary.json'
         $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json
-        if (-not $summary.platforms -or @($summary.platforms | Where-Object { $_ -notin 'Windows', 'Linux' }).Count) {
+        if (-not $summary.platforms -or @($summary.platforms | Where-Object { $_ -notin 'Windows', 'Linux', 'Server' }).Count) {
             throw 'Invalid desktop build summary; refusing cleanup.'
         }
         # Successful attempts were removed; any remaining attempt still needs attention.
@@ -411,16 +521,22 @@ function Invoke-AttemptUpload([string]$Attempt, [switch]$ValidateOnly) {
     $receipt = Get-Content -LiteralPath $receiptFile -Raw | ConvertFrom-Json
     $platform = $receipt.platform
     if (-not $platform) { $platform = 'Windows' } # Legacy Windows-only receipts.
-    if ($platform -notin 'Windows', 'Linux' -or $receipt.status -notin 'packaged', 'upload_failed', 'uploaded' -or -not $receipt.game_version) {
-        throw "Not a completed Windows/Linux package: $Attempt"
+    if ($platform -notin 'Windows', 'Linux', 'Server' -or $receipt.status -notin 'packaged', 'upload_failed', 'uploaded' -or -not $receipt.game_version) {
+        throw "Not a completed Windows/Linux/Server package: $Attempt"
     }
     $archive = Join-Path $Attempt 'dist'
-    $null = Get-GamePackage $archive $receipt.game_version $platform
+    if ($platform -eq 'Server') { Assert-ServerPackage $archive $receipt.game_version }
+    else { $null = Get-GamePackage $archive $receipt.game_version $platform }
     if ($ValidateOnly) { return }
     $script:logFile = Join-Path $Attempt 'upload.log'
-    $receipt | Add-Member -NotePropertyName itch_target -NotePropertyValue (Get-ItchTarget $platform) -Force
     try {
-        Invoke-ItchUpload $archive $receipt.game_version $platform
+        if ($platform -eq 'Server') {
+            $receipt | Add-Member -NotePropertyName docker_image -NotePropertyValue "$(Get-DockerRepository):$($receipt.game_version)" -Force
+            Invoke-ServerImagePush $archive $receipt.game_version $receipt.commit
+        } else {
+            $receipt | Add-Member -NotePropertyName itch_target -NotePropertyValue (Get-ItchTarget $platform) -Force
+            Invoke-ItchUpload $archive $receipt.game_version $platform
+        }
         $receipt.status = 'uploaded'
         $receipt.PSObject.Properties.Remove('error')
     } catch {
@@ -459,9 +575,14 @@ try {
             }
         }
         if (-not $attempts.Count) { throw 'No pending packaged builds found. Pass a platform attempt directory to re-upload an already uploaded build.' }
-        foreach ($attempt in $attempts) { Invoke-AttemptUpload $attempt -ValidateOnly }
-        Assert-Butler
         Get-Command 'python.exe' -CommandType Application -ErrorAction Stop | Out-Null
+        foreach ($attempt in $attempts) { Invoke-AttemptUpload $attempt -ValidateOnly }
+        $attemptPlatforms = @(foreach ($attempt in $attempts) {
+            $platform = (Get-Content -LiteralPath (Join-Path $attempt 'receipt.json') -Raw | ConvertFrom-Json).platform
+            if ($platform) { $platform } else { 'Windows' }
+        })
+        if (@($attemptPlatforms | Where-Object { $_ -ne 'Server' }).Count) { Assert-Butler }
+        if ($attemptPlatforms -contains 'Server') { Assert-DockerServer -Upload }
         if ($Check) { Write-Host 'DESKTOP_UPLOAD_PREFLIGHT_PASS'; exit 0 }
         $failed = $false
         foreach ($attempt in $attempts) {
@@ -484,9 +605,17 @@ try {
     }
     Write-Host "Project: $projectRoot"
     Write-Host "Platforms: $($platforms -join ', ') | Configuration: $Configuration | Output: $OutputRoot"
-    if (-not $NoUpload) {
+    $clientPlatforms = @($platforms | Where-Object { $_ -ne 'Server' })
+    $buildServer = $platforms -contains 'Server'
+    if ($buildServer) { Write-Host 'Server: Linux x64 Development dedicated server, Docker image' }
+    if (-not $NoUpload -and $clientPlatforms.Count) {
         Write-Host 'Upload after packaging: aaggeeaa/respawn-and-rage (one channel per platform)'
         Test-Dependency 'Butler and itch.io authentication' { Assert-Butler }
+    }
+    if ($buildServer) {
+        $dockerCheck = 'Docker Desktop (Linux containers, buildx)'
+        if (-not $NoUpload) { $dockerCheck += " and Docker Hub access ($DockerCredentials)" }
+        Test-Dependency $dockerCheck { Assert-DockerServer -Upload:(-not $NoUpload) }
     }
 
     Test-Dependency 'Git and Git LFS' {
@@ -541,7 +670,15 @@ try {
     if ($resolvedEngine) {
         if ($platforms -contains 'Linux') {
             Test-Dependency 'Unreal Linux target support' { Assert-LinuxSupport $resolvedEngine }
+        }
+        if ($platforms -contains 'Linux' -or $buildServer) {
             Test-Dependency 'Linux v26 toolchain (clang 20.1.8 and C++20 link)' { Assert-LinuxToolchain $resolvedEngine }
+        }
+        if ($buildServer) {
+            Test-Dependency 'UE 5.8.3 with Linux dedicated server support' {
+                $script:resolvedServerEngine = Find-ServerEngine $resolvedEngine
+                Write-Host "Server engine: $resolvedServerEngine"
+            }
         }
         Test-Dependency 'Enabled plugins, including PCGEx 0.79.2' {
             Assert-EnabledPlugins $resolvedEngine $projectRoot
@@ -569,7 +706,8 @@ try {
         throw ("Preflight failed. Fix these items and rerun:`n - " + ($problems -join "`n - ") +
             "`nExisting assets are mounted automatically on a normal build after tool checks pass; -Check only validates mounts." +
             "`nFor missing submodules/LFS, authenticate GitHub for all three private repositories and rerun with -InitAssets." +
-            "`nFor Windows only, pass -TargetPlatform Windows; this does not require the Linux toolchain.")
+            "`nFor Windows only, pass -TargetPlatform Windows; this does not require the Linux toolchain." +
+            "`nWithout the dedicated server (no server engine or Docker), pass -TargetPlatform Windows,Linux.")
     }
     Write-Host 'DESKTOP_PREFLIGHT_PASS' -ForegroundColor Green
     if ($Check) { exit 0 }
@@ -578,17 +716,23 @@ try {
     New-Item -ItemType Directory -Path $runDirectory | Out-Null
     $workspace = Join-Path $runDirectory 'project'
     $summaryFile = Join-Path $runDirectory 'summary.json'
+    # Editor binaries are engine specific: a different server engine cooks from its own workspace.
+    $separateServer = $buildServer -and
+        [IO.Path]::GetFullPath($resolvedServerEngine).TrimEnd('\', '/') -ne [IO.Path]::GetFullPath($resolvedEngine).TrimEnd('\', '/')
     $summary = [ordered]@{
         status = 'running'; configuration = $Configuration; engine = $resolvedEngine; source = $uproject
         started = (Get-Date).ToString('o'); platforms = $platforms; workspace = $workspace
     }
+    if ($buildServer) { $summary['server_engine'] = $resolvedServerEngine }
     $logFile = Join-Path $runDirectory 'editor.log'
     Write-Host "Build workspace: $runDirectory"
     try {
         Invoke-Native 'python.exe' @((Join-Path $PSScriptRoot 'prepare-desktop-build.py'), '--engine', $resolvedEngine, '--destination', $workspace)
         $buildProject = Join-Path $workspace 'RespawnAndRage.uproject'
-        Push-Location $workspace
-        try { Invoke-EditorBuild $resolvedEngine $buildProject } finally { Pop-Location }
+        if ($clientPlatforms.Count -or ($buildServer -and -not $separateServer)) {
+            Push-Location $workspace
+            try { Invoke-EditorBuild $resolvedEngine $buildProject } finally { Pop-Location }
+        }
         $failed = $false
         foreach ($platform in $platforms) {
             $attempt = Join-Path $runDirectory $platform.ToLowerInvariant()
@@ -600,19 +744,45 @@ try {
                 status = 'running'; platform = $platform; configuration = $Configuration; engine = $resolvedEngine
                 project = $buildProject; commit = (Get-Content -LiteralPath (Join-Path $workspace 'Build\SourceCommit.txt') -Raw).Trim()
                 started = (Get-Date).ToString('o'); archive = $archive; log = $logFile
-                itch_target = (Get-ItchTarget $platform)
             }
+            if ($platform -ne 'Server') { $receipt['itch_target'] = Get-ItchTarget $platform }
             try {
-                Push-Location $workspace
-                try { Invoke-PackageBuild $resolvedEngine $buildProject $archive $Configuration $platform } finally { Pop-Location }
-                if ($platform -eq 'Linux') {
-                    foreach ($launcher in @(Get-ChildItem -LiteralPath $archive -Recurse -File -Filter '*.sh')) {
-                        $text = (Get-Content -LiteralPath $launcher.FullName -Raw).Replace("`r`n", "`n")
-                        [IO.File]::WriteAllText($launcher.FullName, $text, (New-Object Text.UTF8Encoding $false))
+                if ($platform -eq 'Server') {
+                    $serverWorkspace = $workspace
+                    if ($separateServer) {
+                        # Fab plugins are discovered in the client engine and copied as source.
+                        $serverWorkspace = Join-Path $runDirectory 'server-project'
+                        Invoke-Native 'python.exe' @((Join-Path $PSScriptRoot 'prepare-desktop-build.py'), '--engine', $resolvedEngine, '--destination', $serverWorkspace)
                     }
+                    $serverProject = Join-Path $serverWorkspace 'RespawnAndRage.uproject'
+                    $receipt.configuration = 'Development'
+                    $receipt.engine = $resolvedServerEngine
+                    $receipt.project = $serverProject
+                    Push-Location $serverWorkspace
+                    try {
+                        if ($separateServer) { Invoke-EditorBuild $resolvedServerEngine $serverProject }
+                        Invoke-ServerPackageBuild $resolvedServerEngine $serverProject $archive
+                    } finally { Pop-Location }
+                    $expectedVersion = (Get-Content -LiteralPath (Join-Path $serverWorkspace 'Build\GameVersion.txt') -Raw).Trim()
+                    Invoke-Native 'python.exe' @($serverImageScript, 'stage', '--project', $projectRoot, '--archive', $archive,
+                        '--target-receipt', (Join-Path $serverWorkspace 'Binaries\Linux\RespawnAndRageServer.target'),
+                        '--version', $expectedVersion)
+                    $receipt['docker_image'] = "$(Get-DockerRepository):$expectedVersion"
+                    # Built now so a Docker failure is a package failure; the upload rebuilds from cache and pushes.
+                    Invoke-Native 'python.exe' (@($serverImageScript, 'build', '--archive', $archive, '--version', $expectedVersion,
+                        '--commit', $receipt.commit) + @(Get-DockerArguments))
+                } else {
+                    Push-Location $workspace
+                    try { Invoke-PackageBuild $resolvedEngine $buildProject $archive $Configuration $platform } finally { Pop-Location }
+                    if ($platform -eq 'Linux') {
+                        foreach ($launcher in @(Get-ChildItem -LiteralPath $archive -Recurse -File -Filter '*.sh')) {
+                            $text = (Get-Content -LiteralPath $launcher.FullName -Raw).Replace("`r`n", "`n")
+                            [IO.File]::WriteAllText($launcher.FullName, $text, (New-Object Text.UTF8Encoding $false))
+                        }
+                    }
+                    $expectedVersion = (Get-Content -LiteralPath (Join-Path $workspace 'Build\GameVersion.txt') -Raw).Trim()
+                    $null = Get-GamePackage $archive $expectedVersion $platform
                 }
-                $expectedVersion = (Get-Content -LiteralPath (Join-Path $workspace 'Build\GameVersion.txt') -Raw).Trim()
-                $null = Get-GamePackage $archive $expectedVersion $platform
                 $receipt.status = 'packaged'
                 $receipt['game_version'] = $expectedVersion
                 Write-Host "${platform}_PACKAGE_PASS: $archive" -ForegroundColor Green

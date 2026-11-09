@@ -218,6 +218,27 @@ def validate_package(archive, target_receipt):
     return package, binary
 
 
+def finalize_package(archive, target_receipt, maps, default_map):
+    """Validate a staged server and add its launcher and settings.
+
+    Shared with the Windows-hosted build (server-image.py): the package layout
+    and launcher contract do not depend on the build host.
+    """
+    package, binary = validate_package(archive, target_receipt)
+    shutil.copy2(Path(__file__).with_name('run-server-linux.py'), package / 'run-server-linux.py')
+    # POSIX paths: the package always runs on Linux, even when staged on Windows.
+    settings = {'binary': binary.relative_to(package).as_posix(), 'map': default_map,
+                'maps': maps, 'port': 7777, 'tick_rate': 60}
+    (package / 'server-settings.json').write_text(json.dumps(settings, indent=2) + '\n')
+    shutil.copy2(target_receipt, package / 'server-build-target.json')
+    helper('run-server-linux.py').command(package, settings)
+    hasher = hashlib.sha256()
+    with binary.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            hasher.update(block)
+    return package, hasher.hexdigest()
+
+
 def execute(project, engine, output, plan):
     output.mkdir(parents=True)
     try:
@@ -226,18 +247,8 @@ def execute(project, engine, output, plan):
             for command_line in plan['commands']:
                 subprocess.run(command_line, cwd=output / 'project', stdout=log, stderr=subprocess.STDOUT, check=True)
         target_receipt = output / 'project/Binaries/Linux/RespawnAndRageServer.target'
-        package, binary = validate_package(output / 'archive', target_receipt)
-        shutil.copy2(Path(__file__).with_name('run-server-linux.py'), package / 'run-server-linux.py')
-        settings = {'binary': str(binary.relative_to(package)), 'map': plan['default_map'],
-                    'maps': plan['maps_to_cook'], 'port': 7777, 'tick_rate': 60}
-        (package / 'server-settings.json').write_text(json.dumps(settings, indent=2) + '\n')
-        shutil.copy2(target_receipt, package / 'server-build-target.json')
-        helper('run-server-linux.py').command(package, settings)
-        hasher = hashlib.sha256()
-        with binary.open('rb') as stream:
-            for block in iter(lambda: stream.read(1024 * 1024), b''):
-                hasher.update(block)
-        digest = hasher.hexdigest()
+        package, digest = finalize_package(output / 'archive', target_receipt,
+                                           plan['maps_to_cook'], plan['default_map'])
         plan.update(packaged=True, package=str(package), binary_sha256=digest, runtime_verified=False)
     except Exception as error:
         plan.update(error=str(error))
