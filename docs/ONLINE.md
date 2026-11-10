@@ -22,6 +22,9 @@ is no matchmaking service.
 All peers must match protocol and build. `RR_VERSION` includes the wire-protocol suffix and
 filters incompatible results. Unreal's handshake checks the same build signature and game
 protocol for direct-IP connections, including maps without cell descriptors.
+The project pins the UE 5.8.3 release NetCL in `Config/DefaultEngine.ini` for all
+clients and dedicated servers. Recheck it on engine upgrades and compare the
+`LogNetVersion` checksum during cross-platform joins.
 
 ## EOS guest identity
 

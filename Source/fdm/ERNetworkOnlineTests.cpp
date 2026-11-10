@@ -27,6 +27,8 @@ bool FEROnlineDedicatedTest::RunTest(const FString&)
     TestTrue(TEXT("Listen hosts use EOS P2P"),UEROnline::IsJoinEndpointValid(TEXT("[EOS:0002aabb:GameNetDriver:97]"),false));
     TestFalse(TEXT("Listen hosts never redirect to IP"),UEROnline::IsJoinEndpointValid(TEXT("203.0.113.7:7777"),false));
     TestTrue(TEXT("Dedicated IPv4 endpoint"),UEROnline::IsJoinEndpointValid(TEXT("203.0.113.7:7777"),true));
+    TestTrue(TEXT("EOS wraps dedicated IPv4 in brackets"),UEROnline::IsJoinEndpointValid(TEXT("[203.0.113.7]:7777"),true));
+    TestFalse(TEXT("Brackets do not bypass IPv4 octet validation"),UEROnline::IsJoinEndpointValid(TEXT("[203.0.113.700]:7777"),true));
     TestTrue(TEXT("Dedicated IPv6 endpoint"),UEROnline::IsJoinEndpointValid(TEXT("[2001:db8::7]:7777"),true));
     TestFalse(TEXT("Dedicated servers have no P2P address"),UEROnline::IsJoinEndpointValid(TEXT("[EOS:0002aabb:GameNetDriver:97]"),true));
     TestFalse(TEXT("URL options cannot be injected"),UEROnline::IsJoinEndpointValid(TEXT("203.0.113.7:7777?Name=x"),true));

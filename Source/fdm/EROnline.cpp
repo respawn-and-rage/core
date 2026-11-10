@@ -88,7 +88,8 @@ bool UEROnline::IsJoinEndpointValid(const FString& Address, bool bDedicated)
 {
     if (!bDedicated) return Address.StartsWith(TEXT("[EOS:"));
     // A dedicated session advertises the public IP EOS observed plus our port
-    // attribute. Accept only a literal address and port: nothing that could
+    // attribute. OSS EOS brackets both IPv4 and IPv6. Accept only a literal
+    // address and port: nothing that could
     // carry a map path or URL options into ClientTravel.
     FString Host, Port;
     if (Address.StartsWith(TEXT("[")))
@@ -97,10 +98,13 @@ bool UEROnline::IsJoinEndpointValid(const FString& Address, bool bDedicated)
         if (Close <= 1) return false;
         Host = Address.Mid(1, Close - 1);
         Port = Address.Mid(Close + 2);
-        for (const TCHAR C : Host) if (!FChar::IsHexDigit(C) && C != TEXT(':') && C != TEXT('.')) return false;
-        return Host.Contains(TEXT(":")) && IsPort(Port);
+        if (Host.Contains(TEXT(":")))
+        {
+            for (const TCHAR C : Host) if (!FChar::IsHexDigit(C) && C != TEXT(':') && C != TEXT('.')) return false;
+            return IsPort(Port);
+        }
     }
-    if (!Address.Split(TEXT(":"), &Host, &Port) || Port.Contains(TEXT(":"))) return false;
+    else if (!Address.Split(TEXT(":"), &Host, &Port) || Port.Contains(TEXT(":"))) return false;
     TArray<FString> Parts;
     if (Host.ParseIntoArray(Parts, TEXT("."), false) != 4) return false;
     for (const FString& Part : Parts)
