@@ -33,7 +33,8 @@ without pixel caps, recomputed from the live viewport. Font: Teko SemiBold throu
   status, and hidden if the killer dies.
 - **Scoreboard** (Tab, and automatically after the match): two team panels side by side in the
   300–980 reference band, each with a team-coloured header (name, score), K/D/TK
-  columns and rows sorted by kills then fewest deaths; the local player row is tinted, bots are
+  columns and rows sorted by kills then fewest deaths. Skull Hunt adds SKULLS and sorts by
+  enemy skulls collected before the standard tie-breakers. The local player row is tinted, bots are
   tagged, and overflow collapses into "+N more".
 - **Inflicted damage**: red HP and green AP text under the reticle, up to five rows, 1s hold,
   .2s fade, attacker only. Rejected, zero and self damage are not shown.

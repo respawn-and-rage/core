@@ -10,6 +10,13 @@ for keys, units and ranges. Numbers below describe Standard values.
 - Two teams, **Alpha** (CT role in reference maps, blue) and **Omega** (T role, orange).
 - Team deathmatch: 600s, first to 50, 1 point per enemy kill, -1 per teamkill (`Match.TeamKillPoints`,
   applied to the killer's team, which may go below zero), 10s intermission.
+- The lobby votes independently on the first map and the match mode. A tied or empty
+  mode vote selects Team Deathmatch. The winning mode stays active across map rotation.
+- Skull Hunt uses the same match timer, score limit and intermission. An enemy kill
+  drops a skull in the victim's team colour. Crossing an enemy skull adds one team point
+  and one skull to the collector's stats. Crossing a friendly skull removes it. The
+  server clears drops at round end and each uncollected skull expires after six turns.
+  `ERSkull` owns the pickup size, clearance and timing.
 - Pre-match countdown (`Match.Countdown`, 10s): once the map is ready and a player is
   present, the server sets `AERGameState::CountdownEndServerTime` and stays in
   `WaitingToStart`. Players spawn but `UERMovement` freezes travel, sprint, jump, ladder
@@ -148,7 +155,7 @@ vitals icons in one row above the killer's head ([HUD.md](HUD.md)).
 
 ## Original scope
 
-Excluded unless requested: pickups, corpse loot, matchmaking, health regeneration,
+Excluded unless requested: equipment pickups, corpse loot, matchmaking, health regeneration,
 automatic respawn, bomb or capture modes. Competitive balance needs real playtests.
 
 ## Verify
@@ -159,6 +166,7 @@ automatic respawn, bomb or capture modes. Competitive balance needs real playtes
 | Movement, posture, stamina | `test-movement.py` (`--posture-only --render`), `test-player-mechanics.py` |
 | Server settings | `test-server-settings.py` (`--regressions`, `--network`, `--render`) |
 | Lobby, rotation, capacity | `test-lobby.py`, `test-round-rotation.py`, `test-capacity.py`, `test-admission.py --bots`, `test-session.py` |
+| Skull Hunt | `test-lobby.py --skull-hunt` |
 | Bots | `test-bots.py`, `test-bot-loadouts.py` |
 | Messages | `test-gameplay-messages.py`, `test-network.py --render` |
 

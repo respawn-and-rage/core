@@ -38,6 +38,12 @@ git commit -m "Use updated character assets"
 Update collaborators with `git pull` then `python3 scripts/setup-assets.py --init`. Close Unreal
 before switching pinned revisions, and avoid `submodule update --remote` unless upgrading.
 
+The Skull Hunt coin lives in the private maps bundle. Run `scripts/bake_skull_model.py`
+in Blender with the supplied ZIP and an output directory. Pass that directory as
+`ER_SKULL_IMPORT` when running `scripts/setup_skull_hunt.py` in Unreal Python. The
+import wires the coin into `BP_ERGameMode`. Provenance lives in `SourceAssets/SkullHunt`
+inside the maps bundle. The supplied archive contains no licence metadata.
+
 ## Publication limits
 
 - `scripts/verify-public-tree.py` allowlists paths and checks all reachable history for assets,

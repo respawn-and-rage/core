@@ -14,4 +14,5 @@ private:
     double Deadline = 0;
     bool Failed = false;
     void Check(bool Value, const TCHAR* Label);
+    bool TickSkullHunt(class AERPlayerController& PC, const class AERGameState& State, double Now);
 };

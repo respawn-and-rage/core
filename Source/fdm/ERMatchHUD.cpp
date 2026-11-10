@@ -112,17 +112,22 @@ void AERHUD::DrawScoreboard(const AERGameState* GS)
     const float Bottom = H - Layout.Edge().Y;
     const auto* Self = PlayerOwner ? PlayerOwner->GetPlayerState<AERPlayerState>() : nullptr;
     // Two team panels side by side inside the 300-980 reference band, clear of the
-    // post-match message column and the minimap; each sorted by kills then fewest deaths.
+    // post-match message column and the minimap.
     const float PanelWidth = 330.f * S, Spacing = 20.f * S;
     const float Top = Layout.Position(0,135).Y;
+    const bool bSkullHunt = GS->MatchMode == EERMatchMode::SkullHunt;
+    if (bSkullHunt)
+        DrawHUDTextAnchored(ERMatchModes::Label(GS->MatchMode), FVector2D(W * .5f, Top - 5.f * S),
+            FLinearColor::White, .85f, FVector2D(.5f,1));
     const float HeaderHeight = 46.f * S, ColumnHeight = 26.f * S, RowHeight = 29.f * S;
     for (const EERTeam Team : {EERTeam::Alpha, EERTeam::Omega})
     {
         TArray<const AERPlayerState*> Players;
         for (const APlayerState* Item : GS->PlayerArray)
             if (const auto* State = Cast<AERPlayerState>(Item); State && State->Team == Team) Players.Add(State);
-        Players.Sort([](const AERPlayerState& A, const AERPlayerState& B)
+        Players.Sort([bSkullHunt](const AERPlayerState& A, const AERPlayerState& B)
         {
+            if (bSkullHunt && A.Skulls != B.Skulls) return A.Skulls > B.Skulls;
             if (A.Kills != B.Kills) return A.Kills > B.Kills;
             if (A.Deaths != B.Deaths) return A.Deaths < B.Deaths;
             return A.GetPlayerName() < B.GetPlayerName();
@@ -143,12 +148,13 @@ void AERHUD::DrawScoreboard(const AERGameState* GS)
         DrawHUDTextAnchored(FString::FromInt(bAlpha ? GS->AlphaScore : GS->OmegaScore), FVector2D(Left + PanelWidth - 16.f * S, HeaderMid),
             FLinearColor::White, 1.6f, FVector2D(1,.5f));
         // Column captions; numbers are centred under their captions.
-        const float Columns[] = {226.f, 266.f, 306.f};
+        const float Columns[] = {bSkullHunt ? 193.f : 226.f, bSkullHunt ? 223.f : 266.f, bSkullHunt ? 253.f : 306.f, 294.f};
+        const int32 ColumnCount = bSkullHunt ? 4 : 3;
         const float CaptionY = Top + HeaderHeight + ColumnHeight * .5f;
         const FLinearColor Caption(.6f,.64f,.7f);
         DrawHUDTextAnchored(TEXT("PLAYER"), FVector2D(Left + 18.f * S, CaptionY), Caption, .6f, FVector2D(0,.5f));
-        const TCHAR* Captions[] = {TEXT("K"), TEXT("D"), TEXT("TK")};
-        for (int32 I = 0; I < 3; ++I)
+        const TCHAR* Captions[] = {TEXT("K"), TEXT("D"), TEXT("TK"), TEXT("SKULLS")};
+        for (int32 I = 0; I < ColumnCount; ++I)
             DrawHUDTextAnchored(Captions[I], FVector2D(Left + Columns[I] * S, CaptionY), Caption, .6f, FVector2D(.5f,.5f));
         float Y = Top + HeaderHeight + ColumnHeight;
         if (Players.IsEmpty())
@@ -161,12 +167,12 @@ void AERHUD::DrawScoreboard(const AERGameState* GS)
             else if ((Index % 2) != 0) DrawRect(FLinearColor(1,1,1,.035f), Left, Y, PanelWidth, RowHeight);
             DrawRect(Color.CopyWithNewOpacity(bSelf ? 1.f : .7f), Left, Y + 3.f * S, 4.f * S, RowHeight - 6.f * S);
             const float Mid = Y + RowHeight * .5f;
-            const FVector2D NameSize = DrawHUDTextAnchored(ShortName(State->GetPlayerName(), State->IsABot() ? 14 : 18), FVector2D(Left + 18.f * S, Mid),
+            const FVector2D NameSize = DrawHUDTextAnchored(ShortName(State->GetPlayerName(), (State->IsABot() ? 14 : 18) - (bSkullHunt ? 3 : 0)), FVector2D(Left + 18.f * S, Mid),
                 bSelf ? FLinearColor::White : FLinearColor(.88f,.9f,.94f), .8f, FVector2D(0,.5f));
             if (State->IsABot())
                 DrawHUDTextAnchored(TEXT("BOT"), FVector2D(Left + 24.f * S + NameSize.X, Mid), FLinearColor(.55f,.58f,.64f), .5f, FVector2D(0,.5f));
-            const int32 Values[] = {State->Kills, State->Deaths, State->TeamKills};
-            for (int32 I = 0; I < 3; ++I)
+            const int32 Values[] = {State->Kills, State->Deaths, State->TeamKills, State->Skulls};
+            for (int32 I = 0; I < ColumnCount; ++I)
                 DrawHUDTextAnchored(FString::FromInt(Values[I]), FVector2D(Left + Columns[I] * S, Mid),
                     I == 2 && Values[I] > 0 ? FLinearColor(1.f,.8f,.3f) : FLinearColor::White, .8f, FVector2D(.5f,.5f));
             Y += RowHeight;

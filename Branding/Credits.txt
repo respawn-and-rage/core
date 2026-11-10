@@ -65,6 +65,11 @@ Changes: static mesh conversion, centering and rescaling, lid and lock aligned c
 https://skfb.ly/6xwPJ
 https://creativecommons.org/licenses/by/4.0/
 
+SKULL HUNT
+Pirate Gold Coins - Hand-Painted — Efthalía Estasmalteadas.
+One coin isolated, oriented upright, rescaled and tinted with the team colours.
+https://sketchfab.com/3d-models/pirate-gold-coins-hand-painted-60c38b94e08342aca0e419a43f2676c8
+
 EFFECTS
 Bullet Interactive Smoke — Theos.
 Adapted Niagara smoke simulation, materials and integration.

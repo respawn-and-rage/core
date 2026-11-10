@@ -3,8 +3,8 @@
 
 namespace ERNetworkProtocol
 {
-// Packed fire intent, shot acknowledgments and per-owner cell recovery.
-constexpr uint32 Version=1;
+// Match mode voting, skull actors and replicated skull counts.
+constexpr uint32 Version=2;
 inline FString BuildSignature(const FString& Build){return FString::Printf(TEXT("%s-net%u"),*Build,Version);}
 }
 

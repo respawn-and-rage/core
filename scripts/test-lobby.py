@@ -11,6 +11,7 @@ parser.add_argument('--industrial', action='store_true', help='Vote for the gene
 parser.add_argument('--village', action='store_true', help='Vote for Village and verify its generated geometry on every peer')
 parser.add_argument('--rooms', action='store_true', help='Vote for Rooms and verify its generated bases on every peer')
 parser.add_argument('--map-sizing', action='store_true', help='Creation-time sizing, frozen lobby snapshot, independent capacity and travel descriptor')
+parser.add_argument('--skull-hunt', action='store_true', help='Verify the mode vote and Skull Hunt scoring over LAN')
 parser.add_argument('--timeout', action='store_true', help='Also check the real 30-second no-server timeout')
 parser.add_argument('--settings', action='store_true', help='Check fullscreen defaults and preferences across two graphical launches')
 parser.add_argument('--focus', action='store_true', help='Graphical foreground fullscreen/menu/game mouse capture recovery probe')
@@ -21,11 +22,13 @@ if sum((args.industrial, args.village, args.rooms)) > 1:
 voted_map = 4 if args.rooms else 5 if args.village else 0 if args.industrial else 2
 root = Path(__file__).resolve().parents[1]
 exe = Path(os.environ.get('UE_ROOT', '/Users/Shared/Epic Games/UE_5.8')) / 'Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor'
-out = root / 'Saved/Testing/Lobby'
+out = root / 'Saved/Testing' / ('SkullHunt' if args.skull_hunt else 'Lobby')
 out.mkdir(parents=True, exist_ok=True)
 common = [str(exe), str(root / 'RespawnAndRage.uproject'), '-game', '-nosound', '-unattended', '-NoSplash', '-Multiprocess', '-stdout', '-FullStdOutLogOutput', '-ExecCmds=t.MaxFPS 60,sg.GlobalIlluminationQuality 0,sg.ReflectionQuality 0,sg.ShadowQuality 1']
 if args.map_sizing:
     common.append('-ERMapSizingLobbyTest')
+if args.skull_hunt:
+    common.append('-ERSkullHuntProbe')
 common.append(f'-ERLobbyProbeMap={voted_map}')
 children, handles = [], []
 
@@ -91,6 +94,9 @@ try:
         assert 'one_of_three_ready_does_not_start' in log('host')
         assert f'ER_LOBBY_START humans=3 ready=2 map={voted_map}' in log('host')
         assert all('ER_LAN_FOUND' in log('client' + str(i)) for i in (1, 2))
+        if args.skull_hunt:
+            for process in [*clients, host]:
+                assert process.wait(timeout=20) == 0, f'Unreal process {process.pid} failed during shutdown'
         if args.timeout:
             timeout = launch('timeout', ['-nullrhi', '-ERDiscoveryPort=17948', '-ERLobbyProbeTimeout'])
             timeout.wait(timeout=65)

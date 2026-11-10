@@ -4,6 +4,9 @@
 #include "ERPlayerController.h"
 #include "ERCharacter.h"
 #include "ERMatch.h"
+#include "ERSkull.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "ERMapCatalog.h"
 #include "ERWeapon.h"
 #include "ERBlockRoom.h"
@@ -165,6 +168,7 @@ void AERLobbyProbe::Tick(float DeltaTime)
         }
         return;
     }
+    const bool bSkullHuntProbe = FParse::Param(FCommandLine::Get(), TEXT("ERSkullHuntProbe"));
     const bool Host = FParse::Param(FCommandLine::Get(), TEXT("ERLobbyProbeHost"));
     const bool Timeout = FParse::Param(FCommandLine::Get(), TEXT("ERLobbyProbeTimeout"));
     int32 VotedMap = 2; FParse::Value(FCommandLine::Get(), TEXT("ERLobbyProbeMap="), VotedMap);
@@ -178,7 +182,7 @@ void AERLobbyProbe::Tick(float DeltaTime)
         {
             Phase = 1;
             GI->LocalName = Host ? TEXT("LobbyHost") : FString::Printf(TEXT("LobbyClient%d"), Client);
-            if (Host) { if(FParse::Param(FCommandLine::Get(),TEXT("ERMapSizingLobbyTest")))GI->ServerRules.Set("Map.ExpectedTeamSize",3); GI->AlphaBots = 1; GI->OmegaBots = 0; GI->StartLANServer(); }
+            if (Host) { if(FParse::Param(FCommandLine::Get(),TEXT("ERMapSizingLobbyTest")))GI->ServerRules.Set("Map.ExpectedTeamSize",3); GI->AlphaBots = bSkullHuntProbe ? 0 : 1; GI->OmegaBots = 0; GI->StartLANServer(); }
             else GI->FindLANServer();
         }
         if (Timeout && Phase == 1 && !GI->IsSearchingLAN())
@@ -210,6 +214,7 @@ void AERLobbyProbe::Tick(float DeltaTime)
                 Check(GS->ServerRules.Get("Map.ExpectedTeamSize")==3,TEXT("draft_changes_do_not_mutate_lobby_snapshot"));
             }
             PC->ServerLobbyVote(VotedMap);
+            if (bSkullHuntProbe) PC->ServerLobbyMatchModeVote(int32(Host || Client == 1 ? EERMatchMode::SkullHunt : EERMatchMode::TeamDeathmatch));
             Phase = 1; Deadline = Now + 1;
         }
         if (Phase == 1 && Now > Deadline && Host && GS->PlayerArray.Num() == 3)
@@ -230,6 +235,12 @@ void AERLobbyProbe::Tick(float DeltaTime)
         else if (Phase == 2 && Client == 1 && Now > Deadline)
         { PC->ServerLobbyReady(true); Phase = 3; }
         return;
+    }
+    if (Phase >= 80 && Phase < 90)
+    {
+        if (!TickSkullHunt(*PC, *GS, Now)) return;
+        UE_LOG(LogTemp, Display, TEXT("ER_LOBBY_PROBE_COMPLETE result=%s"), Failed ? TEXT("FAIL") : TEXT("PASS"));
+        Phase = 90; Deadline = Now + (Host ? 8 : 2);
     }
     if (!PC->IsMenuLevel() && Now > 4 && Phase < 90)
     {
@@ -253,6 +264,8 @@ void AERLobbyProbe::Tick(float DeltaTime)
         if (ERMaps::At(VotedMap).Procedural) Check(true, TEXT("generated_geometry_ready_on_all_peers"));
         Check(GetWorld()->GetMapName().Contains(FPaths::GetBaseFilename(ERMaps::At(VotedMap).Package)), TEXT("voted_map_loaded"));
         Check(PS->Team == (Host ? EERTeam::Alpha : EERTeam::Omega), TEXT("team_survives_travel"));
+        Check(GS->MatchMode == (bSkullHuntProbe ? EERMatchMode::SkullHunt : EERMatchMode::TeamDeathmatch), TEXT("match_mode_survives_travel"));
+        if (bSkullHuntProbe) { Phase = 80; Deadline = Now + 2; return; }
         if(FParse::Param(FCommandLine::Get(),TEXT("ERMapSizingLobbyTest")))
         {
             const auto* Pawn=Cast<AERCharacter>(PC->GetPawn());
@@ -298,3 +311,68 @@ void AERLobbyProbe::Tick(float DeltaTime)
     if (Phase == 90 && Now > Deadline) FPlatformMisc::RequestExitWithStatus(false, Failed ? 1 : 0);
 #endif
 }
+
+#if !UE_BUILD_SHIPPING
+bool AERLobbyProbe::TickSkullHunt(AERPlayerController& PC, const AERGameState& State, double Now)
+{
+    if (Failed) return true;
+    TActorIterator<AERSkull> Skull(GetWorld());
+    if (!HasAuthority())
+    {
+        if (Phase == 80 && Skull)
+        {
+            const auto* Coin = Skull->FindComponentByClass<UStaticMeshComponent>();
+            Check(Coin && Coin->GetStaticMesh(), TEXT("skull_mesh_replicates"));
+            Phase = 81;
+        }
+        if (State.AlphaScore < 1) return false;
+        const auto* HostState = State.PlayerArray.FindByPredicate([](const APlayerState* Item)
+            { return Item->GetPlayerName() == TEXT("LobbyHost"); });
+        const auto* HostStats = HostState ? Cast<AERPlayerState>(HostState->Get()) : nullptr;
+        if (!HostStats || HostStats->Skulls < 1) return false;
+        Check(Phase == 81 && HostStats->Kills == 2 && State.OmegaScore == 0, TEXT("skulls_and_kills_replicate_separately"));
+        return true;
+    }
+
+    auto* HostPawn = Cast<AERCharacter>(PC.GetPawn());
+    const auto* HostStats = PC.GetPlayerState<AERPlayerState>();
+    AERCharacter* Rivals[2] = {};
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        auto* Remote = It->Get();
+        const auto* PS = Remote ? Remote->GetPlayerState<AERPlayerState>() : nullptr;
+        if (!PS) continue;
+        if (PS->GetPlayerName() == TEXT("LobbyClient1")) Rivals[0] = Cast<AERCharacter>(Remote->GetPawn());
+        if (PS->GetPlayerName() == TEXT("LobbyClient2")) Rivals[1] = Cast<AERCharacter>(Remote->GetPawn());
+    }
+    if (!HostPawn || !HostStats || !Rivals[0] || !Rivals[1] || !State.IsMatchInProgress() || Now < Deadline) return false;
+    if (Phase == 82)
+    {
+        const auto* AllyStats = Rivals[1]->GetPlayerState<AERPlayerState>();
+        Check(!Skull && State.OmegaScore == 0 && AllyStats && AllyStats->Skulls == 0, TEXT("friendly_skull_denied_without_points"));
+    }
+    if (Phase == 80 || Phase == 82)
+    {
+        auto* Victim = Rivals[Phase == 80 ? 0 : 1];
+        if (Victim->Health->IsProtected()) return false;
+        Victim->Health->ReceiveDamage(10000.f, &PC, 0.f);
+        Check(Victim->Health->bDead && State.AlphaScore == 0 && HostStats->Skulls == 0, TEXT("enemy_kill_grants_no_points"));
+    }
+    else if (Phase == 81 || Phase == 83)
+    {
+        Check(static_cast<bool>(Skull), TEXT("enemy_kill_drops_skull"));
+        if (Failed) return true;
+        auto* Collector = Phase == 81 ? Rivals[1] : HostPawn;
+        const FVector Target = Skull->GetActorLocation() + FVector(0, 0, Collector->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() - 21);
+        Check(Collector->TeleportTo(Target, Collector->GetActorRotation(), false, true), TEXT("collector_steps_onto_skull"));
+    }
+    if (Phase == 84)
+    {
+        Check(!Skull && State.AlphaScore == 1 && HostStats->Skulls == 1 && HostStats->Kills == 2, TEXT("enemy_skull_scores_once"));
+        return true;
+    }
+    ++Phase;
+    Deadline = Now + 1;
+    return false;
+}
+#endif

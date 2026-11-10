@@ -248,7 +248,7 @@ void AERPlayerController::ShowMenu(bool bShow)
                 int32 Humans = 0, Ready = 0;
                 if (GS) for (auto Item : GS->PlayerArray) if (const auto* PS = Cast<AERPlayerState>(Item); PS && !PS->IsABot() && !PS->IsInactive())
                 { ++Humans; Ready += PS->bLobbyReady; }
-                return FText::FromString(GS && GS->bLobbyStarting ? TEXT("Starting match · generating map...") : FString::Printf(TEXT("%s · %d / %d players    |    READY %d / %d needed"), GS && GS->bOnline ? TEXT("INTERNET") : TEXT("LAN"), Humans, GS ? GS->ServerMaxPlayers : GI->MaxPlayers, Ready, ERLobby::RequiredReady(Humans,ERServer::Get(GetWorld(),"Match.ReadyPercent"))));
+                return FText::FromString(GS && GS->bLobbyStarting ? FString::Printf(TEXT("Starting %s · generating map..."), ERMatchModes::Label(GS->MatchMode)) : FString::Printf(TEXT("%s · %d / %d players    |    READY %d / %d needed"), GS && GS->bOnline ? TEXT("INTERNET") : TEXT("LAN"), Humans, GS ? GS->ServerMaxPlayers : GI->MaxPlayers, Ready, ERLobby::RequiredReady(Humans,ERServer::Get(GetWorld(),"Match.ReadyPercent"))));
             });
             Add(Panel, Status);
             Add(Panel,SNew(STextBlock).Font(MenuFont(22)).Text_Lambda([this]()
@@ -274,6 +274,27 @@ void AERPlayerController::ShowMenu(bool bShow)
                     return FText::FromString(Roster.IsEmpty() ? TEXT("No players yet") : Roster.TrimEnd());
                 })]]);
             }
+            Add(Teams, Text(TEXT("Vote for the match mode"), 25));
+            auto ModeButtons = SNew(SHorizontalBox);
+            for (EERMatchMode MatchMode : {EERMatchMode::TeamDeathmatch, EERMatchMode::SkullHunt})
+            {
+                const int32 Vote = int32(MatchMode);
+                ModeButtons->AddSlot().AutoWidth().Padding(0, 0, 8, 0)
+                    [SNew(SButton).ContentPadding(7)
+                    .OnClicked_Lambda([this, Vote]() { ServerLobbyMatchModeVote(Vote); return FReply::Handled(); })
+                    [SNew(STextBlock).Font(MenuFont(23)).Text_Lambda([this, MatchMode, Vote]()
+                    {
+                        int32 Votes = 0;
+                        if (const auto* GS = GetWorld()->GetGameState<AERGameState>()) for (const APlayerState* Item : GS->PlayerArray)
+                            if (const auto* PS = Cast<AERPlayerState>(Item); PS && PS->CanVoteInLobby() && PS->MatchModeVote == Vote) ++Votes;
+                        const auto* PS = GetPlayerState<AERPlayerState>();
+                        return FText::FromString(FString::Printf(TEXT("%s   (%d)%s"), ERMatchModes::Label(MatchMode),
+                            Votes, PS && PS->MatchModeVote == Vote ? TEXT("  ✓") : TEXT("")));
+                    })]];
+            }
+            Add(Teams, ModeButtons);
+            Add(Teams, Text(TEXT("Collect enemy skulls for points. Clear friendly skulls to deny points."), 20));
+            Add(Teams, Text(TEXT("Team Deathmatch wins ties and starts if nobody votes."), 20));
             auto Actions = SNew(SVerticalBox);
             Add(Actions, Button(TEXT("Player"), Go(6)));
             Add(Actions, Button(TEXT("Server rules"),Go(10)));

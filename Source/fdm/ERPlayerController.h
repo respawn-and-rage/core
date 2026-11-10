@@ -172,6 +172,7 @@ public:
     UFUNCTION(Server, Reliable) void ServerChangeTeam(int32 Team, bool Suicide);
     UFUNCTION(Server, Reliable) void ServerLobbyTeam(int32 Team);
     UFUNCTION(Server, Reliable) void ServerLobbyVote(int32 Map);
+    UFUNCTION(Server, Reliable) void ServerLobbyMatchModeVote(int32 Mode);
     UFUNCTION(Server, Reliable) void ServerLobbyReady(bool Ready);
     UFUNCTION(Server, Reliable) void ServerSetSupplies(int32 Magazines, int32 HE, int32 Smoke, int32 Stun);
     UFUNCTION(Client, Reliable) void ClientFlash(float Strength);

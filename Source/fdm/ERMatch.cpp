@@ -16,6 +16,7 @@
 #include "ERReconProbe.h"
 #include "ERCharacter.h"
 #include "ERCorpse.h"
+#include "ERSkull.h"
 #include "ERTeamGallery.h"
 #include "ERSmokeCloud.h"
 #include "ERPlayerController.h"
@@ -64,6 +65,7 @@ void AERPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(AERPlayerState, bLobbyReady); DOREPLIFETIME(AERPlayerState, MapVote);
+    DOREPLIFETIME(AERPlayerState, MatchModeVote); DOREPLIFETIME(AERPlayerState, Skulls);
     DOREPLIFETIME(AERPlayerState, SpareMagazines); DOREPLIFETIME(AERPlayerState, HECount);
     DOREPLIFETIME(AERPlayerState, SmokeCount); DOREPLIFETIME(AERPlayerState, StunCount);
     DOREPLIFETIME(AERPlayerState, PendingTeam); DOREPLIFETIME(AERPlayerState, Team); DOREPLIFETIME(AERPlayerState, Kills);
@@ -98,6 +100,7 @@ void AERGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
     DOREPLIFETIME(AERGameState, bOnline);
     DOREPLIFETIME(AERGameState, bLobby); DOREPLIFETIME(AERGameState, bLobbyStarting);
     DOREPLIFETIME(AERGameState, LobbyAlphaBots); DOREPLIFETIME(AERGameState, LobbyOmegaBots);
+    DOREPLIFETIME(AERGameState, MatchMode);
     DOREPLIFETIME(AERGameState, AlphaScore); DOREPLIFETIME(AERGameState, OmegaScore);
     DOREPLIFETIME(AERGameState, MatchEndServerTime); DOREPLIFETIME(AERGameState, RestartServerTime);
     DOREPLIFETIME(AERGameState, Winner); DOREPLIFETIME(AERGameState, CountdownEndServerTime);
@@ -141,6 +144,8 @@ void AERGameMode::InitGame(const FString& MapName, const FString& Options, FStri
     MatchDuration=Rules.Get("Match.Duration");
     bLobby = MapName.Contains(TEXT("L_MainMenu")) && UGameplayStatics::HasOption(Options, TEXT("ERLobby"));
     bUseSeamlessTravel = bLobby;
+    if (!bLobby && UGameplayStatics::GetIntOption(Options, TEXT("ERMatchMode"), 0) == int32(EERMatchMode::SkullHunt))
+        MatchMode = EERMatchMode::SkullHunt;
     MaxHumanPlayers = ERServer::ValidMaxPlayers(UGameplayStatics::GetIntOption(Options, TEXT("ERMaxPlayers"), ERServer::DefaultMaxPlayers));
     // Set before PreLogin, including initial load and seamless travel.
     if (GameSession) GameSession->MaxPlayers = MaxHumanPlayers;
@@ -242,7 +247,7 @@ void AERGameMode::FillBots()
 void AERGameMode::BeginPlay()
 {
     if(auto* State=GetGameState<AERGameState>())
-    { State->ServerRules=ERServer::Rules(GetWorld());State->ServerRules.Normalize();State->ServerRules.Ready=true; }
+    { State->MatchMode = MatchMode; State->ServerRules=ERServer::Rules(GetWorld());State->ServerRules.Normalize();State->ServerRules.Ready=true; }
     Super::BeginPlay();
     if(auto* GI=GetGameInstance<UERGameInstance>())
     {
@@ -513,7 +518,7 @@ void AERGameMode::HandleMatchHasStarted()
     State->Winner = EERTeam::None;
     State->CountdownEndServerTime = 0;
     State->MatchEndServerTime = State->GetServerWorldTimeSeconds() + MatchDuration;
-    for (APlayerState* Item : State->PlayerArray) if (auto* PS = Cast<AERPlayerState>(Item)) PS->Kills = PS->Deaths = PS->TeamKills = 0;
+    for (APlayerState* Item : State->PlayerArray) if (auto* PS = Cast<AERPlayerState>(Item)) PS->Kills = PS->Deaths = PS->TeamKills = PS->Skulls = 0;
     GetWorld()->GetSubsystem<UERGameplayMessages>()->MatchStarted();
     UE_LOG(LogTemp, Display, TEXT("ER_MATCH_STARTED players=%d duration=%.1f"), GetNumPlayers(), MatchDuration);
 }
@@ -545,6 +550,7 @@ void AERGameMode::FinishRound()
     GetWorld()->GetSubsystem<UERGameplayMessages>()->MatchFinished();
     for (TActorIterator<AERWeapon> It(GetWorld()); It; ++It) It->Cancel();
     for (TActorIterator<AERProjectile> It(GetWorld()); It; ++It) It->Destroy();
+    for (TActorIterator<AERSkull> It(GetWorld()); It; ++It) It->Destroy();
 }
 void AERGameMode::ResetRound(bool AllowMapTravel)
 {
@@ -588,7 +594,7 @@ void AERGameMode::ResetRound(bool AllowMapTravel)
         if (APawn* Old = Controller->GetPawn()) { Controller->UnPossess(); Old->Destroy(); }
         if (PC) { PC->bAwaitingRespawn = false; PC->RespawnAllowedAt = 0; }
         if (Bot) Bot->ResetLife();
-        if (auto* PS = Controller->GetPlayerState<AERPlayerState>()) PS->Kills = PS->Deaths = PS->TeamKills = 0;
+        if (auto* PS = Controller->GetPlayerState<AERPlayerState>()) PS->Kills = PS->Deaths = PS->TeamKills = PS->Skulls = 0;
     }
     // Production archetypes start the next round with a fresh deterministic
     // seed. Publish the new epoch before spawning anyone into its collision.
@@ -637,15 +643,19 @@ void AERGameMode::RecordDeath(AERCharacter* Victim, AController* Killer, const F
         auto& Deaths = SpawnMemory->Deaths[VictimPS->Team == EERTeam::Omega ? 1 : 0];
         SpawnMemory->Add(Deaths, Victim->GetActorLocation(), GetWorld()->GetTimeSeconds());
     }
+    bool bDropSkull = false;
     if (VictimPS && KillerPS && KillerPS != VictimPS)
     {
-        // Enemy kills add Match.KillPoints; teamkills apply Match.TeamKillPoints (default -1)
-        // to the killer's team, which may go below zero.
         const bool bTeamKill = VictimPS->Team == KillerPS->Team;
         if (bTeamKill) ++KillerPS->TeamKills; else ++KillerPS->Kills;
-        const int32 Points = FMath::RoundToInt32(ERServer::Get(GetWorld(), bTeamKill ? FName("Match.TeamKillPoints") : FName("Match.KillPoints")));
-        if (KillerPS->Team == EERTeam::Alpha) Scores->AlphaScore += Points;
-        else if (KillerPS->Team == EERTeam::Omega) Scores->OmegaScore += Points;
+        if (MatchMode == EERMatchMode::SkullHunt)
+            bDropSkull = !bTeamKill && KillerPS->Team != EERTeam::None && VictimPS->Team != EERTeam::None;
+        else
+        {
+            const int32 Points = FMath::RoundToInt32(ERServer::Get(GetWorld(), bTeamKill ? FName("Match.TeamKillPoints") : FName("Match.KillPoints")));
+            if (KillerPS->Team == EERTeam::Alpha) Scores->AlphaScore += Points;
+            else if (KillerPS->Team == EERTeam::Omega) Scores->OmegaScore += Points;
+        }
     }
     if (auto* PC = Cast<AERPlayerController>(Victim->Controller))
     {
@@ -658,6 +668,7 @@ void AERGameMode::RecordDeath(AERCharacter* Victim, AController* Killer, const F
         Bot->RespawnAllowedAt = GetWorld()->GetTimeSeconds()+ERServer::Get(GetWorld(),"Health.Respawn");
     }
     GetWorld()->GetSubsystem<UERGameplayMessages>()->ScoresChanged(OldAlpha, OldOmega);
+    if (bDropSkull && IsMatchInProgress()) DropSkull(*Victim, VictimPS->Team);
     CheckMatch();
 }
 void AERGameMode::RequestRespawn(AController* Controller)

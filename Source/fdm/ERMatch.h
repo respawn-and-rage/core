@@ -11,6 +11,14 @@
 UENUM(BlueprintType)
 enum class EERTeam : uint8 { None, Alpha, Omega };
 
+UENUM(BlueprintType)
+enum class EERMatchMode : uint8 { TeamDeathmatch, SkullHunt };
+
+namespace ERMatchModes
+{
+    const TCHAR* Label(EERMatchMode Mode);
+}
+
 UCLASS()
 class FDM_API AERPlayerState : public APlayerState
 {
@@ -21,6 +29,7 @@ public:
     UPROPERTY(Replicated, BlueprintReadOnly) int32 Kills = 0;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 Deaths = 0;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 TeamKills = 0;
+    UPROPERTY(Replicated, BlueprintReadOnly) int32 Skulls = 0;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 ActiveClaymores = 0;
     UPROPERTY(Replicated, BlueprintReadOnly) FName LoadoutPreset = "rifleman";
     UPROPERTY(Replicated, BlueprintReadOnly) FName LoadoutVariant = "offense";
@@ -30,6 +39,8 @@ public:
     UPROPERTY(Replicated, BlueprintReadOnly) int32 ActiveSkin = 0;
     UPROPERTY(Replicated, BlueprintReadOnly) bool bLobbyReady = false;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 MapVote = -1;
+    UPROPERTY(Replicated, BlueprintReadOnly) int32 MatchModeVote = -1;
+    bool CanVoteInLobby() const { return !IsABot() && !IsInactive() && !IsOnlyASpectator(); }
     UPROPERTY(Replicated, BlueprintReadOnly) int32 SpareMagazines = -1;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 HECount = -1;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 SmokeCount = -1;
@@ -80,6 +91,7 @@ public:
     UPROPERTY(Replicated, BlueprintReadOnly) bool bLobbyStarting = false;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 LobbyAlphaBots = 0;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 LobbyOmegaBots = 0;
+    UPROPERTY(Replicated, BlueprintReadOnly) EERMatchMode MatchMode = EERMatchMode::TeamDeathmatch;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 AlphaScore = 0;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 OmegaScore = 0;
     UPROPERTY(Replicated, BlueprintReadOnly) double MatchEndServerTime = 0;
@@ -110,6 +122,7 @@ class FDM_API AERGameMode : public AGameMode
 public:
     AERGameMode();
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Recon") TSubclassOf<class AERReconDirector> ReconClass;
+    UPROPERTY(EditDefaultsOnly, Category="Skull Hunt") TSubclassOf<class AERSkull> SkullClass;
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite) int32 ScoreLimit = 50;
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite) float MatchDuration = 600;
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Training") TSubclassOf<class AERCharacter> TrainingTargetPawnClass;
@@ -136,6 +149,10 @@ public:
     void CheckLobby();
     static FString SanitizeName(const FString& Name);
 private:
+    friend class AERSkull;
+    void DropSkull(const AERCharacter& Victim, EERTeam Team);
+    void CollectSkull(AERPlayerState& Collector);
+    EERMatchMode MatchMode = EERMatchMode::TeamDeathmatch;
     friend class AERIndustrialMapProbe;
     friend class AERCapacityProbe;
     int32 MaxHumanPlayers = ERServer::DefaultMaxPlayers;
