@@ -238,9 +238,9 @@ FString AERBlockRoom::GetStatistics() const
     int32 Quads=0,Boxes=0,Debris=0,Physics=0; for (int32 Q:ChunkQuads) Quads+=Q; for (int32 B:ChunkBoxes) Boxes+=B;
     for(const auto& Entry:SkinMeshes)if(Entry.Value){Entry.Value->ProcessMesh([&](const UE::Geometry::FDynamicMesh3& M){Quads+=FMath::DivideAndRoundUp(M.TriangleCount(),2);});Boxes+=Entry.Value->GetSimpleCollisionShapes().BoxElems.Num();}
     GetDebrisCounts(Debris,Physics);
-    return FString::Printf(TEXT("%s resolution=%.0fcm cells=%lld alive=%lld destroyed=%lld detached=%lld panels=%d chunks=%d quads=%d boxes=%d generation=%.2fms update=%.2fms chunks_updated=%d mesh=%.2fms collision=%.2fms debris=%d physics=%d support=%.2fms pending=%d"),
+    return FString::Printf(TEXT("%s resolution=%.0fcm cells=%lld alive=%lld destroyed=%lld detached=%lld panels=%d chunks=%d groups=%d quads=%d boxes=%d generation=%.2fms update=%.2fms chunks_updated=%d mesh=%.2fms collision=%.2fms debris=%d physics=%d support=%.2fms pending=%d"),
         *GetLayoutStatistics(), CellSettings.CellSize, CellWorld.GetCellCount(), CellWorld.GetCellCount()-CellWorld.GetRemovedCount(), CellWorld.GetRemovedCount()-CellWorld.GetDetachedCount(), CellWorld.GetDetachedCount(),
-        CellWorld.GetPanels().Num(), CellWorld.GetChunks().Num(), Quads, Boxes, GenerationMs, LastUpdateMs, LastGroupsRebuilt, UpdateProfile.MeshMs, UpdateProfile.CollisionMs, Debris, Physics, LastSupportMs, bSupportPending);
+        CellWorld.GetPanels().Num(), CellWorld.GetChunks().Num(), CellGroupChunks.Num()+SkinMeshes.Num(), Quads, Boxes, GenerationMs, LastUpdateMs, LastGroupsRebuilt, UpdateProfile.MeshMs, UpdateProfile.CollisionMs, Debris, Physics, LastSupportMs, bSupportPending);
 }
 FERBlockMemoryProfile AERBlockRoom::GetMemoryProfile() const
 {
@@ -253,15 +253,20 @@ FERBlockMemoryProfile AERBlockRoom::GetMemoryProfile() const
     Result.LogicalBytes=CellWorld.GetAllocatedBytes(); Result.LayoutBytes=GetLayoutBytes();
     Result.MappingBytes=CellMeshes.GetAllocatedSize()+CellComponentChunks.GetAllocatedSize()+ChunkQuads.GetAllocatedSize()+ChunkBoxes.GetAllocatedSize()+ImpactDecals.GetAllocatedSize()+ImpactEmitters.GetAllocatedSize()+OwnedBursts.GetAllocatedSize();
     Result.Cells=CellWorld.GetCellCount(); Result.RemovedCells=CellWorld.GetRemovedCount();
-    for (int32 I=0;I<CellMeshes.Num();++I)
+    Result.MappingBytes+=ChunkGroups.GetAllocatedSize()+CellGroupChunks.GetAllocatedSize()+CellGroupBoxes.GetAllocatedSize()+ChunkFaceCache.GetAllocatedSize()+ChunkBoxCache.GetAllocatedSize();
+    for (const auto& Faces:ChunkFaceCache) Result.MappingBytes+=Faces.GetAllocatedSize();
+    for (const auto& Boxes:ChunkBoxCache) Result.MappingBytes+=Boxes.GetAllocatedSize();
+    for (const auto& Members:CellGroupChunks)
     {
-        if (!CellMeshes[I]) continue;
+        Result.MappingBytes+=Members.GetAllocatedSize();
+        auto* Mesh=CellMeshes[Members[0]].Get();
+        if (!Mesh) continue;
         // CPU mesh copy; GPU vertex/index buffers are outside tracked memory.
-        FResourceSizeEx Size(EResourceSizeMode::Exclusive); CellMeshes[I]->GetResourceSizeEx(Size);
+        FResourceSizeEx Size(EResourceSizeMode::Exclusive); Mesh->GetResourceSizeEx(Size);
         Result.InstanceResourceBytes+=Size.GetTotalMemoryBytes();
-        CellMeshes[I]->ProcessMesh([&Result](const UE::Geometry::FDynamicMesh3& Mesh){Result.InstanceResourceBytes+=Mesh.GetByteCount();});
-        if (CellMeshes[I]->GetBodyInstance() && CellMeshes[I]->GetBodyInstance()->IsValidBodyInstance()) ++Result.CollisionBodies;
-        Result.Quads+=ChunkQuads[I]; Result.CollisionBoxes+=ChunkBoxes[I];
+        Mesh->ProcessMesh([&Result](const UE::Geometry::FDynamicMesh3& M){Result.InstanceResourceBytes+=M.GetByteCount();});
+        if (Mesh->GetBodyInstance() && Mesh->GetBodyInstance()->IsValidBodyInstance()) ++Result.CollisionBodies;
+        for (int32 Chunk:Members) { Result.Quads+=ChunkQuads[Chunk]; Result.CollisionBoxes+=ChunkBoxes[Chunk]; }
     }
     Result.MappingBytes+=SkinMeshes.GetAllocatedSize()+SkinComponentPanels.GetAllocatedSize()+DirtySkinPanels.GetAllocatedSize();
     Result.MappingBytes+=SkinClipCaches.GetAllocatedSize();
@@ -449,8 +454,7 @@ void AERBlockRoom::SetMapCollision(bool Enabled)
     TInlineComponentArray<UPrimitiveComponent*> Components(this);
     for(auto* C:Components)
     {C->SetCollisionEnabled(Enabled && !C->ComponentHasTag(TEXT("ERTemplateVisual")) ? ECollisionEnabled::QueryAndPhysics:ECollisionEnabled::NoCollision);C->SetVisibility(Enabled);}
-    // Empty chunks keep no query collision.
-    if(Enabled)for(int32 I=0;I<CellMeshes.Num();++I)if(CellMeshes[I] && ChunkBoxes.IsValidIndex(I) && ChunkBoxes[I]==0)CellMeshes[I]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    if(Enabled)DisableEmptyCellCollision();
 }
 void AERBlockRoom::OnRep_Network()
 {

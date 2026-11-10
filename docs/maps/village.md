@@ -12,11 +12,18 @@ have flat sheet-metal roofs.
 
 - Seeded terrain is flat, raised in the centre or lower in the centre. Elevation changes only along the base-to-base axis; both bases have equal elevation. Level foundations carry central blocks, spawn structures and stairs; gentle ramps and level side-wall landings connect them. Ground shelters stay on level terrain.
 - Ground blocks enclose three timber bays around two dogleg passages; bays are breachable.
+  Passages are 3m wide with a 4m diagonal bend; one straight line across a block stays blocked.
+- Huts have 220cm doors and keep 1.8m of deck in front of each long wall; balcony cover has no
+  side returns. Block stairs are 2m wide, gallery and lookout stairs 1.8m.
+- Floors are boards: plank runs clear of ladder wells are one panel each. Ladders are fixed
+  instanced timber.
 - Each base has a variant (gallery, covered porch or barracks), a corner lookout, a side shack
   with roof access. Lateral walls 240cm, with standing bypasses recorded in `VillageSideWalls`
   and `VillageSideBypasses`.
-- Bases have a 3m timber screen in front of their spawn bank, with both
-  gallery stairs accessible around its ends.
+- Spawn galleries are 5.6–6.6m deep with starts 2.4m apart in two rows 1.4m apart. Bases have
+  a 12m wide, 3m timber screen in front of their spawn bank, with both gallery stairs
+  accessible around its ends; the barracks variant leaves both stair landings beside it and 1.4m
+  in front of its door.
 - Nothing may stand unsupported on a fresh map: decks drop plank and beam stubs beside ladder
   wells, and imported storage shells hold their lowest 30cm through `AnchorHeight`.
 - 3v3+ uses at least two blocks; paired 4.8×2.4m L shelters meet a ground-cover quota that upper

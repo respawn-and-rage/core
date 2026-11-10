@@ -38,11 +38,19 @@ Recipes live in `Art/MapTemplates`. Reproduce a layout with
   rule is not. Exhausted retries fail closed. Destruction may open lines later.
 - Walkable decks, roofs and treads use solid surfaces with matching visible and collision
   geometry. Detailed art never provides a walkable surface.
+- **Few, large pieces.** Every destructible panel is at least one draw call and one collision
+  body. Build floors, walls and covers from the largest panels the design allows (a run of
+  planks is one board; split only around openings and wells). Small repeated details such as
+  ladder rails and rungs are fixed instanced pieces, never cell panels. Check `panels=` and
+  `chunks=` in `ER_BLOCK_GENERATED` when a template changes.
 - All peers rebuild the same layout behind the loading gate. See [DESTRUCTION.md](DESTRUCTION.md).
 - Gameplay generation distributes the existing player slots over 1–3 paired spawn zones.
   The seed requests the count; bounded fitting may keep fewer where the map has no safe
   space. Secondary zones sit at least 10m apart, in screened brick pockets beside existing
-  standing routes, with checked rear exits. The primary zone retains its original start.
+  standing routes, with checked rear exits. A pocket is 4×3m with starts 130cm apart where the
+  site has room, otherwise 2.8×2.4m with starts 90cm apart. Pre-physics pocket and exit checks
+  apply the standing-capsule margin in world axes, so decks and beams overhead count.
+  The primary zone retains its original start.
   Existing standing routes and cover entry paths remain clear of the new screens.
   Every opposing pair stays screened. Real standing, support and exit collision checks
   run before readiness. Zone count is independent of player slots and capacity.
@@ -57,7 +65,11 @@ Depot rolls a cosmetic seed at level start. The authored directional and ambient
 lights retain their settings. Each panorama rotates toward the strongest directional light using an approximate sun azimuth; overcast images use their brightest opening. The backdrop uses
 one unlit 2048px texture and a flat ground plane below the playable terrain.
 Village and variants with a grass ground use a dedicated horizon finish with the shared grass texture. The sky is visible in real-time Skylight captures; the horizon is excluded. The existing ambient
-lighting stays in use. Fire Training and Rooms keep their indoor lighting.
+lighting stays in use. Fire Training and Rooms are lit by three shadowless directional lights
+(key, fill and an upward bounce for ceilings: `er.InteriorKeyLux`, `er.InteriorFillLux`,
+`er.InteriorBounceLux`) instead of point-light grids; `er.InteriorLights 0` restores the grids for
+comparison. The level sun of a closed hall casts no shadows, since its shell would hide them all.
+Walls, ceiling and emissive panels keep the hall reading as closed.
 
 `setup_outdoor_backdrops.py` creates the private art derivatives in Unreal; `setup_outdoor_sky_capture.py` updates the sky material flag and `setup_outdoor_sky_yaw.py` adds the yaw parameter in existing installations. Verify
 with the Metal galleries for Central Building and Village, and compare the

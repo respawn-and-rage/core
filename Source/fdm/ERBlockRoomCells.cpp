@@ -25,9 +25,15 @@
 using UE::Geometry::FDynamicMesh3;
 using UE::Geometry::FIndex3i;
 
+namespace
+{
+    // 8 x 8 chunks of 32 cells: 12.8m at 5cm, so most panels draw as one component.
+    constexpr int32 CellGroupTile=8;
+}
+
 void AERBlockRoom::ClearCells()
 {
-    for (auto& Mesh : CellMeshes) if (Mesh)
+    for (const auto& Chunks : CellGroupChunks) if (auto* Mesh = CellMeshes.IsValidIndex(Chunks[0]) ? CellMeshes[Chunks[0]].Get() : nullptr)
     {
         RemoveInstanceComponent(Mesh); Mesh->DestroyComponent();
         // Free the deterministic, net-addressable name before a regeneration reuses it.
@@ -37,45 +43,59 @@ void AERBlockRoom::ClearCells()
     {RemoveInstanceComponent(Mesh);Mesh->DestroyComponent();Mesh->Rename(*MakeUniqueObjectName(this,UDynamicMeshComponent::StaticClass(),TEXT("DeadSkin")).ToString(),nullptr,REN_DontCreateRedirectors|REN_NonTransactional);}
     SkinMeshes.Reset();SkinComponentPanels.Reset();SkinClipCaches.Reset();DirtySkinPanels.Reset();
     CellMeshes.Reset(); CellComponentChunks.Reset(); ChunkQuads.Reset(); ChunkBoxes.Reset(); AppliedChunkRevisions.Reset();
+    ChunkGroups.Reset(); CellGroupChunks.Reset(); CellGroupBoxes.Reset(); ChunkFaceCache.Reset(); ChunkBoxCache.Reset(); DirtyCellGroups.Reset();
 }
 
 void AERBlockRoom::BuildCellComponents()
 {
     const auto& Chunks = CellWorld.GetChunks();
+    const auto& Panels = CellWorld.GetPanels();
     const auto* Map=Cast<AERProceduralMap>(this);
     const bool FireCargo=Map && Map->LayoutConfig.TemplateAsset &&
         Map->LayoutConfig.TemplateAsset->Archetype==EERMapArchetype::FireTraining;
-    CellMeshes.Reserve(Chunks.Num()); ChunkQuads.Init(0, Chunks.Num()); ChunkBoxes.Init(0, Chunks.Num());
-    for (int32 Index = 0; Index < Chunks.Num(); ++Index)
+    CellMeshes.Init(nullptr, Chunks.Num()); ChunkGroups.Init(INDEX_NONE, Chunks.Num());
+    ChunkQuads.Init(0, Chunks.Num()); ChunkBoxes.Init(0, Chunks.Num());
+    ChunkFaceCache.SetNum(Chunks.Num()); ChunkBoxCache.SetNum(Chunks.Num());
+    for (int32 PanelIndex = 0; PanelIndex < Panels.Num(); ++PanelIndex)
     {
-        const auto& Panel = CellWorld.GetPanels()[Chunks[Index].Panel];
-        if(!Panel.Skin.IsEmpty()){CellMeshes.Add(nullptr);DirtySkinPanels.Add(Chunks[Index].Panel);continue;}
-        auto* Mesh = NewObject<UDynamicMeshComponent>(this, *FString::Printf(TEXT("Cells_P%d_C%d"), Panel.Id, Index));
-        AddInstanceComponent(Mesh);
-        Mesh->SetMobility(EComponentMobility::Movable);
-        // Movable chunks become pawns' movement bases: corrections carry them by
-        // name, identical on host and clients for the same layout.
-        Mesh->SetNetAddressable();
-        Mesh->SetupAttachment(RootComponent);
-        Mesh->SetRelativeTransform(Panel.Transform);
-        // Mesh and collision are rebuilt together, explicitly, once per batch.
-        Mesh->SetDeferredCollisionUpdatesEnabled(true, false);
-        Mesh->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
-        Mesh->CollisionType = CTF_UseSimpleAsComplex; Mesh->bEnableComplexCollision = false;
-        Mesh->SetCollisionProfileName(TEXT("BlockAll"));
-        Mesh->SetCanEverAffectNavigation(false);
-        if (auto* Surface = Panel.Surface ? Panel.Surface : MaterialCatalog->Find(Panel.Material)->Surface.Get()) Mesh->SetMaterial(0, Surface);
-        if(FireCargo && Panel.Material==EERBlockMaterial::Metal && Panel.Strength>1)
-        {
-            // All five panels of a container share its construction id.
-            const uint32 Paint=(uint32(Map->LayoutConfig.Seed)+uint32(Panel.Id/8))%3;
-            Mesh->SetCustomPrimitiveDataFloat(0, float(Panel.Size.X));
-            Mesh->SetCustomPrimitiveDataFloat(1, float(Panel.Size.Z));
-            Mesh->SetCustomPrimitiveDataFloat(2, float(Paint));
-        }
-        Mesh->RegisterComponent();
-        CellMeshes.Add(Mesh); CellComponentChunks.Add(Mesh, Index);
-        RebuildCellChunk(Index);
+        const auto& Panel = Panels[PanelIndex];
+        if(!Panel.Skin.IsEmpty()){DirtySkinPanels.Add(PanelIndex);continue;}
+        for (int32 TZ = 0; TZ < Panel.ChunksZ; TZ += CellGroupTile)
+            for (int32 TX = 0; TX < Panel.ChunksX; TX += CellGroupTile)
+            {
+                const int32 Group = CellGroupChunks.Num();
+                auto& Members = CellGroupChunks.AddDefaulted_GetRef(); CellGroupBoxes.Add(0);
+                for (int32 CZ = TZ; CZ < FMath::Min(TZ + CellGroupTile, Panel.ChunksZ); ++CZ)
+                    for (int32 CX = TX; CX < FMath::Min(TX + CellGroupTile, Panel.ChunksX); ++CX)
+                        Members.Add(Panel.FirstChunk + CZ * Panel.ChunksX + CX);
+                auto* Mesh = NewObject<UDynamicMeshComponent>(this, *FString::Printf(TEXT("Cells_P%d_G%d"), Panel.Id, Group));
+                AddInstanceComponent(Mesh);
+                Mesh->SetMobility(EComponentMobility::Movable);
+                // Movable groups become pawns' movement bases: corrections carry them by
+                // name, identical on host and clients for the same layout.
+                Mesh->SetNetAddressable();
+                Mesh->SetupAttachment(RootComponent);
+                Mesh->SetRelativeTransform(Panel.Transform);
+                // Mesh and collision are rebuilt together, explicitly, once per batch.
+                Mesh->SetDeferredCollisionUpdatesEnabled(true, false);
+                Mesh->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
+                Mesh->CollisionType = CTF_UseSimpleAsComplex; Mesh->bEnableComplexCollision = false;
+                Mesh->SetCollisionProfileName(TEXT("BlockAll"));
+                Mesh->SetCanEverAffectNavigation(false);
+                if (auto* Surface = Panel.Surface ? Panel.Surface : MaterialCatalog->Find(Panel.Material)->Surface.Get()) Mesh->SetMaterial(0, Surface);
+                if(FireCargo && Panel.Material==EERBlockMaterial::Metal && Panel.Strength>1)
+                {
+                    // All five panels of a container share its construction id.
+                    const uint32 Paint=(uint32(Map->LayoutConfig.Seed)+uint32(Panel.Id/8))%3;
+                    Mesh->SetCustomPrimitiveDataFloat(0, float(Panel.Size.X));
+                    Mesh->SetCustomPrimitiveDataFloat(1, float(Panel.Size.Z));
+                    Mesh->SetCustomPrimitiveDataFloat(2, float(Paint));
+                }
+                Mesh->RegisterComponent();
+                CellComponentChunks.Add(Mesh, Members[0]);
+                for (int32 Chunk : Members) { CellMeshes[Chunk] = Mesh; ChunkGroups[Chunk] = Group; }
+                for (int32 Chunk : Members) RebuildCellChunk(Chunk);
+            }
     }
     FlushSkinMeshes();
 }
@@ -85,59 +105,84 @@ void AERBlockRoom::RebuildCellChunk(int32 Index)
     TRACE_CPUPROFILER_EVENT_SCOPE(ERCell_RebuildChunk);
     const int32 SkinPanelIndex=CellWorld.GetChunks()[Index].Panel;
     if(!CellWorld.GetPanels()[SkinPanelIndex].Skin.IsEmpty()){DirtySkinPanels.Add(SkinPanelIndex);return;}
-    auto* Component = CellMeshes.IsValidIndex(Index) ? CellMeshes[Index].Get() : nullptr;
-    if (!Component) return;
-    const auto& Panel = CellWorld.GetPanels()[CellWorld.GetChunks()[Index].Panel];
-    double Start = FPlatformTime::Seconds();
-    TArray<ERCellMesh::FQuad> Quads;
+    if (!ChunkGroups.IsValidIndex(Index) || ChunkGroups[Index] == INDEX_NONE) return;
+    const double Start = FPlatformTime::Seconds();
+    auto& Quads = ChunkFaceCache[Index];
     ERCellMesh::BuildFaces(CellWorld, Index, Quads);
-    FDynamicMesh3 Mesh;
-    Mesh.EnableAttributes();
-    auto* Normals = Mesh.Attributes()->PrimaryNormals();
-    auto* UVs = Mesh.Attributes()->PrimaryUV();
-    for (const auto& Q : Quads)
-    {
-        // Planar UVs in metres on the face plane; the PBR surfaces map by world position.
-        // U is mirrored on negative faces so every tangent frame is right-handed:
-        // mirrored UVs flip the auto-calculated shading normal of those faces.
-        const int32 Axis = FMath::Abs(Q.Normal.X) > .5f ? 0 : FMath::Abs(Q.Normal.Y) > .5f ? 1 : 2;
-        const int32 U = (Axis + 1) % 3, V = (Axis + 2) % 3;
-        const float Mirror = Q.Normal[Axis] < 0 ? -1.f : 1.f;
-        // Overlay elements belong to one parent vertex each: never share them across corners.
-        int32 Vertex[4], UV[4], Normal[4];
-        for (int32 I = 0; I < 4; ++I)
-        {
-            Vertex[I] = Mesh.AppendVertex(FVector3d(Q.Corner[I]));
-            UV[I] = UVs->AppendElement(FVector2f(Mirror * Q.Corner[I][U], Q.Corner[I][V]) / 100);
-            Normal[I] = Normals->AppendElement(Q.Normal);
-        }
-        const int32 A = Mesh.AppendTriangle(Vertex[0], Vertex[1], Vertex[2]), B = Mesh.AppendTriangle(Vertex[0], Vertex[2], Vertex[3]);
-        ensure(A >= 0 && B >= 0);
-        if (A >= 0) { Normals->SetTriangle(A, FIndex3i(Normal[0], Normal[1], Normal[2])); UVs->SetTriangle(A, FIndex3i(UV[0], UV[1], UV[2])); }
-        if (B >= 0) { Normals->SetTriangle(B, FIndex3i(Normal[0], Normal[2], Normal[3])); UVs->SetTriangle(B, FIndex3i(UV[0], UV[2], UV[3])); }
-    }
-    Component->SetMesh(MoveTemp(Mesh));
     const double MeshEnd = FPlatformTime::Seconds();
-    TArray<FBox> Boxes;
+    auto& Boxes = ChunkBoxCache[Index];
     ERCellMesh::BuildBoxes(CellWorld, Index, Boxes);
-    FKAggregateGeom Geometry;
-    for (const FBox& Box : Boxes)
-    {
-        FVector Size = Box.GetSize();
-        for (int32 Axis = 0; Axis < 3; ++Axis) Size[Axis] = FMath::Max(Size[Axis], double(CellSettings.MinCollisionThickness));
-        FKBoxElem& Element = Geometry.BoxElems.Emplace_GetRef(Size.X, Size.Y, Size.Z);
-        Element.Center = Box.GetCenter();
-    }
-    Component->SetSimpleCollisionShapes(Geometry, true);
-    if (Boxes.IsEmpty()) Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     const double End = FPlatformTime::Seconds();
     RebuildProfile.MeshMs += (MeshEnd - Start) * 1000; RebuildProfile.CollisionMs += (End - MeshEnd) * 1000;
-    RebuildProfile.Quads += Quads.Num(); RebuildProfile.Boxes += Boxes.Num(); ++RebuildProfile.Groups;
+    RebuildProfile.Quads += Quads.Num(); RebuildProfile.Boxes += Boxes.Num();
     ChunkQuads[Index] = Quads.Num(); ChunkBoxes[Index] = Boxes.Num();
+    DirtyCellGroups.Add(ChunkGroups[Index]);
+}
+
+void AERBlockRoom::FlushCellGroups()
+{
+    TRACE_CPUPROFILER_EVENT_SCOPE(ERCell_FlushGroups);
+    auto Order = DirtyCellGroups.Array(); Order.Sort(); DirtyCellGroups.Reset();
+    for (int32 Group : Order)
+    {
+        const auto& Members = CellGroupChunks[Group];
+        auto* Component = CellMeshes[Members[0]].Get();
+        if (!Component) continue;
+        const double Start = FPlatformTime::Seconds();
+        FDynamicMesh3 Mesh;
+        Mesh.EnableAttributes();
+        auto* Normals = Mesh.Attributes()->PrimaryNormals();
+        auto* UVs = Mesh.Attributes()->PrimaryUV();
+        for (int32 Chunk : Members) for (const auto& Q : ChunkFaceCache[Chunk])
+        {
+            // Planar UVs in metres on the face plane; the PBR surfaces map by world position.
+            // U is mirrored on negative faces so every tangent frame is right-handed:
+            // mirrored UVs flip the auto-calculated shading normal of those faces.
+            const int32 Axis = FMath::Abs(Q.Normal.X) > .5f ? 0 : FMath::Abs(Q.Normal.Y) > .5f ? 1 : 2;
+            const int32 U = (Axis + 1) % 3, V = (Axis + 2) % 3;
+            const float Mirror = Q.Normal[Axis] < 0 ? -1.f : 1.f;
+            // Overlay elements belong to one parent vertex each: never share them across corners.
+            int32 Vertex[4], UV[4], Normal[4];
+            for (int32 I = 0; I < 4; ++I)
+            {
+                Vertex[I] = Mesh.AppendVertex(FVector3d(Q.Corner[I]));
+                UV[I] = UVs->AppendElement(FVector2f(Mirror * Q.Corner[I][U], Q.Corner[I][V]) / 100);
+                Normal[I] = Normals->AppendElement(Q.Normal);
+            }
+            const int32 A = Mesh.AppendTriangle(Vertex[0], Vertex[1], Vertex[2]), B = Mesh.AppendTriangle(Vertex[0], Vertex[2], Vertex[3]);
+            ensure(A >= 0 && B >= 0);
+            if (A >= 0) { Normals->SetTriangle(A, FIndex3i(Normal[0], Normal[1], Normal[2])); UVs->SetTriangle(A, FIndex3i(UV[0], UV[1], UV[2])); }
+            if (B >= 0) { Normals->SetTriangle(B, FIndex3i(Normal[0], Normal[2], Normal[3])); UVs->SetTriangle(B, FIndex3i(UV[0], UV[2], UV[3])); }
+        }
+        Component->SetMesh(MoveTemp(Mesh));
+        const double MeshEnd = FPlatformTime::Seconds();
+        FKAggregateGeom Geometry;
+        for (int32 Chunk : Members) for (const FBox& Box : ChunkBoxCache[Chunk])
+        {
+            FVector Size = Box.GetSize();
+            for (int32 Axis = 0; Axis < 3; ++Axis) Size[Axis] = FMath::Max(Size[Axis], double(CellSettings.MinCollisionThickness));
+            FKBoxElem& Element = Geometry.BoxElems.Emplace_GetRef(Size.X, Size.Y, Size.Z);
+            Element.Center = Box.GetCenter();
+        }
+        CellGroupBoxes[Group] = Geometry.BoxElems.Num();
+        Component->SetSimpleCollisionShapes(Geometry, true);
+        if (CellGroupBoxes[Group] == 0) Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        const double End = FPlatformTime::Seconds();
+        RebuildProfile.MeshMs += (MeshEnd - Start) * 1000; RebuildProfile.CollisionMs += (End - MeshEnd) * 1000;
+        ++RebuildProfile.Groups;
+    }
+}
+
+void AERBlockRoom::DisableEmptyCellCollision()
+{
+    // Empty groups keep no query collision.
+    for (int32 Group = 0; Group < CellGroupChunks.Num(); ++Group)
+        if (CellGroupBoxes[Group] == 0) if (auto* Mesh = CellMeshes[CellGroupChunks[Group][0]].Get()) Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void AERBlockRoom::FlushSkinMeshes()
 {
+    FlushCellGroups();
     auto Order=DirtySkinPanels.Array();Order.Sort();DirtySkinPanels.Reset();
     for(int32 SkinPanelIndex:Order)
     {
@@ -388,7 +433,7 @@ void AERBlockRoom::CollectCellExplosion(const FVector& Origin, const FERBlockExp
 
 void AERBlockRoom::GetCellComponents(TArray<UPrimitiveComponent*>& Out) const
 {
-    for (const auto& Mesh : CellMeshes) if (Mesh) Out.Add(Mesh);
+    for (const auto& Chunks : CellGroupChunks) if (auto* Mesh = CellMeshes[Chunks[0]].Get()) Out.Add(Mesh);
     for(const auto& Pair:SkinMeshes)if(Pair.Value)Out.Add(Pair.Value);
 }
 
@@ -416,17 +461,25 @@ bool AERBlockRoom::ValidateCells() const
             continue;
         }
         ++Ordinary;const auto* Mesh = CellMeshes[I].Get();
+        if (!ChunkGroups.IsValidIndex(I) || !CellGroupChunks.IsValidIndex(ChunkGroups[I])) return false;
+        const auto& Members = CellGroupChunks[ChunkGroups[I]];
         const int32* Index = CellComponentChunks.Find(Mesh);
-        if (!Mesh || !Mesh->IsRegistered() || !Index || *Index != I) return false;
+        if (!Mesh || !Mesh->IsRegistered() || !Index || *Index != Members[0] || CellMeshes[Members[0]] != Mesh || !Members.Contains(I)) return false;
         if (!Mesh->GetRelativeTransform().Equals(CellWorld.GetPanels()[Chunks[I].Panel].Transform, 1.e-3)) return false;
         ERCellMesh::BuildFaces(CellWorld, I, Quads); ERCellMesh::BuildBoxes(CellWorld, I, Boxes);
-        int32 Triangles = 0;
-        Mesh->ProcessMesh([&Triangles](const FDynamicMesh3& M) { Triangles = M.TriangleCount(); });
-        if (Quads.Num() != ChunkQuads[I] || Boxes.Num() != ChunkBoxes[I] || Triangles != 2 * Quads.Num() ||
-            Mesh->GetSimpleCollisionShapes().BoxElems.Num() != Boxes.Num()) return false;
-        if (!Boxes.IsEmpty() && Mesh->GetCollisionEnabled() != ECollisionEnabled::NoCollision && !Mesh->GetBodyInstance()->IsValidBodyInstance()) return false;
+        if (Quads.Num() != ChunkQuads[I] || Boxes.Num() != ChunkBoxes[I]) return false;
     }
-    return Ordinary==CellComponentChunks.Num() && CheckedSkins.Num()==SkinMeshes.Num();
+    int32 Grouped = 0;
+    for (int32 Group = 0; Group < CellGroupChunks.Num(); ++Group)
+    {
+        const auto* Mesh = CellMeshes[CellGroupChunks[Group][0]].Get();
+        int32 Expected = 0, ExpectedBoxes = 0, Triangles = 0;
+        for (int32 Chunk : CellGroupChunks[Group]) { Expected += ChunkQuads[Chunk]; ExpectedBoxes += ChunkBoxes[Chunk]; ++Grouped; }
+        Mesh->ProcessMesh([&Triangles](const FDynamicMesh3& M) { Triangles = M.TriangleCount(); });
+        if (Triangles != 2 * Expected || Mesh->GetSimpleCollisionShapes().BoxElems.Num() != ExpectedBoxes || CellGroupBoxes[Group] != ExpectedBoxes) return false;
+        if (ExpectedBoxes && Mesh->GetCollisionEnabled() != ECollisionEnabled::NoCollision && !Mesh->GetBodyInstance()->IsValidBodyInstance()) return false;
+    }
+    return Ordinary==Grouped && CellGroupChunks.Num()==CellComponentChunks.Num() && CheckedSkins.Num()==SkinMeshes.Num();
 }
 
 void AERBlockRoom::EmitGlassBreaks(const TArray<FERCellId>& Panes)
@@ -633,8 +686,8 @@ bool AERBlockRoom::ApplyCellSnapshot(const FERBlockNetworkDescriptor& Descriptor
     AppliedSequence = Descriptor.Sequence;
     if(Recovery)bNetworkError=false;
     if (!bMapReady) { bMapReady = true; SetMapCollision(true); }
-    // Empty chunks keep no query collision after the gate opens.
-    for (int32 I = 0; I < CellMeshes.Num(); ++I) if (CellMeshes[I] && ChunkBoxes[I] == 0) CellMeshes[I]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    // Empty groups keep no query collision after the gate opens.
+    DisableEmptyCellCollision();
     UE_LOG(LogTemp, Verbose, TEXT("ER_BLOCK_NET_APPLIED epoch=%u sequence=%u removed_cells=%lld"), BuiltEpoch, AppliedSequence, CellWorld.GetRemovedCount());
     LastCellApplyAt=FPlatformTime::Seconds();LastCellApplyMs=float((LastCellApplyAt-Start)*1000);++SyncProgressSerial;
     return true;

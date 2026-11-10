@@ -13,6 +13,9 @@
 #include "Sound/SoundAttenuation.h"
 #include "Components/DynamicMeshComponent.h"
 #include "Components/PointLightComponent.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "HAL/IConsoleManager.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "Engine/StaticMesh.h"
 #include "PhysicsEngine/BodySetup.h"
@@ -339,7 +342,15 @@ bool ERProcedural::ApplyMapTheme(const FERProceduralConfig& C,FERProceduralLayou
         Piece.Surface=Piece.Roof ? P.Ceiling.Get():P.Materials[uint8(Piece.Material)].Get();
         const FVector FixedSize=Piece.Transform.GetScale3D()*100;
         const bool ProceduralShell=C.TemplateAsset->Archetype==EERMapArchetype::FireTraining && !Piece.Mesh && !Piece.Roof && FixedSize.Z>=700 && (FixedSize.X>=L.WarehouseWidth-50 || FixedSize.Y>=L.WarehouseLength-1);
+        // Fixed instanced ladder rails and rungs take the same finish as cell ladders.
+        bool LadderPart=false;
+        if(P.LadderSteel && !Piece.Mesh && Piece.Material==EERBlockMaterial::Metal)for(const auto& Ladder:L.Ladders)
+        {
+            const FVector Local=Ladder.Frame.InverseTransformPosition(Piece.Transform.GetLocation());
+            if(FMath::Abs(Local.X)<=5 && FMath::Abs(Local.Y)<=47 && Local.Z>=0 && Local.Z<=Ladder.DeckHeight+111){LadderPart=true;break;}
+        }
         if(ProceduralShell)Piece.Surface=Piece.Material==EERBlockMaterial::Concrete ? P.Wall.Get():P.ShellSteel ? P.ShellSteel.Get():Piece.Surface;
+        else if(LadderPart)Piece.Surface=P.LadderSteel;
         else if(P.ShellSteel && Piece.Mesh && Piece.Mesh->GetName().StartsWith(TEXT("SM_ER_WH_")))
         {
             const FString Name=Piece.Mesh->GetName();
@@ -475,6 +486,47 @@ void AERProceduralMap::OnGenerationFinished()
     ERPlayability::Save(*PlayabilityDraft,Directory);
     UE_LOG(LogTemp,Display,TEXT("ER_MAP_PLAYABILITY_LIVE %s"),*ERPlayability::Summary(*PlayabilityDraft));
     PlayabilityDraft.Reset();
+}
+static TAutoConsoleVariable<int32> CVarERInteriorLights(TEXT("er.InteriorLights"),1,TEXT("Closed interiors: 0 point-light grid, 1 two shadowless directional lights."));
+static TAutoConsoleVariable<float> CVarERInteriorKeyLux(TEXT("er.InteriorKeyLux"),.75f,TEXT("Closed interiors: key directional light, lux."));
+static TAutoConsoleVariable<float> CVarERInteriorFillLux(TEXT("er.InteriorFillLux"),.3f,TEXT("Closed interiors: opposite fill directional light, lux."));
+static TAutoConsoleVariable<float> CVarERInteriorBounceLux(TEXT("er.InteriorBounceLux"),.25f,TEXT("Closed interiors: upward bounce light on ceilings and undersides, lux."));
+void AERProceduralMap::ConfigureInteriorLighting()
+{
+    // Closed halls read as closed from their walls, ceiling and emissive panels. A
+    // shadowless key, fill and upward bounce replace dozens of overlapping point
+    // lights; the level sun, fully occluded by the shell, stops rendering shadow
+    // maps that show nothing.
+    UDirectionalLightComponent* Key=nullptr;
+    for(TActorIterator<ADirectionalLight> It(GetWorld());It;++It)
+        if(auto* Light=Cast<UDirectionalLightComponent>(It->GetLightComponent()))
+        {
+            if(!Key)Key=Light;
+            else Light->SetVisibility(false);
+        }
+    auto Configure=[](UDirectionalLightComponent* Light,const FRotator& Rotation,float Lux)
+    {
+        Light->SetMobility(EComponentMobility::Movable);
+        Light->SetCastShadows(false);Light->SetAffectTranslucentLighting(true);
+        Light->SetIntensity(Lux);Light->SetLightColor(FLinearColor::White);
+        Light->SetAtmosphereSunLight(false);
+        Light->SetWorldRotation(Rotation);Light->SetVisibility(true);
+    };
+    if(!Key)
+    {
+        Key=NewObject<UDirectionalLightComponent>(this);AddInstanceComponent(Key);
+        Key->SetupAttachment(RootComponent);Key->RegisterComponent();WarehouseLights.Add(Key);
+    }
+    Configure(Key,FRotator(-58,35,0),CVarERInteriorKeyLux.GetValueOnGameThread());
+    auto Add=[&](const FRotator& Rotation,float Lux)
+    {
+        auto* Light=NewObject<UDirectionalLightComponent>(this);AddInstanceComponent(Light);
+        Light->SetupAttachment(RootComponent);Light->RegisterComponent();WarehouseLights.Add(Light);
+        Configure(Light,Rotation,Lux);return Light;
+    };
+    const auto* Fill=Add(FRotator(-35,215,0),CVarERInteriorFillLux.GetValueOnGameThread());
+    const auto* Bounce=Add(FRotator(60,125,0),CVarERInteriorBounceLux.GetValueOnGameThread());
+    UE_LOG(LogTemp,Display,TEXT("ER_INTERIOR_LIGHTING key=%.2f fill=%.2f bounce=%.2f"),Key->Intensity,Fill->Intensity,Bounce->Intensity);
 }
 void AERProceduralMap::ConfigureFloors()
 {
@@ -746,11 +798,13 @@ void AERProceduralMap::ConfigureTemplateFloors()
         CeilingPanels->ComponentTags.Add(TEXT("ERTemplateRoof"));CeilingPanels->ComponentTags.Add(TEXT("ERTemplateVisual"));
         CeilingPanels->RegisterComponent();FixedMeshes.Add(CeilingPanels);
     }
+    const bool LegacyInteriorLights=CVarERInteriorLights.GetValueOnGameThread()==0;
     if(FireTraining && GetNetMode()!=NM_DedicatedServer)
         for(float X=-Layout.WarehouseWidth*.5f+600;X<Layout.WarehouseWidth*.5f;X+=1200)
             for(float Y=-Layout.WarehouseLength*.5f+600;Y<Layout.WarehouseLength*.5f;Y+=1200)
             {
                 if(CeilingPanels)CeilingPanels->AddInstance(FTransform(FQuat::Identity,FVector(X,Y,Layout.IndoorCeiling-5),FVector(.6,.6,.04)));
+                if(!LegacyInteriorLights)continue;
                 auto* Light=NewObject<UPointLightComponent>(this);AddInstanceComponent(Light);
                 Light->SetupAttachment(RootComponent);Light->SetMobility(EComponentMobility::Movable);
                 Light->SetRelativeLocation({X,Y,Layout.IndoorCeiling-65});
@@ -761,13 +815,14 @@ void AERProceduralMap::ConfigureTemplateFloors()
                 Light->SetSourceRadius(40);Light->SetSpecularScale(.35f);
                 Light->SetLightColor(FLinearColor::White);Light->RegisterComponent();WarehouseLights.Add(Light);
             }
+    if((FireTraining || ClosedRooms) && GetNetMode()!=NM_DedicatedServer && GetWorld()->IsGameWorld() && !LegacyInteriorLights)ConfigureInteriorLighting();
     for(const auto& Desc:Layout.Ladders)
     {
         FActorSpawnParameters Params;Params.Owner=this;
         auto* Ladder=GetWorld()->SpawnActor<AERLadder>(AERLadder::StaticClass(),Desc.Frame*GetActorTransform(),Params);
         if(Ladder){Ladder->Height=Desc.Height;Ladder->DeckHeight=Desc.DeckHeight;LadderActors.Add(Ladder);}
     }
-    if(ClosedRooms && GetNetMode()!=NM_DedicatedServer)
+    if(ClosedRooms && GetNetMode()!=NM_DedicatedServer && LegacyInteriorLights)
         for(const FVector P:Layout.RoomLightPoints)
         {
             auto* Light=NewObject<UPointLightComponent>(this);AddInstanceComponent(Light);

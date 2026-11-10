@@ -112,8 +112,8 @@ bool FERAlleyBrickTowerTest::RunTest(const FString&)
         AddInfo(FString::Printf(TEXT("ER_ALLEY_TOWER_DECK panel=%d id=%d size=%s frame=%s probe=%s local=%s valid=%d alive=%d chunk=%d trace=%d impact=%s"),
             Deck,Platform.Id,*Platform.Size.ToString(),*Platform.Transform.ToString(),*Probe.ToString(),*Local.ToString(),Cells.IsValid(ProbeCell),Cells.IsAlive(ProbeCell),Chunk,Lands,*LandingHit.ImpactPoint.ToString()));
         TArray<UPrimitiveComponent*> Components;Map->GetCellComponents(Components);
-        const FString ExpectedName=FString::Printf(TEXT("Cells_P%d_C%d"),Platform.Id,Chunk);
-        for(auto* Component:Components)if(Component->GetName()==ExpectedName)
+        const FString ExpectedPrefix=FString::Printf(TEXT("Cells_P%d_G"),Platform.Id);
+        for(auto* Component:Components)if(Component->GetName().StartsWith(ExpectedPrefix))
         {
             const auto* Dynamic=Cast<UDynamicMeshComponent>(Component);
             AddInfo(FString::Printf(TEXT("ER_ALLEY_TOWER_COLLISION component=%s enabled=%d response=%d bounds=%s boxes=%d"),

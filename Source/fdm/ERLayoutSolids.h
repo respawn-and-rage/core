@@ -55,6 +55,25 @@ struct FLayoutSolids
         const FVector LocalA=S.Frame.InverseTransformPositionNoScale(A),LocalB=S.Frame.InverseTransformPositionNoScale(B);
         return FMath::LineBoxIntersection(FBox(-S.Half-Margin,S.Half+Margin),LocalA,LocalB,LocalB-LocalA);
     }
+    // Standing capsule clearance with its margin in world axes: a rolled panel (a deck
+    // or beam) keeps the full vertical margin rather than the margin of its local axes.
+    bool PawnClearWorld(FVector A,FVector B) const
+    {
+        const FVector Margin(35,35,93);
+        return !Solids.ContainsByPredicate([&](const FSolid& S)
+        {
+            if(!S.bPawn)return false;
+            const FQuat Q=S.Frame.GetRotation();FVector Local;
+            for(int32 Axis=0;Axis<3;++Axis)
+            {
+                const FVector Direction=Axis==0 ? Q.GetAxisX():Axis==1 ? Q.GetAxisY():Q.GetAxisZ();
+                Local[Axis]=FMath::Abs(Direction.X)*Margin.X+FMath::Abs(Direction.Y)*Margin.Y+FMath::Abs(Direction.Z)*Margin.Z;
+            }
+            if(!S.Bounds.ExpandBy(Margin).Intersect(FBox(ForceInit)+A+B))return false;
+            const FVector LocalA=S.Frame.InverseTransformPositionNoScale(A),LocalB=S.Frame.InverseTransformPositionNoScale(B);
+            return FMath::LineBoxIntersection(FBox(-S.Half-Local,S.Half+Local),LocalA,LocalB,LocalB-LocalA);
+        });
+    }
     bool PawnClear(FVector A,FVector B) const
     {
         return !Solids.ContainsByPredicate([&](const FSolid& S){return S.bPawn && Crosses(S,A,B,FVector(35,35,93));});

@@ -12,6 +12,7 @@ struct FSpawnPocket
 {
     FTransform Frame;
     TArray<FVector> Exit;
+    int32 Shape=0;
 };
 FVector Paired(FVector P,bool Mirror){return {Mirror ? P.X:-P.X,-P.Y,P.Z};}
 // Conservative pre-physics queries: unknown hollow buildings are excluded in
@@ -38,7 +39,7 @@ struct FSpawnSpace
     }
     bool Clear(FVector A,FVector B) const
     {
-        if(!Solids.PawnClear(A,B))return false;
+        if(!Solids.PawnClearWorld(A,B))return false;
         const FVector Margin(35,35,93);
         for(const auto* Set:{&Excluded,&WallFaces})for(const auto& Box:*Set)
             if(FMath::LineBoxIntersection(Box.ExpandBy(Margin),A,B,B-A))return false;
@@ -78,8 +79,17 @@ struct FSpawnSpace
         return true;
     }
 };
-const FVector WallCenters[]={{0,130,150},{-150,0,150},{150,0,150}};
-const FVector WallSizes[]={{320,20,300},{20,240,300},{20,240,300}};
+struct FPocketShape
+{
+    FVector WallCenters[3],WallSizes[3];
+    float FootX,FootY,BypassX,RearY,Spacing,FirstRow;
+};
+// A wide 4 x 3m pocket keeps starts 130cm apart; a compact 2.8 x 2.4m pocket
+// serves narrow corridors that have no room for it.
+const FPocketShape PocketShapes[]={
+    {{{0,160,150},{-210,0,150},{210,0,150}},{{440,20,300},{20,300,300},{20,300,300}},230,190,290,-220,130,-60},
+    {{{0,130,150},{-150,0,150},{150,0,150}},{{320,20,300},{20,240,300},{20,240,300}},170,150,230,-190,90,-45}};
+FVector PocketStart(const FPocketShape& S,int32 I){return FVector((I%3-1)*S.Spacing,(I/3)*S.Spacing+S.FirstRow,100);}
 }
 
 bool ERProcedural::BuildSpawnZones(int32 Seed,FERProceduralLayout& L,const FERCellSettings& Cells)
@@ -141,66 +151,75 @@ bool ERProcedural::BuildSpawnZones(int32 Seed,FERProceduralLayout& L,const FERCe
         const FVector Center=Candidates[Site],Join=Joins[Site];
         bool Apart=true;for(const auto& Pocket:Pockets)Apart&=FVector::Dist2D(Center,Pocket.Frame.GetLocation())>=1000;
         if(!Apart)continue;
-        const FTransform Frame(Facing,Center-FVector(0,0,100));
-        bool Fits=true;
-        for(float X:{-170.f,0.f,170.f})for(float Y:{-150.f,0.f,150.f})
+        for(int32 ShapeIndex=0;ShapeIndex<UE_ARRAY_COUNT(PocketShapes);++ShapeIndex)
         {
-            const FVector Point=Frame.TransformPosition({X,Y,100});
-            Fits&=Space.Floor(Point) && Space.Clear(Point,Point) && Space.Floor(Paired(Point,Mirror)) && Space.Clear(Paired(Point,Mirror),Paired(Point,Mirror));
+            const auto& S=PocketShapes[ShapeIndex];
+            TArray<FVector> Exit;
+            auto Try=[&]()
+            {
+                const FTransform Frame(Facing,Center-FVector(0,0,100));
+                bool Fits=true;
+                for(float X:{-S.FootX,0.f,S.FootX})for(float Y:{-S.FootY,0.f,S.FootY})
+                {
+                    const FVector Point=Frame.TransformPosition({X,Y,100});
+                    Fits&=Space.Floor(Point) && Space.Clear(Point,Point) && Space.Floor(Paired(Point,Mirror)) && Space.Clear(Paired(Point,Mirror),Paired(Point,Mirror));
+                }
+                if(!Fits)return false;
+                ++FootprintFits;
+                TArray<FBox> Bounds;
+                for(int32 W=0;W<3;++W)
+                {
+                    const FBox Box=FBox(S.WallCenters[W]-S.WallSizes[W]*.5,S.WallCenters[W]+S.WallSizes[W]*.5).TransformBy(Frame);
+                    const FBox Mate(Paired(Box.Max,Mirror).ComponentMin(Paired(Box.Min,Mirror)),Paired(Box.Max,Mirror).ComponentMax(Paired(Box.Min,Mirror)));
+                    Fits&=Space.FreeBox(Box) && Space.FreeBox(Mate);Bounds.Add(Box);Bounds.Add(Mate);
+                }
+                if(Fits)++WallFits;
+                // Do not silently obstruct a previously validated route with a screen.
+                for(const auto& Path:ProtectedPaths)for(int32 I=1;I<Path.Num() && Fits;++I)for(const auto& Box:Bounds)
+                    if(FMath::LineBoxIntersection(Box.ExpandBy(FVector(35,35,93)),Path[I-1],Path[I],Path[I]-Path[I-1])){Fits=false;break;}
+                if(!Fits)return false;
+                ++RouteFits;
+                const FVector LocalJoin=Frame.InverseTransformPosition(Join);
+                const double BypassX=FMath::Abs(LocalJoin.X)>=S.BypassX ? LocalJoin.X:(LocalJoin.X<0 ? -double(S.BypassX):double(S.BypassX));
+                const TArray<FVector> Knots{Frame.TransformPosition({0,0,100}),Frame.TransformPosition({0,S.RearY,100}),
+                    Frame.TransformPosition({BypassX,S.RearY,100}),Frame.TransformPosition({BypassX,LocalJoin.Y,100}),Join};
+                Exit={Knots[0]};
+                for(int32 Leg=1;Leg<Knots.Num();++Leg)
+                {
+                    const int32 Steps=FMath::Max(1,FMath::CeilToInt32(FVector::Dist2D(Knots[Leg-1],Knots[Leg])/75));
+                    for(int32 I=1;I<=Steps;++I)Exit.Add(FMath::Lerp(Knots[Leg-1],Knots[Leg],double(I)/Steps));
+                }
+                // The route must clear its own new walls as well as the old district.
+                for(int32 I=1;I<Exit.Num() && Fits;++I)for(const auto& Box:Bounds)
+                    if(FMath::LineBoxIntersection(Box.ExpandBy(FVector(35,35,93)),Exit[I-1],Exit[I],Exit[I]-Exit[I-1]) ||
+                       FMath::LineBoxIntersection(Box.ExpandBy(FVector(35,35,93)),Paired(Exit[I-1],Mirror),Paired(Exit[I],Mirror),Paired(Exit[I]-Exit[I-1],Mirror)))
+                    {Fits=false;break;}
+                for(int32 I=0;I<Exit.Num();++I)
+                {
+                    Fits&=Space.Floor(Exit[I]) && Space.Floor(Paired(Exit[I],Mirror));
+                    if(I)Fits&=Space.Clear(Exit[I-1],Exit[I]) && Space.Clear(Paired(Exit[I-1],Mirror),Paired(Exit[I],Mirror));
+                }
+                for(int32 I=0;I<6 && Fits;++I)
+                {
+                    const FVector Point=Frame.TransformPosition(PocketStart(S,I));
+                    Fits&=Space.Floor(Point) && Space.Clear(Point,Center) && Space.Floor(Paired(Point,Mirror)) && Space.Clear(Paired(Point,Mirror),Paired(Center,Mirror));
+                }
+                if(!Fits)return false;
+                ++ExitFits;
+                // Newly accepted pockets also exclude the next one's walls and route.
+                bool Conflict=false;
+                for(const auto& Pocket:Pockets)for(const auto& Box:Bounds)for(int32 I=1;I<Pocket.Exit.Num();++I)
+                    Conflict|=FMath::LineBoxIntersection(Box.ExpandBy(FVector(35,35,93)),Pocket.Exit[I-1],Pocket.Exit[I],Pocket.Exit[I]-Pocket.Exit[I-1]);
+                for(const auto& Pocket:Pockets)for(int32 W=0;W<3;++W)
+                {
+                    const auto& Other=PocketShapes[Pocket.Shape];const FBox Box=FBox(Other.WallCenters[W]-Other.WallSizes[W]*.5,Other.WallCenters[W]+Other.WallSizes[W]*.5).TransformBy(Pocket.Frame);
+                    for(int32 I=1;I<Exit.Num();++I)Conflict|=FMath::LineBoxIntersection(Box.ExpandBy(FVector(35,35,93)),Exit[I-1],Exit[I],Exit[I]-Exit[I-1]);
+                }
+                if(Conflict)return false;
+                return true;
+            };
+            if(Try()){Pockets.Add({FTransform(Facing,Center-FVector(0,0,100)),Exit,ShapeIndex});break;}
         }
-        if(!Fits)continue;
-        ++FootprintFits;
-        TArray<FBox> Bounds;
-        for(int32 W=0;W<3;++W)
-        {
-            const FBox Box=FBox(WallCenters[W]-WallSizes[W]*.5,WallCenters[W]+WallSizes[W]*.5).TransformBy(Frame);
-            const FBox Mate(Paired(Box.Max,Mirror).ComponentMin(Paired(Box.Min,Mirror)),Paired(Box.Max,Mirror).ComponentMax(Paired(Box.Min,Mirror)));
-            Fits&=Space.FreeBox(Box) && Space.FreeBox(Mate);Bounds.Add(Box);Bounds.Add(Mate);
-        }
-        if(Fits)++WallFits;
-        // Do not silently obstruct a previously validated route with a screen.
-        for(const auto& Path:ProtectedPaths)for(int32 I=1;I<Path.Num() && Fits;++I)for(const auto& Box:Bounds)
-            if(FMath::LineBoxIntersection(Box.ExpandBy(FVector(35,35,93)),Path[I-1],Path[I],Path[I]-Path[I-1])){Fits=false;break;}
-        if(!Fits)continue;
-        ++RouteFits;
-        const FVector LocalJoin=Frame.InverseTransformPosition(Join);
-        const double BypassX=FMath::Abs(LocalJoin.X)>=230 ? LocalJoin.X:(LocalJoin.X<0 ? -230.:230.);
-        const TArray<FVector> Knots{Frame.TransformPosition({0,0,100}),Frame.TransformPosition({0,-190,100}),
-            Frame.TransformPosition({BypassX,-190,100}),Frame.TransformPosition({BypassX,LocalJoin.Y,100}),Join};
-        TArray<FVector> Exit{Knots[0]};
-        for(int32 Leg=1;Leg<Knots.Num();++Leg)
-        {
-            const int32 Steps=FMath::Max(1,FMath::CeilToInt32(FVector::Dist2D(Knots[Leg-1],Knots[Leg])/75));
-            for(int32 I=1;I<=Steps;++I)Exit.Add(FMath::Lerp(Knots[Leg-1],Knots[Leg],double(I)/Steps));
-        }
-        // The route must clear its own new walls as well as the old district.
-        for(int32 I=1;I<Exit.Num() && Fits;++I)for(const auto& Box:Bounds)
-            if(FMath::LineBoxIntersection(Box.ExpandBy(FVector(35,35,93)),Exit[I-1],Exit[I],Exit[I]-Exit[I-1]) ||
-               FMath::LineBoxIntersection(Box.ExpandBy(FVector(35,35,93)),Paired(Exit[I-1],Mirror),Paired(Exit[I],Mirror),Paired(Exit[I]-Exit[I-1],Mirror)))
-            {Fits=false;break;}
-        for(int32 I=0;I<Exit.Num();++I)
-        {
-            Fits&=Space.Floor(Exit[I]) && Space.Floor(Paired(Exit[I],Mirror));
-            if(I)Fits&=Space.Clear(Exit[I-1],Exit[I]) && Space.Clear(Paired(Exit[I-1],Mirror),Paired(Exit[I],Mirror));
-        }
-        for(int32 I=0;I<6 && Fits;++I)
-        {
-            const FVector Point=Frame.TransformPosition({(I%3-1)*90.,(I/3)*90.-45,100});
-            Fits&=Space.Floor(Point) && Space.Clear(Point,Center) && Space.Floor(Paired(Point,Mirror)) && Space.Clear(Paired(Point,Mirror),Paired(Center,Mirror));
-        }
-        if(!Fits)continue;
-        ++ExitFits;
-        // Newly accepted pockets also exclude the next one's walls and route.
-        bool Conflict=false;
-        for(const auto& Pocket:Pockets)for(const auto& Box:Bounds)for(int32 I=1;I<Pocket.Exit.Num();++I)
-            Conflict|=FMath::LineBoxIntersection(Box.ExpandBy(FVector(35,35,93)),Pocket.Exit[I-1],Pocket.Exit[I],Pocket.Exit[I]-Pocket.Exit[I-1]);
-        for(const auto& Pocket:Pockets)for(int32 W=0;W<3;++W)
-        {
-            const FBox Box=FBox(WallCenters[W]-WallSizes[W]*.5,WallCenters[W]+WallSizes[W]*.5).TransformBy(Pocket.Frame);
-            for(int32 I=1;I<Exit.Num();++I)Conflict|=FMath::LineBoxIntersection(Box.ExpandBy(FVector(35,35,93)),Exit[I-1],Exit[I],Exit[I]-Exit[I-1]);
-        }
-        if(Conflict)continue;
-        Pockets.Add({Frame,Exit});
     }
     UE_LOG(LogTemp,Verbose,TEXT("ER_SPAWN_ZONE_FIT seed=%d candidates=%d footprint=%d walls=%d routes=%d exits=%d pockets=%d"),Seed,Candidates.Num(),FootprintFits,WallFits,RouteFits,ExitFits,Pockets.Num());
     const int32 ZoneCount=Pockets.Num()+1;
@@ -220,17 +239,17 @@ bool ERProcedural::BuildSpawnZones(int32 Seed,FERProceduralLayout& L,const FERCe
         L.SpawnZones.Add(Zone);
         for(int32 I=0;I<Count;++I)
         {
-            const FVector Point=Pocket.Frame.TransformPosition({(I%3-1)*90.,(I/3)*90.-45,100});
+            const FVector Point=Pocket.Frame.TransformPosition(PocketStart(PocketShapes[Pocket.Shape],I));
             L.AlphaSpawns.Emplace(FRotator(0,Forward.Rotation().Yaw,0),Point);
             const auto& A=L.AlphaSpawns.Last();L.OmegaSpawns.Emplace(FRotator(0,Mirror ? -A.Rotator().Yaw:A.Rotator().Yaw+180,0),Paired(Point,Mirror));
         }
         L.RoomAccessRoutes.Add(Pocket.Exit);TArray<FVector> MateExit;for(const auto& P:Pocket.Exit)MateExit.Add(Paired(P,Mirror));L.RoomAccessRoutes.Add(MateExit);
         for(int32 W=0;W<3;++W)for(int32 Team=0;Team<2;++Team)
         {
-            const FVector Center=Pocket.Frame.TransformPosition(WallCenters[W]);
+            const auto& Shape=PocketShapes[Pocket.Shape];const FVector Center=Pocket.Frame.TransformPosition(Shape.WallCenters[W]);
             const double Yaw=Pocket.Frame.Rotator().Yaw;
             const FTransform Placement(FRotator(0,Team ? (Mirror ? -Yaw:Yaw+180):Yaw,0),Team ? Paired(Center,Mirror):Center);
-            const int32 First=L.Panels.Num();AddPieceCells(PieceId++,EERBlockMaterial::Brick,FBox(-WallSizes[W]*.5,WallSizes[W]*.5),true,Cells,L.Panels);
+            const int32 First=L.Panels.Num();AddPieceCells(PieceId++,EERBlockMaterial::Brick,FBox(-Shape.WallSizes[W]*.5,Shape.WallSizes[W]*.5),true,Cells,L.Panels);
             for(int32 I=First;I<L.Panels.Num();++I)L.Panels[I].Transform=L.Panels[I].Transform*Placement;
         }
     }

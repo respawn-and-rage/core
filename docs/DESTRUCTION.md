@@ -8,9 +8,11 @@ own a `FERCellWorld`. `UERBlockWorld` survives only as an empty subobject for sa
 
 ## Storage and mesh
 
-Per-chunk alive bitsets plus sparse float HP. One `UDynamicMeshComponent` per 32×32-cell
-chunk, with visible faces only and aggregate-box collision. Dirty chunks and their
-face neighbours rebuild mesh and collision together.
+Per-chunk alive bitsets plus sparse float HP. Faces and aggregate boxes are cached per 32×32-cell
+chunk; one `UDynamicMeshComponent` (`Cells_P<id>_G<group>`) draws and collides for a tile of up
+to 8×8 chunks of one panel, so most panels are a single component, intact or damaged. Dirty
+chunks and their face neighbours rebuild their caches; each touched group then uploads mesh and
+collision together, once per batch. Group names are deterministic movement bases.
 
 - Layouts emit `FERCellPanelDesc`. Door and window openings are holes (absent cells, never
   "destroyed"). Each axis holds `round(L/5cm)` equal cells (`FERCellWorld::FitCell`): pieces

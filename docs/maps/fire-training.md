@@ -21,13 +21,15 @@ when the general ceiling display option is disabled.
   across the hall. Some layouts include paired suites of two connected offices with a
   shared partition, interior window and a route between offset exterior doors. Destructible cargo uses matte ribbed sheets with smooth perimeter frames and seeded oxide red, green or ochre paint. Cargo and denser staggered groups of six cover types fill the ground; only movement and ladder volumes remain reserved.
   Clear routes, full climbing shafts and ladder exit sweeps are reserved before
-  furnishing. Ladders step off at deck level instead of overshooting into overhead decks.
+  furnishing. Ladders are fixed instanced steel and step off at deck level instead of
+  overshooting into overhead decks.
 - Elevated projection ≤30%, overhead ≤40%, and a connected region open to the ceiling
   ≥45%, measured on the shared 50cm plan raster. Every elevated area has at least
   two independent accesses and checked standing headroom.
 - Roof groups are omitted from minimap capture. Bounded attempts end with a safe
   procedural reference composition. White emissive 60cm square ceiling panels share Rooms'
-  owned office finish and follow the existing grid of soft white point lights. Panels have
+  owned office finish on a 12m grid; shadowless key, fill and bounce directional lights light the hall
+  (see [MAPS.md](../MAPS.md#outdoor-backdrop)). Panels have
   no collision and are hidden from the minimap. A neutral
   specified ambient cubemap replaces the blue atmospheric capture; setup is scoped
   to Fire Training through `setup_fire_training_lighting.py`.

@@ -56,7 +56,7 @@ void AERIndustrialMapProbe::Capture(AERProceduralMap* Map,int32 View)
             for(float Side:{-1.f,1.f})
             {
                 const FVector Eye=Target+Normal*Side*450;FHitResult Hit;
-                if(GetWorld()->LineTraceSingleByChannel(Hit,Eye,Target,ECC_Visibility) && Hit.GetComponent() && Hit.GetComponent()->GetName().StartsWith(FString::Printf(TEXT("Cells_P%d_C"),P.Id)))
+                if(GetWorld()->LineTraceSingleByChannel(Hit,Eye,Target,ECC_Visibility) && Hit.GetComponent() && Hit.GetComponent()->GetName().StartsWith(FString::Printf(TEXT("Cells_P%d_G"),P.Id)))
                 {Camera->SetActorLocation(Eye);Camera->SetActorRotation((Target-Eye).Rotation());Found=true;break;}
             }
             if(Found)break;

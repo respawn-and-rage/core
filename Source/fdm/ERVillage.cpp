@@ -183,7 +183,18 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
             for(int32 I=0;I<N;++I){const float A=X-Width*.5f+I*Pitch;if(X1>A && X0<A+Pitch && !Holed(A,A+Pitch,CY-10,CY+10))return true;}
             return false;
         };
-        for(int32 I=0;I<N;++I){const float A=X-Width*.5f+I*Pitch;Strip(A+.15f,A+Pitch-.15f,Y-Depth*.5f,Y+Depth*.5f,Height-3,6);}
+        // Planks beside a well keep their own pitch; every run clear of wells is one
+        // board, so a floor draws and collides as a few panels instead of dozens.
+        auto Board=[&](float X0,float X1){Strip(X0+.15f,X1-.15f,Y-Depth*.5f,Y+Depth*.5f,Height-3,6);};
+        float Run=X-Width*.5f;
+        for(int32 I=0;I<N;++I)
+        {
+            const float A=X-Width*.5f+I*Pitch;
+            if(!Holes.ContainsByPredicate([&](const FBox& H){return A+Pitch>H.Min.X && A<H.Max.X;}))continue;
+            if(A>Run+.1f)Board(Run,A);
+            Board(A,A+Pitch);Run=A+Pitch;
+        }
+        if(X+Width*.5f>Run+.1f)Board(Run,X+Width*.5f);
         // Transverse beams stop at wells rather than passing through a climber.
         for(float CY:BeamY)
         {
@@ -194,7 +205,7 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
             }
             for(const auto& S:Segments)if(S.Y>S.X+.1 && UnderPlank(S.X,S.Y,CY))Wood({(S.X+S.Y)*.5f,CY,Height-11},{S.Y-S.X,20,10});
         }
-        for(float DX:{-.45f,-.15f,.15f,.45f})for(float DY:{-1.f,1.f})
+        for(float DX:{-.45f,-.27f,.27f,.45f})for(float DY:{-1.f,1.f})
         {
             const FVector Position(X+DX*Width,Y+DY*(Depth*.5f-25),Height-10);
             if(!Holes.ContainsByPredicate([&](const FBox& H){return Position.X>H.Min.X-44 && Position.X<H.Max.X+44;}))
@@ -206,6 +217,7 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     };
     auto Stairs=[&](FVector Mouth,float Height,float Width,float Yaw)
     {
+        Width+=30;
         const FTransform Frame(FRotator(0,Yaw,0),Mouth);
         const int32 Count=FMath::CeilToInt(Height/20);const float Step=Height/Count,Length=Count*30;
         TArray<FVector> Path{Frame.TransformPosition({0,-Length-80,100})};
@@ -222,7 +234,7 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     };
     auto Hut=[&](float X,float Y,float Floor,float Width,float Depth,float Height,bool Roof=true)
     {
-        const float Wall=8,Door=170;
+        const float Wall=8,Door=220;
         for(float Side:{-1.f,1.f})
         {
             int32 I=Wood({X,Y+Side*(Depth*.5f-Wall*.5f),Floor+Height*.5f},{Width,Wall,Height});
@@ -273,35 +285,35 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
             L.VillageClosedGround.Add(Polygon);if(MirrorConstruction){for(auto& P:Polygon)P=-P;L.VillageClosedGround.Add(Polygon);}
         };
         if(Plan.SelfSymmetric)MirrorConstruction=true;
-        ClosedBay({{-1400,-350},{-660,-350},{-660,-120},{-400,120},{-400,350},{-1400,350}});
+        ClosedBay({{-1400,-350},{-710,-350},{-710,-200},{-410,200},{-410,350},{-1400,350}});
         if(Plan.SelfSymmetric)
         {
             MirrorConstruction=false;
-            ClosedBay({{-420,-350},{160,-350},{160,-120},{420,120},{420,350},{-160,350},{-160,120},{-420,-120}});
+            ClosedBay({{-410,-350},{110,-350},{110,-200},{410,200},{410,350},{-110,350},{-110,200},{-410,-200}});
         }
         else
         {
-            ClosedBay({{1400,-350},{1400,350},{400,350},{400,120},{660,-120},{660,-350}});
-            ClosedBay({{-420,-350},{420,-350},{420,-120},{160,120},{160,350},{-160,350},{-160,120},{-420,-120}});
+            ClosedBay({{1400,-350},{1400,350},{410,350},{410,200},{710,-200},{710,-350}});
+            ClosedBay({{-410,-350},{410,-350},{410,-200},{110,200},{110,350},{-110,350},{-110,200},{-410,-200}});
         }
         MirrorConstruction=true;
         for(float Side:{-1.f,1.f})
         {
             if(Plan.SelfSymmetric && Side>0)continue;
             TArray<FVector> Passage;
-            for(const FVector2D P:{FVector2D(540,-450),{540,-200},{540,-120},{410,0},{280,120},{280,200},{280,450}})
+            for(const FVector2D P:{FVector2D(560,-450),{560,-260},{560,-200},{410,0},{260,200},{260,260},{260,450}})
                 Passage.Add({BX+Side*P.X*SX,BY+P.Y*SY,100});
             L.VillagePassages.Add(Passage);for(auto& P:Passage)P=HalfTurn.TransformPosition(P);L.VillagePassages.Add(Passage);
             for(float End:{-1.f,1.f})
             {
-                const float X=BX+Side*(End<0 ? 540:280)*SX,Y=BY+End*(D*.5f-8);
-                for(float DX:{-1.f,1.f})Wood({X+DX*(120*SX+8),Y,(Z-6)*.5f},{16,16,Z-6});
-                Wood({X,Y,Z-16},{240*SX+32,20,20});
+                const float X=BX+Side*(End<0 ? 560:260)*SX,Y=BY+End*(D*.5f-8);
+                for(float DX:{-1.f,1.f})Wood({X+DX*(150*SX+8),Y,(Z-6)*.5f},{16,16,Z-6});
+                Wood({X,Y,Z-16},{300*SX+32,20,20});
             }
         }
         for(int32 Level=0;Level<Plan.Storeys;++Level)
         {
-            const float Floor=Z+Level*300,RoomW=FMath::Min(480.f,W*.18f),RoomD=D-260,RoomX=W*.34f;
+            const float Floor=Z+Level*300,RoomW=FMath::Min(480.f,W*.18f),RoomD=D-360,RoomX=W*.34f;
             TArray<FBox> Holes;
             if(Level>0)for(float Side:{-1.f,1.f})
             {
@@ -327,9 +339,6 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
                 if(Plan.SelfSymmetric && RoomSide>0)continue;
                 const float RW=(RoomW-190)*.5f,CX=BX+RoomSide*RoomX+Side*(95+RW*.5f),CY=BY+D*.5f-35;
                 Wood({CX,CY,Floor+62.5f},{RW,24,125});GraySheet({CX,CY+12.1f,Floor+62.5f},{RW,.2f,125});GraySheet({CX,CY,Floor+125.1f},{RW,26,.2f});
-                // The return meets the wall: over a ladder well no plank would carry it.
-                Wood({BX+RoomSide*RoomX+Side*(RoomW*.5f+12),CY-40,Floor+62.5f},{24,80,125});
-                GraySheet({BX+RoomSide*RoomX+Side*(RoomW*.5f+24.1f),CY-40,Floor+62.5f},{.2f,80,125});
                 FERLayoutCover Cover;Cover.Frame=FTransform(FVector(CX,CY,Floor));Cover.Size={RW,24,125};Cover.Material=EERBlockMaterial::Wood;Cover.HalfHeight=60;
                 Cover.Hide={CX,CY-50,Floor+60};Cover.Entry={BX+RoomSide*RoomX,CY-50,Floor+60};Cover.SightFrom={CX,CY+400,Floor+110};Cover.SightTo={CX,CY-50,Floor+110};
                 L.CoverSites.Add(Cover);Cover.Frame=Cover.Frame*HalfTurn;for(FVector* P:{&Cover.Hide,&Cover.Entry,&Cover.SightFrom,&Cover.SightTo})*P=HalfTurn.TransformPosition(*P);L.CoverSites.Add(Cover);
@@ -339,8 +348,9 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
                 if(Plan.SelfSymmetric && Side>0)continue;
                 const float Direction=Level%2 ? 1.f:-1.f;
                 const FTransform Frame(FRotator(0,-90*Direction,0),{BX+Side*(RoomX+RoomW*.5f+80),BY-Direction*(D*.5f-110),Floor-300});
-                for(float DY:{-39.f,39.f})Wood(Frame.TransformPosition({0,DY,152.5f}),{8,8,305});
-                for(float H=25;H<300;H+=25)Wood(Frame.TransformPosition({0,0,H}),{76,6,6});
+                // Fixed instanced timber: one cell panel per rung would cost a draw each.
+                for(float DY:{-39.f,39.f})Fixed(Frame.TransformPosition({0,DY,152.5f}),{8,8,305},EERBlockMaterial::Wood);
+                for(float H=25;H<300;H+=25)Fixed(Frame.TransformPosition({0,0,H}),{76,6,6},EERBlockMaterial::Wood);
                 L.Ladders.Add({Frame,305,300});L.Ladders.Add({Frame*HalfTurn,305,300});
                 L.VillageUpperLadders.Add({Frame,305,300});L.VillageUpperLadders.Add({Frame*HalfTurn,305,300});
             }
@@ -353,8 +363,8 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     // Each spawn has two genuine elevated structures: a rear firing gallery
     // and an opposite corner lookout. The side shack stays inside the arena.
     L.VillageBaseVariant=Geometry.RandRange(0,2);
-    const float GalleryHeight=160+40*Geometry.RandRange(0,2),GalleryWidth=FMath::Clamp(L.ArenaSize.X-1760,1600.f,2200.f),GalleryDepth=400+100*Geometry.RandRange(0,1);
-    const float GalleryY=-HY+GalleryDepth*.5f+40,GalleryFront=GalleryY+GalleryDepth*.5f,GalleryStairX=GalleryWidth*.5f-100;
+    const float GalleryHeight=160+40*Geometry.RandRange(0,2),GalleryWidth=FMath::Clamp(L.ArenaSize.X-1760,1600.f,2200.f),GalleryDepth=560+100*Geometry.RandRange(0,1);
+    const float GalleryY=-HY+GalleryDepth*.5f+40,GalleryFront=GalleryY+GalleryDepth*.5f,GalleryStairX=GalleryWidth*.5f-110;
     Deck(0,GalleryY,GalleryWidth,GalleryDepth,GalleryHeight);
     L.VillageAccessFlights.Add(L.StairRoutes.Num());
     for(float X:{-GalleryStairX,GalleryStairX})Stairs({X,GalleryFront,0},GalleryHeight,150,180);
@@ -363,12 +373,13 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
         for(float DX:{-1.f,1.f})for(float DY:{-1.f,1.f})Wood({DX*(GalleryWidth*.5f-20),GalleryY+DY*(GalleryDepth*.5f-20),GalleryHeight+130},{20,20,260});
         Wood({0,GalleryY,GalleryHeight+250},{GalleryWidth,20,20});GraySheet({0,GalleryY,GalleryHeight+260},{GalleryWidth+20,GalleryDepth+20,.2f});
     }
-    if(L.VillageBaseVariant==2)Hut(0,GalleryY,GalleryHeight,GalleryWidth-180,GalleryDepth-180,240);
+    // Both gallery stairs land beside the barracks, not against its front wall.
+    if(L.VillageBaseVariant==2)Hut(0,GalleryY,GalleryHeight,GalleryWidth-480,GalleryDepth-280,240);
     for(float X:{-GalleryWidth*.24f,GalleryWidth*.24f})
     {
-        Wood({X,GalleryFront-5,GalleryHeight+55},{GalleryWidth*.28f,20,110});GraySheet({X,GalleryFront+5.1f,GalleryHeight+55},{GalleryWidth*.28f,.2f,110});
+        Wood({X,GalleryFront-5,GalleryHeight+55},{GalleryWidth*.26f,20,110});GraySheet({X,GalleryFront+5.1f,GalleryHeight+55},{GalleryWidth*.26f,.2f,110});
     }
-    Wood({0,GalleryFront-5,GalleryHeight+150},{1300,20,300});
+    Wood({0,GalleryFront-5,GalleryHeight+150},{1200,20,300});
     Wood({0,-HY+40,GalleryHeight+55},{GalleryWidth-20,20,110});
     FERTemplateBase Gallery;Gallery.Frame=FTransform(FVector(0,GalleryY,0));Gallery.Size={GalleryWidth,GalleryDepth,GalleryHeight};Gallery.RoofZ=GalleryHeight;
     L.Bases.Add(Gallery);Gallery.Frame=Gallery.Frame*HalfTurn;L.Bases.Add(Gallery);
@@ -399,14 +410,14 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     const FBox Shack(Store-FVector(StoreW,StoreD,StoreH)*.5f,Store+FVector(StoreW,StoreD,StoreH)*.5f);L.TownBuildings.Add(Shack);L.TownBuildings.Add(Shack.TransformBy(HalfTurn));
     // Timber ladder on the inward side of the shack roof, away from the flank.
     const FTransform Ladder(FRotator(0,180,0),{Store.X-StoreW*.5f-10,Store.Y,0});
-    for(float Y:{-39.f,39.f})Wood(Ladder.TransformPosition({0,Y,(StoreH+110)*.5f}),{8,8,StoreH+110});
-    for(float H=25;H<StoreH;H+=25)Wood(Ladder.TransformPosition({0,0,H}),{6,76,6});
+    for(float Y:{-39.f,39.f})Fixed(Ladder.TransformPosition({0,Y,(StoreH+110)*.5f}),{8,8,StoreH+110},EERBlockMaterial::Wood);
+    for(float H=25;H<StoreH;H+=25)Fixed(Ladder.TransformPosition({0,0,H}),{6,76,6},EERBlockMaterial::Wood);
     L.Ladders.Add({Ladder,StoreH+110,StoreH});L.Ladders.Add({Ladder*HalfTurn,StoreH+110,StoreH});
-    Wood({0,-HY+620,90},{600,24,180});GraySheet({0,-HY+632.1f,90},{600,.2f,180});
+    Wood({0,-HY+800,90},{600,24,180});GraySheet({0,-HY+812.1f,90},{600,.2f,180});
     }
     for(int32 SpawnRow=0;SpawnRow<2;++SpawnRow)for(int32 I=0;I<5;++I)
     {
-        const FVector P((I-2)*280,GalleryY-60+SpawnRow*120,GalleryHeight+100);
+        const FVector P((I-2)*240,GalleryY-70+SpawnRow*140,GalleryHeight+100);
         L.AlphaSpawns.Add(FTransform(FRotator(0,90,0),P));L.OmegaSpawns.Add(FTransform(FRotator(0,-90,0),HalfTurn.TransformPosition(P)));
     }
     // Reserve a cross lane between blocks; an odd origin block occupies Y=0.

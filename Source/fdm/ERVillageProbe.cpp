@@ -65,7 +65,12 @@ void AERVillageProbe::Tick(float Delta)
             {
                 const FVector D=Path[Point]-Pawn->GetActorLocation();
                 if(D.Size2D()<(Flight>=3 ? 8:26) && FMath::Abs(D.Z)<35)++Point;
-                else Pawn->AddMovementInput(D.GetSafeNormal2D(),1);
+                else
+                {
+                    // Face the walk like a player: the ready weapon reserves space ahead.
+                    PC->SetControlRotation(FRotator(0,D.Rotation().Yaw,0));
+                    Pawn->AddMovementInput(D.GetSafeNormal2D(),1);
+                }
             }
             Finished=Point==Path.Num();
             if(Finished && (Flight<4 || !L.VillageUpperLadders.IsEmpty()))
@@ -92,7 +97,7 @@ void AERVillageProbe::Tick(float Delta)
             Check(Finished && (Flight<5 || SawUpperLadder),Labels[Flight]);
             Pawn->ConsumeMovementInputVector();
             Pawn->GetCharacterMovement()->StopMovementImmediately();
-            const FVector Center(0,-L.ArenaSize.Y*.5f+620,140);FHitResult Hit;FCollisionQueryParams Q(SCENE_QUERY_STAT(ERVillageDamage),false,Pawn);
+            const FVector Center(0,-L.ArenaSize.Y*.5f+800,140);FHitResult Hit;FCollisionQueryParams Q(SCENE_QUERY_STAT(ERVillageDamage),false,Pawn);
             const uint32 Before=Map->GetStateDigest();
             const bool Found=GetWorld()->LineTraceSingleByChannel(Hit,Center-FVector(0,200,0),Center+FVector(0,200,0),ECC_GameTraceChannel1,Q);
             Check(Found && Map->ApplyHitDamage(Hit,100000) && Map->GetStateDigest()!=Before,TEXT("timber_damage"));

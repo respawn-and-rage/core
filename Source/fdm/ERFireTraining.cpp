@@ -163,17 +163,14 @@ bool BuildFireTraining(const UERMapTemplate& T,int32 Seed,int32 Attempt,TArray<F
         }
         Part(Cursor,Span,0,Height);
     };
-    // Calibrated 2mm destructible steel, exactly as the industrial ladders.
+    // Fixed instanced steel: dozens of tiny destructible rails and rungs per
+    // ladder cost one draw each, so ladders stay intact like the shell.
     auto Ladder=[&](FVector Base,float Yaw,float Rise,bool Anchored,bool LevelExit=true)
     {
         const FTransform Frame(FRotator(0,Yaw,0),Base);const float Height=Rise+110;
-        auto Part=[&](FVector P,FVector Size,bool Root){auto& B=Box(Frame.TransformPosition(P),Size,EERBlockMaterial::Metal,false);B.RotationYaw=Yaw;B.Anchored=Root && Anchored;};
-        for(float Y:{-42.f,42.f})
-        {
-            for(float X:{-3.9f,3.9f})Part({X,Y,Height*.5f},{.2f,8,Height},true);
-            for(float Edge:{-3.9f,3.9f})Part({0,Y+Edge,Height*.5f},{7.6f,.2f,Height},true);
-        }
-        for(float Z=25;Z<Rise;Z+=25)Part({0,0,Z},{.2f,76,4},false);
+        auto Part=[&](FVector P,FVector Size){auto& B=Box(Frame.TransformPosition(P),Size,EERBlockMaterial::Metal,true);B.RotationYaw=Yaw;};
+        for(float Y:{-42.f,42.f})Part({0,Y,Height*.5f},{8,8,Height});
+        for(float Z=25;Z<Rise;Z+=25)Part({0,0,Z},{3,76,4});
         // Notched high walkway ends allow stepping off at deck level instead of
         // climbing 110cm over a parapet into the lights. Keep the real handles.
         const float ExitHeight=LevelExit ? Rise+5:Height;

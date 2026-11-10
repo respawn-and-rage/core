@@ -246,6 +246,7 @@ public:
 protected:
     virtual bool GenerateLogicalWorld() override;
     virtual void ConfigureFloors() override;
+    void ConfigureInteriorLighting();
     virtual bool ValidateGeneratedCollision() const override;
     virtual void OnGenerationFinished() override;
     virtual FString GetLayoutStatistics() const override;
@@ -269,6 +270,6 @@ private:
     UPROPERTY() TObjectPtr<class UDynamicMeshComponent> AlleyTerrain;
     UPROPERTY() TArray<TObjectPtr<class UDynamicMeshComponent>> RoomsShell;
     // Cosmetic warehouse lighting under the roof lamps; never on a dedicated server.
-    UPROPERTY(Transient) TArray<TObjectPtr<class UPointLightComponent>> WarehouseLights;
+    UPROPERTY(Transient) TArray<TObjectPtr<class ULightComponent>> WarehouseLights;
     void ConfigureTemplateFloors();
 };

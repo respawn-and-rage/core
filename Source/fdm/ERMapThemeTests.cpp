@@ -112,7 +112,9 @@ bool FERMapThemeTest::RunTest(const FString& Parameters)
             {
                 const FVector Rung=Ladder.Frame.TransformPosition({0,0,25});
                 const auto* Panel=After.Panels.FindByPredicate([&](const auto& D){return D.Material==EERBlockMaterial::Metal && FVector::DistSquared(D.Transform.TransformPosition(D.Size*.5),Rung)<9;});
-                if(TestNotNull(TEXT("physical ladder has a first rung"),Panel))TestEqual(TEXT("ladder rungs get the light galvanized finish"),Panel->Surface,Palette.LadderSteel.Get());
+                // Fixed instanced ladders carry their rungs as fixed pieces.
+                const auto* Piece=After.FixedPieces.FindByPredicate([&](const auto& D){return D.Material==EERBlockMaterial::Metal && FVector::DistSquared(D.Transform.GetLocation(),Rung)<9;});
+                if(TestTrue(TEXT("physical ladder has a first rung"),Panel || Piece))TestEqual(TEXT("ladder rungs get the light galvanized finish"),Panel ? Panel->Surface:Piece->Surface,Palette.LadderSteel.Get());
             }
             TestTrue(TEXT("same arena and starts"),Before.ArenaSize==After.ArenaSize && Before.AlphaSpawns.Num()==After.AlphaSpawns.Num() && Before.OmegaSpawns.Num()==After.OmegaSpawns.Num());
             Again=Before;TestTrue(TEXT("cosmetic pass deterministic"),ERProcedural::ApplyMapTheme(C,Again));
