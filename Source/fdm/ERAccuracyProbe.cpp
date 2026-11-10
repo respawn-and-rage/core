@@ -26,12 +26,13 @@ void AERAccuracyProbe::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 #if !UE_BUILD_SHIPPING
+    const float SpreadScale=ERServer::Get(GetWorld(),"Weapons.Spread");
     if (!HasAuthority())
     {
         auto* Pawn = Cast<AERCharacter>(UGameplayStatics::GetPlayerPawn(GetWorld(),0));
         if (!Pawn || !Pawn->Weapon || !Pawn->Weapon->Data) return;
         auto* Weapon = Pawn->Weapon.Get();
-        if (!SawOwnerBase && FMath::IsNearlyEqual(Weapon->GetSpreadDegrees(),ERWeaponAccuracy::Degrees(7.01f),.01f))
+        if (!SawOwnerBase && FMath::IsNearlyEqual(Weapon->GetSpreadDegrees(),ERWeaponAccuracy::Degrees(7.01f*SpreadScale),.01f))
         {
             SawOwnerBase=true; UE_LOG(LogTemp,Display,TEXT("ER_ACCURACY_CLIENT_PASS owner_base_data"));
         }
@@ -41,7 +42,7 @@ void AERAccuracyProbe::Tick(float DeltaTime)
             if (Phase==7) Pawn->ServerStartFire();
             if (Phase==8) Pawn->ServerStopFire();
         }
-        if (!SawOwnerBloom && Phase>=7 && Weapon->GetBloomDegrees()>.2f && Weapon->MagazineAmmo<30)
+        if (!SawOwnerBloom && Phase>=7 && Weapon->GetBloomDegrees()>.2f*SpreadScale && Weapon->MagazineAmmo<30)
         {
             SawOwnerBloom=true;
             UE_LOG(LogTemp,Display,TEXT("ER_ACCURACY_CLIENT_PASS owner_ammo_bloom_replicated ammo=%d spread=%.3f"),Weapon->MagazineAmmo,Weapon->GetSpreadDegrees());
@@ -132,7 +133,7 @@ void AERAccuracyProbe::Tick(float DeltaTime)
     {
     case 1:
         Standing=H->Weapon->GetSpreadDegrees();
-        Check(FMath::IsNearlyEqual(Standing,ERWeaponAccuracy::Degrees(7.01f),.001f),TEXT("standing_base_cone"));
+        Check(FMath::IsNearlyEqual(Standing,ERWeaponAccuracy::Degrees(7.01f*SpreadScale),.001f),TEXT("standing_base_cone"));
         H->Crouch(); Advance(2,.5f); break;
     case 2:
         Check(H->bIsCrouched && H->Weapon->GetSpreadDegrees()<Standing,TEXT("crouch_narrows_cone"));
@@ -153,11 +154,11 @@ void AERAccuracyProbe::Tick(float DeltaTime)
         Check(H->Weapon->AccuracyLandingSpeed>0 && H->Weapon->AccuracyLandingServerTime>Now-3,
             TEXT("real_jump_landing_records_authority_measured_impulse"));
         Check(SamplesVary,TEXT("server_samples_different_directions"));
-        Check(H->Weapon->FiringInaccuracyAtLastShot>=7.8f && FMath::IsFinite(H->Weapon->GetFiringInaccuracy()),TEXT("worksheet_fire_impulses_accumulate_without_legacy_cap"));
+        Check(H->Weapon->FiringInaccuracyAtLastShot>=7.8f*SpreadScale && FMath::IsFinite(H->Weapon->GetFiringInaccuracy()),TEXT("worksheet_fire_impulses_accumulate_without_legacy_cap"));
         H->Health->ProtectionEndServerTime=Now+60;
         AmmoBeforeBurst=C->Weapon->MagazineAmmo; Advance(7,.65f); break;
     case 7:
-        Check(C->Weapon->MagazineAmmo<AmmoBeforeBurst && C->Weapon->GetSpreadDegrees()>Standing+.2f,TEXT("remote_rpc_burst_adds_server_bloom"));
+        Check(C->Weapon->MagazineAmmo<AmmoBeforeBurst && C->Weapon->GetSpreadDegrees()>Standing+.2f*SpreadScale,TEXT("remote_rpc_burst_adds_server_bloom"));
         Advance(8,.4f); break;
     case 8:
         Check(!C->Weapon->bReloading && C->Weapon->GetBloomDegrees()>0,TEXT("stopped_burst_recovers_gradually"));

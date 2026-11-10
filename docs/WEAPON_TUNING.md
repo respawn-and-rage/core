@@ -24,11 +24,14 @@ server, and the HUD projects the same envelope.
 - Server snapshots carry state across posture changes; the owner extrapolates them on
   the synchronized clock.
 
+The server applies global firearm dispersion and recoil scales. The pistol has additional
+scales in its own settings category, both set to 0.5 in Standard.
+
 ## Recoil
 
 `bUseWorksheetRecoil` with `HipRecoil` and `ScopedRecoil`:
 
-| Slot | Row | Hip ± var | Angle var | Optical | Pattern |
+| Slot | Row | Authored hip ± var | Angle var | Optical | Pattern |
 | --- | --- | ---: | ---: | ---: | --- |
 | Pistol | deagle | 48.2 ±18 | ±60° | same | Random |
 | SMG | mp9 | 21 ±1 | ±70° | same | Set |

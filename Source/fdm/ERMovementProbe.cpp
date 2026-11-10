@@ -94,7 +94,7 @@ void AERMovementProbe::Tick(float DeltaTime)
             {
                 const FVector SprintVelocity=M->Velocity;
                 const float SprintCone=C->Weapon->GetSpreadDegrees();
-                M->Velocity=SprintVelocity.GetSafeNormal2D()*(1500.f/3.6f);
+                M->Velocity=SprintVelocity.GetSafeNormal2D()*(1400.f/3.6f);
                 const float RunCone=C->Weapon->GetSpreadDegrees();M->Velocity=SprintVelocity;
                 UE_LOG(LogTemp,Display,TEXT("ER_MOVEMENT_CLIENT_%s owner_sprint_has_extra_spread run=%.3f sprint=%.3f"),
                     SprintCone>RunCone+1.4f?TEXT("PASS"):TEXT("FAIL"),RunCone,SprintCone);
@@ -223,7 +223,7 @@ void AERMovementProbe::Tick(float DeltaTime)
         if (Phase == 1 && Peak == 0 && Move->Velocity.Size2D() > 0 && Move->Velocity.Size2D() < Move->MaxWalkSpeed-1) Peak = Move->Velocity.Size2D();
         if (Elapsed > 1.5f)
         {
-            Check(FMath::IsNearlyEqual(Move->Velocity.Size2D(), Phase == 1 ? 1500.f/3.6f : 750.f/3.6f,1),Phase == 1 ? TEXT("15 km/h run") : TEXT("7.5 km/h Shift walk"));
+            Check(FMath::IsNearlyEqual(Move->Velocity.Size2D(), Phase == 1 ? 1400.f/3.6f : 750.f/3.6f,1),Phase == 1 ? TEXT("14 km/h run") : TEXT("7.5 km/h Shift walk"));
             if (Phase == 1) Check(Peak > 0 && Peak < Move->MaxWalkSpeed,TEXT("progressive acceleration"));
             Advance();
         }
@@ -283,7 +283,7 @@ void AERMovementProbe::Tick(float DeltaTime)
         if (Elapsed > 2)
         {
             const auto* Remote = Cast<UERMovement>(Client->GetCharacterMovement());
-            Check(FMath::IsNearlyEqual(Remote->Velocity.Size2D(),Phase==25 ? 1500.f/3.6f : 750.f/3.6f,2) && Remote->bWalkHeld==(Phase==26),Phase==25 ? TEXT("remote client run replicated") : TEXT("remote client walk intent replicated"));
+            Check(FMath::IsNearlyEqual(Remote->Velocity.Size2D(),Phase==25 ? 1400.f/3.6f : 750.f/3.6f,2) && Remote->bWalkHeld==(Phase==26),Phase==25 ? TEXT("remote client run replicated") : TEXT("remote client walk intent replicated"));
             Advance();
         }
         return;
@@ -370,9 +370,9 @@ void AERMovementProbe::Tick(float DeltaTime)
         {
             if (Elapsed > 1.5f && Peak == 0)
             {
-                Check(Remote->IsSprinting() && FMath::IsNearlyEqual(Remote->Velocity.Size2D(),750.f,2),TEXT("remote double-W intent: 27 km/h sprint"));
+                Check(Remote->IsSprinting() && FMath::IsNearlyEqual(Remote->Velocity.Size2D(),2500.f/3.6f,2),TEXT("remote double-W intent: 25 km/h sprint"));
                 auto* Weapon=Client->Weapon.Get();const float SprintCone=Weapon->GetSpreadDegrees();
-                const FVector SprintVelocity=Remote->Velocity;Remote->Velocity=SprintVelocity.GetSafeNormal2D()*(1500.f/3.6f);
+                const FVector SprintVelocity=Remote->Velocity;Remote->Velocity=SprintVelocity.GetSafeNormal2D()*(1400.f/3.6f);
                 const float RunCone=Weapon->GetSpreadDegrees();Remote->Velocity=SprintVelocity;
                 Check(SprintCone>RunCone+1.4f,TEXT("actual remote sprint adds real dispersion beyond ordinary running"));
                 const uint32 Shots=Weapon->AuthorizedShotCount;

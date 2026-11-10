@@ -66,7 +66,6 @@ const UERWeaponData* AERWeapon::Tuned() const
     if(!Data)return nullptr;
     if(TuningSource==Data && TunedData)return TunedData;
     const auto& Rules=ERServer::Rules(GetWorld());
-    if(Rules.IsStandard())return Data;
     auto* Self=const_cast<AERWeapon*>(this);
     Self->TuningSource=Data;
     Self->TunedData=DuplicateObject<UERWeaponData>(Data,Self);

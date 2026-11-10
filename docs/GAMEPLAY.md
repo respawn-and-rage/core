@@ -45,7 +45,7 @@ does not affect bot vision. Stationary targets keep team, skin and start across 
 | Action | Value |
 | --- | --- |
 | Capsule | 185cm standing, 68cm wide, eye 170cm; half height 92.5, crouched 62.5 |
-| Walk (Shift) / run / sprint | 7.5 / 15 / 27 km/h |
+| Walk (Shift) / run / sprint | 7.5 / 14 / 25 km/h |
 | Crouch / crawl / posture transition | 150 / 82.5 / 67.5 cm/s |
 | Ladder, light item / heavy weapon stowed | 216 / 270 cm/s |
 | Stamina | 15s of sprint, 20s full recovery from empty, also while running |
@@ -109,7 +109,7 @@ resets, Standard reset and named presets. Saved in GameUserSettings under
 direct launches can set `[RespawnAndRage.ServerRules]` in Game.ini:
 
 ```ini
-Move.Sprint=27
+Move.Sprint=24
 Smoke.Radius=6
 Weapon.HE.ExplosionRadius=6
 Kit.rifleman.offense.HE=3
@@ -121,7 +121,7 @@ authored assets stay untouched. Kit values are final carried quantities. Client 
 preferences never apply to another server. Configuration exposes existing mechanics
 only; it adds no slots or systems. Material rules travel in the cell descriptor.
 
-`Map.ExpectedTeamSize` (1–16, default 2) is fixed at creation and shown read-only in
+`Map.ExpectedTeamSize` (1–16, default 3) is fixed at creation and shown read-only in
 the lobby. See [MAPS.md](MAPS.md).
 
 ## Gameplay messages

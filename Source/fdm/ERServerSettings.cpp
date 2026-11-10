@@ -54,8 +54,8 @@ const TArray<FERServerSetting>& ERServer::Settings()
         Add(TEXT("Match.KillPoints"),TEXT("Match"),TEXT("Points per enemy kill"),TEXT("points"),1.f,0.f,100.f,true,true);
         Add(TEXT("Match.TeamKillPoints"),TEXT("Match"),TEXT("Team score change per teamkill"),TEXT("points"),-1.f,-100.f,0.f,true,true);
         Add(TEXT("Move.Walk"),TEXT("Movement"),TEXT("Walking speed"),TEXT("km/h"),7.5f,0.1f,50.f,false,false);
-        Add(TEXT("Move.Run"),TEXT("Movement"),TEXT("Running speed"),TEXT("km/h"),15.f,0.1f,75.f,false,false);
-        Add(TEXT("Move.Sprint"),TEXT("Movement"),TEXT("Sprint speed"),TEXT("km/h"),27.f,0.1f,100.f,false,false);
+        Add(TEXT("Move.Run"),TEXT("Movement"),TEXT("Running speed"),TEXT("km/h"),14.f,0.1f,75.f,false,false);
+        Add(TEXT("Move.Sprint"),TEXT("Movement"),TEXT("Sprint speed"),TEXT("km/h"),25.f,0.1f,100.f,false,false);
         Add(TEXT("Move.Crouch"),TEXT("Movement"),TEXT("Crouched speed"),TEXT("km/h"),5.4f,0.1f,30.f,false,false);
         Add(TEXT("Move.Prone"),TEXT("Movement"),TEXT("Crawling speed"),TEXT("km/h"),2.97f,0.1f,20.f,false,false);
         Add(TEXT("Move.Posture"),TEXT("Movement"),TEXT("Speed while changing posture"),TEXT("km/h"),2.43f,0.1f,20.f,true,false);
@@ -93,8 +93,8 @@ const TArray<FERServerSetting>& ERServer::Settings()
         Add(TEXT("Damage.Arms"),TEXT("Health and respawn"),TEXT("Arm bullet damage"),TEXT("×"),1.f,0.f,4.f,true,false);
         Add(TEXT("Damage.Legs"),TEXT("Health and respawn"),TEXT("Leg bullet damage"),TEXT("×"),1.f,0.f,4.f,true,false);
         Add(TEXT("Weapons.Damage"),TEXT("Weapons - global"),TEXT("All firearm damage"),TEXT("×"),1.f,0.f,10.f,false,false);
-        Add(TEXT("Weapons.Spread"),TEXT("Weapons - global"),TEXT("All firearm dispersion"),TEXT("×"),1.f,0.f,5.f,false,false);
-        Add(TEXT("Weapons.Recoil"),TEXT("Weapons - global"),TEXT("All firearm recoil"),TEXT("×"),1.f,0.f,5.f,false,false);
+        Add(TEXT("Weapons.Spread"),TEXT("Weapons - global"),TEXT("All firearm dispersion"),TEXT("×"),0.5f,0.f,5.f,false,false);
+        Add(TEXT("Weapons.Recoil"),TEXT("Weapons - global"),TEXT("All firearm recoil"),TEXT("×"),0.5f,0.f,5.f,false,false);
         Add(TEXT("Weapons.SprintSpread"),TEXT("Weapons - global"),TEXT("Sprint spread penalty"),TEXT("degrees"),1.5f,0.f,10.f,true,false);
         Add(TEXT("Smoke.Growth"),TEXT("Smoke"),TEXT("Expansion duration"),TEXT("s"),2.2f,.1f,30.f,true);
         Add(TEXT("Smoke.Fade"),TEXT("Smoke"),TEXT("Dissipation duration"),TEXT("s"),4.f,.1f,30.f,true);
@@ -127,7 +127,7 @@ const TArray<FERServerSetting>& ERServer::Settings()
         Add(TEXT("Recon.MinimapRadius"),TEXT("Recon"),TEXT("Minimap display radius"),TEXT("m"),40.f,10.f,150.f,true,false);
         Add(TEXT("Structure.Health"),TEXT("Destruction"),TEXT("All material resistance"),TEXT("×"),1.f,0.1f,10.f,false,false);
         Add(TEXT("Structure.Explosion"),TEXT("Destruction"),TEXT("Explosion damage to structures"),TEXT("×"),1.f,0.f,10.f,false,false);
-        Add(TEXT("Map.ExpectedTeamSize"),TEXT("Maps"),TEXT("Expected players per team (map sizing only)"),TEXT("players / team"),2.f,1.f,16.f,false,true);
+        Add(TEXT("Map.ExpectedTeamSize"),TEXT("Maps"),TEXT("Expected players per team (map sizing only)"),TEXT("players / team"),3.f,1.f,16.f,false,true);
         Add(TEXT("Map.FixedSeed"),TEXT("Maps"),TEXT("Use a fixed generation seed"),TEXT("on/off"),0.f,0.f,1.f,false,true);
         Add(TEXT("Map.Seed"),TEXT("Maps"),TEXT("Generation seed"),TEXT(""),42.f,0.f,2147483520.f,false,true);
         Add(TEXT("Material.Drywall.Health"),TEXT("Destruction"),TEXT("Drywall resistance"),TEXT("×"),1.f,.1f,10.f,true);
@@ -146,9 +146,11 @@ const TArray<FERServerSetting>& ERServer::Settings()
         Add(TEXT("Material.Glass.Transmission"),TEXT("Destruction"),TEXT("Glass blast transmission"),TEXT("×"),1.f,0.f,4.f,true);
         for(const auto& Entry:ERMaps::All())if(Entry.InRotation)
             Add(*(FString(TEXT("Map."))+Entry.Id),TEXT("Maps"),*(FString(Entry.Label)+TEXT(" in rotation")),TEXT("on/off"),1.f,0.f,1.f,false,true);
-        // Absolute weapon overrides retain authored values until explicitly edited.
+        Add(TEXT("Weapon.Pistol.SpreadScale"),TEXT("Weapon - Pistol"),TEXT("Pistol dispersion"),TEXT("×"),.5f,0.f,5.f);
+        Add(TEXT("Weapon.Pistol.RecoilScale"),TEXT("Weapon - Pistol"),TEXT("Pistol recoil"),TEXT("×"),.5f,0.f,5.f);
+        // Absolute weapon overrides default to authored values unless specified here.
         auto WeaponField = [&](const TCHAR* Id, const TCHAR* Section, const TCHAR* Property, const TCHAR* Label,
-            const TCHAR* Unit, float Min, float Max, bool Advanced=false, bool Integer=false, float Factor=1)
+            const TCHAR* Unit, float Min, float Max, bool Advanced=false, bool Integer=false, float Factor=1, TOptional<float> Default={})
         {
             FERServerSetting S; S.Key=FName(*FString::Printf(TEXT("Weapon.%s.%s"),Id,Property));
             S.Section=Section; S.Label=Label; S.Unit=Unit; S.Min=Min; S.Max=Max;
@@ -163,7 +165,8 @@ const TArray<FERServerSetting>& ERServer::Settings()
             FString Mode,Field;if(FString(Property).Split(TEXT("."),&Mode,&Field))
                 if(const auto* Friendly=Labels.Find(Field))S.Label=(Mode.StartsWith(TEXT("Hip"))?TEXT("Hip fire / "):TEXT("Aimed fire / "))+*Friendly;
             if(S.Unit==TEXT("worksheet units"))S.Unit=TEXT("spread units");
-            S.Advanced=Advanced; S.Integer=Integer; S.AssetDefault=true;
+            S.Advanced=Advanced; S.Integer=Integer; S.AssetDefault=!Default.IsSet();
+            if(Default.IsSet())S.Default=Default.GetValue();
             S.Weapon=FName(*(FString(TEXT("DA_"))+Id)); S.Property=Property; S.Factor=Factor; R.Add(S);
         };
         for (const TCHAR* Id : {TEXT("Pistol"),TEXT("SMG"),TEXT("Shotgun"),TEXT("Assault"),TEXT("Carbine"),TEXT("Sniper"),TEXT("Launcher"),TEXT("HE"),TEXT("Smoke"),TEXT("Knife")})
@@ -219,8 +222,9 @@ const TArray<FERServerSetting>& ERServer::Settings()
                 if(FString(Id)==TEXT("Launcher"))WeaponField(Id,*Group,TEXT("ScopedLaunchRangeMultiplier"),TEXT("Aimed horizontal launch multiplier"),TEXT("×"),.1f,4,true);
                 if(FString(Id)!=TEXT("Smoke"))
                 {
-                    WeaponField(Id,*Group,TEXT("ExplosionRadius"),TEXT("Maximum player damage radius"),TEXT("m"),.1f,30,false,false,100);
-                    WeaponField(Id,*Group,TEXT("ExplosionInnerRadius"),TEXT("Full player damage radius"),TEXT("m"),0,30,false,false,100);
+                    WeaponField(Id,*Group,TEXT("ExplosionRadius"),TEXT("Maximum player damage radius"),TEXT("m"),.1f,30,false,false,100,Name==TEXT("HE") ? TOptional<float>(8.f) : TOptional<float>());
+                    WeaponField(Id,*Group,TEXT("ExplosionInnerRadius"),TEXT("Full player damage radius"),TEXT("m"),0,30,false,false,100,
+                        Name==TEXT("HE") ? TOptional<float>(4.f) : TOptional<float>());
                     WeaponField(Id,*Group,TEXT("BlockExplosion.BaseDamage"),TEXT("Peak structural damage"),TEXT("HP"),0,10000,true);
                     WeaponField(Id,*Group,TEXT("BlockExplosion.InnerRadius"),TEXT("Full structural damage radius"),TEXT("m"),0,20,true,false,100);
                     WeaponField(Id,*Group,TEXT("BlockExplosion.OuterRadius"),TEXT("Maximum structural damage radius"),TEXT("m"),.1f,20,true,false,100);
@@ -329,11 +333,13 @@ void ERServer::TuneWeapon(UERWeaponData* Target,const FERServerRules& Rules,FNam
 {
     if(!Target)return;
     for(const auto& S:Settings())
-        if(S.Weapon==AssetId && Rules.Has(S.Key))WriteNumber(Target,Target->GetClass(),S.Property,Rules.Get(S.Key)*S.Factor);
+        if(S.Weapon==AssetId && (!S.AssetDefault || Rules.Has(S.Key)))WriteNumber(Target,Target->GetClass(),S.Property,Rules.Get(S.Key)*S.Factor);
     if(Target->Payload==EERPayload::Bullet)
     {
         Target->Damage*=Rules.Get("Weapons.Damage");
-        const float Spread=Rules.Get("Weapons.Spread"),Recoil=Rules.Get("Weapons.Recoil");
+        const bool bPistol=AssetId==FName("DA_Pistol");
+        const float Spread=Rules.Get("Weapons.Spread")*(bPistol ? Rules.Get("Weapon.Pistol.SpreadScale") : 1.f);
+        const float Recoil=Rules.Get("Weapons.Recoil")*(bPistol ? Rules.Get("Weapon.Pistol.RecoilScale") : 1.f);
         for(auto* Mode:{&Target->HipAccuracy,&Target->ScopedAccuracy})
             for(const TCHAR* Field:{TEXT("Spread"),TEXT("Stand"),TEXT("Crouch"),TEXT("Move"),TEXT("Ladder"),TEXT("Jump"),TEXT("JumpInitial"),TEXT("JumpApex"),TEXT("Land"),TEXT("Fire")})
                 WriteNumber(Mode,FERWeaponAccuracyMode::StaticStruct(),Field,ReadNumber(Mode,FERWeaponAccuracyMode::StaticStruct(),Field)*Spread);

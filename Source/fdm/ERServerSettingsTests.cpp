@@ -23,14 +23,16 @@ bool FERServerRulesTest::RunTest(const FString&)
 {
     FERServerRules R;
     TestEqual(TEXT("Standard smoke lifetime is doubled"),R.Get("Smoke.Duration"),24.f);
+    TestEqual(TEXT("Standard running speed"),R.Get("Move.Run"),14.f);
+    TestEqual(TEXT("Standard sprint speed"),R.Get("Move.Sprint"),25.f);
     TestEqual(TEXT("Latest sprint duration remains Standard"),R.Get("Move.SprintDuration"),15.f);
     TestEqual(TEXT("Actual weapon value is retained without override"),R.Get("Weapon.Shotgun.Damage",22),22.f);
     R.Set("Move.SprintDuration",7);R.Set("Move.Recovery",11);
     R.Set("Unknown.Arbitrary",10);R.Set("Move.Run",std::numeric_limits<float>::quiet_NaN());
     TestEqual(TEXT("Unknown / nonfinite settings are rejected"),R.Values.Num(),2);
-    TestEqual(TEXT("map sizing defaults to two per team"),R.Get("Map.ExpectedTeamSize"),2.f);
-    R.Set("Map.ExpectedTeamSize",3.4f);
-    TestEqual(TEXT("map sizing is integral"),R.Get("Map.ExpectedTeamSize"),3.f);
+    TestEqual(TEXT("map sizing defaults to three per team"),R.Get("Map.ExpectedTeamSize"),3.f);
+    R.Set("Map.ExpectedTeamSize",4.4f);
+    TestEqual(TEXT("map sizing is integral"),R.Get("Map.ExpectedTeamSize"),4.f);
     TestEqual(TEXT("map sizing never changes admission capacity"),ERServer::ValidMaxPlayers(33),33);
     R.Set("Health.Max",150);R.Set("Health.Start",200);
     R.Set("Claymore.DetectionAngle",150);R.Set("Claymore.DamageAngle",80);
@@ -81,7 +83,7 @@ bool FERServerWeaponSettingsTest::RunTest(const FString&)
     auto* Class=LoadClass<AERCharacter>(nullptr,TEXT("/Game/EclipseRecoil/Core/BP_ERCharacter.BP_ERCharacter_C"));
     if(!TestNotNull(TEXT("Saved catalog"),Class))return false;
     const auto* Catalog=Class->GetDefaultObject<AERCharacter>();
-    FERServerRules R;R.Set("Weapons.Damage",1.5f);R.Set("Weapons.Recoil",.5f);
+    FERServerRules R;R.Set("Weapons.Damage",1.5f);R.Set("Weapons.Spread",1.f);R.Set("Weapons.Recoil",.75f);
     R.Set("Weapon.Assault.Damage",20);R.Set("Weapon.Assault.MagazineSize",10);
     R.Set("Weapon.Assault.HipAccuracy.Move",12);R.Set("Weapon.HE.ExplosionRadius",2);R.Set("Weapon.HE.ExplosionInnerRadius",6);
     const auto Standard=ERLoadouts::Resolve("rifleman","offense",false,Catalog);
@@ -89,11 +91,25 @@ bool FERServerWeaponSettingsTest::RunTest(const FString&)
     auto* Tuned=DuplicateObject<UERWeaponData>(Original,GetTransientPackage());ERServer::TuneWeapon(Tuned,R,Original->GetFName());
     TestEqual(TEXT("Absolute override followed by global multiplier"),Tuned->Damage,30.f);
     TestEqual(TEXT("Nested precision field is applied"),Tuned->HipAccuracy.Move,12.f);
-    TestEqual(TEXT("Scoped recoil multiplier applies to actual worksheet"),Tuned->ScopedRecoil.Magnitude,Original->ScopedRecoil.Magnitude*.5f);
+    TestEqual(TEXT("Scoped recoil multiplier applies to actual worksheet"),Tuned->ScopedRecoil.Magnitude,Original->ScopedRecoil.Magnitude*.75f);
     TestEqual(TEXT("Authored weapon stays immutable"),Original->Damage,OriginalDamage);
+    const FERServerRules Defaults;
+    for(const auto& D:Catalog->ReferenceArsenal)if(D && D->GetFName()==FName("DA_Pistol"))
+    {
+        auto* Pistol=DuplicateObject<UERWeaponData>(D.Get(),GetTransientPackage());
+        ERServer::TuneWeapon(Pistol,Defaults,D->GetFName());
+        TestEqual(TEXT("Standard pistol dispersion halves the global default"),
+            Pistol->HipAccuracy.Spread,D->HipAccuracy.Spread*.25f);
+        TestEqual(TEXT("Standard pistol recoil halves the global default"),
+            Pistol->HipRecoil.Magnitude,D->HipRecoil.Magnitude*.25f);
+    }
     for(const auto& D:Catalog->ReferenceArsenal)if(D && D->GetFName()==FName("DA_HE"))
     {
-        auto* HE=DuplicateObject<UERWeaponData>(D.Get(),GetTransientPackage());ERServer::TuneWeapon(HE,R,D->GetFName());
+        auto* HE=DuplicateObject<UERWeaponData>(D.Get(),GetTransientPackage());
+        ERServer::TuneWeapon(HE,Defaults,D->GetFName());
+        TestEqual(TEXT("Standard HE maximum damage radius"),HE->ExplosionRadius,800.f);
+        TestEqual(TEXT("Standard HE full damage radius"),HE->ExplosionInnerRadius,400.f);
+        ERServer::TuneWeapon(HE,R,D->GetFName());
         TestEqual(TEXT("Meters convert to centimeters"),HE->ExplosionRadius,200.f);
         TestTrue(TEXT("Full damage radius does not exceed maximum"),HE->ExplosionInnerRadius<=HE->ExplosionRadius);
     }
@@ -107,6 +123,8 @@ bool FERServerWeaponSettingsTest::RunTest(const FString&)
         for(const auto& D:Catalog->ReferenceArsenal)if(D && D->GetFName()==S.Weapon)
         {
             auto* Copy=DuplicateObject<UERWeaponData>(D.Get(),GetTransientPackage());FERServerRules One;
+            One.Set("Weapons.Spread",1.f);One.Set("Weapons.Recoil",1.f);
+            One.Set("Weapon.Pistol.SpreadScale",1.f);One.Set("Weapon.Pistol.RecoilScale",1.f);
             const float Value=FMath::Clamp(S.Min+(S.Max-S.Min)*.1f,S.Min,S.Max);
             One.Set(S.Key,Value);ERServer::TuneWeapon(Copy,One,S.Weapon);
             // Radius ordering may clamp the inner radius; all other fields must match.

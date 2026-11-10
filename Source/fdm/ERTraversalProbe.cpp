@@ -197,9 +197,13 @@ void AERTraversalProbe::Tick(float Delta)
             if(Step>=1 && Step<=3 && Okay)
             {
                 auto* W=Client->Weapon.Get();const uint32 Shots=W->AuthorizedShotCount;
-                if(Step==3)Check(FMath::IsNearlyEqual(W->GetSpreadDegrees(),D->bUseWorksheetAccuracy ?
-                    ERWeaponAccuracy::Degrees(D->HipAccuracy.Spread+2*D->HipAccuracy.Ladder+W->GetFiringInaccuracy()) :
-                    D->StandingSpreadDegrees+W->GetBloomDegrees(),.01f),TEXT("stationary ladder pistol uses its accuracy profile"));
+                if(Step==3)
+                {
+                    const auto* Tuned=W->Tuned();
+                    Check(FMath::IsNearlyEqual(W->GetSpreadDegrees(),Tuned->bUseWorksheetAccuracy ?
+                        ERWeaponAccuracy::Degrees(Tuned->HipAccuracy.Spread+2*Tuned->HipAccuracy.Ladder+W->GetFiringInaccuracy()) :
+                        Tuned->StandingSpreadDegrees+W->GetBloomDegrees(),.01f),TEXT("stationary ladder pistol uses its accuracy profile"));
+                }
                 Client->ServerStartFire();
                 auto* Grenade=W->CookedGrenade.Get();
                 const bool Armed=Step!=2 || (Grenade && W->bCookingGrenade && Grenade->bHeld);
