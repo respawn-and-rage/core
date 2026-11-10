@@ -22,6 +22,9 @@
 #include "Misc/App.h"
 #include "ShaderCompiler.h"
 #include "UnrealClient.h"
+#include "GameFramework/HUD.h"
+#include "Animation/AnimSingleNodeInstance.h"
+#include "Animation/AnimSequence.h"
 
 AERArsenalProbe::AERArsenalProbe() { bReplicates = true; bAlwaysRelevant = true; PrimaryActorTick.bCanEverTick = true; }
 void AERArsenalProbe::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -176,6 +179,40 @@ void AERArsenalProbe::Tick(float DeltaTime)
                 : (Phase==1 ? .29f : Phase==2 ? .5f : Phase==3 ? .65f : 1.f));
         }
         return;
+    }
+    if (FParse::Param(FCommandLine::Get(), TEXT("ERFPSPoseGallery")))
+    {
+        // Standalone first-person review: idle, scrubbed fire and reload frames, iron aim.
+        auto* PC=Cast<AERPlayerController>(GetWorld()->GetFirstPlayerController());
+        auto* C=PC ? Cast<AERCharacter>(PC->GetPawn()) : nullptr;
+        if (!C || !C->Weapon || !PC->IsLocalController() || C->Inventory.Num()!=10) return;
+        if (GetWorld()->GetTimeSeconds()<FMath::Max(8.,Deadline) || (GShaderCompilingManager && GShaderCompilingManager->IsCompiling())) return;
+        struct FPoseStep { int32 Kind; float Fraction; const TCHAR* Name; };
+        static const FPoseStep Steps[]={{0,0,TEXT("Idle")},{1,.15f,TEXT("Fire15")},{1,.4f,TEXT("Fire40")},{2,.2f,TEXT("Reload20")},
+            {2,.4f,TEXT("Reload40")},{2,.6f,TEXT("Reload60")},{2,.8f,TEXT("Reload80")},{3,0,TEXT("Aim")}};
+        PC->SetControlRotation(FRotator::ZeroRotator);PC->SetIgnoreLookInput(true);PC->SetIgnoreMoveInput(true);
+        if (PC->GetHUD()) PC->GetHUD()->bShowHUD=false;
+        if (GalleryIndex>=10) { FPlatformMisc::RequestExitWithStatus(false,0); return; }
+        if (C->Weapon!=C->Inventory[GalleryIndex]) { C->ServerSelectWeapon(GalleryIndex); Phase=0; Deadline=GetWorld()->GetTimeSeconds()+1.2; return; }
+        const int32 Step=Phase/2;
+        if (Step>=UE_ARRAY_COUNT(Steps)) { ++GalleryIndex; Phase=0; return; }
+        const auto* Data=C->Weapon->Data.Get();
+        const FPoseStep& Pose=Steps[Step];
+        UAnimSequence* Arms=Pose.Kind==1 ? Data->FireAnimation.Get() : Pose.Kind==2 ? Data->ReloadAnimation.Get() : Data->IdleAnimation.Get();
+        UAnimSequence* Gun=Pose.Kind==1 ? Data->WeaponFireAnimation.Get() : Pose.Kind==2 ? Data->WeaponReloadAnimation.Get() : Data->WeaponIdleAnimation.Get();
+        const bool Aim=Pose.Kind==3;
+        if ((Pose.Kind==1 || Pose.Kind==2) ? !Arms : (Aim && (C->Weapon->HasOpticalScope() || (GalleryIndex!=4 && GalleryIndex!=7)))) { Phase+=2; return; }
+        if (Phase%2==0)
+        {
+            const bool Scrub=Pose.Kind==1 || Pose.Kind==2;
+            if (Arms) { C->FirstPersonBody->PlayAnimation(Arms,!Scrub); if (Scrub) { C->FirstPersonBody->GetSingleNodeInstance()->SetPosition(Arms->GetPlayLength()*Pose.Fraction,false); C->FirstPersonBody->SetPlayRate(0.f); } else C->FirstPersonBody->SetPlayRate(1.f); }
+            if (Gun) { C->FirstPersonRifle->PlayAnimation(Gun,!Scrub); if (Scrub) { C->FirstPersonRifle->GetSingleNodeInstance()->SetPosition(Gun->GetPlayLength()*Pose.Fraction,false); C->FirstPersonRifle->SetPlayRate(0.f); } else C->FirstPersonRifle->SetPlayRate(1.f); }
+            C->Weapon->ScopeLevel=Aim ? 1 : 0;
+            ++Phase; Deadline=GetWorld()->GetTimeSeconds()+(Aim ? .8 : .35); return;
+        }
+        FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir()/FString::Printf(TEXT("Testing/FPSPoses/S%02d_%d_%s.png"),GalleryIndex,Step,Pose.Name),false,false);
+        UE_LOG(LogTemp,Display,TEXT("ER_FPS_POSE_GALLERY slot=%d pose=%s weapon=%s"),GalleryIndex,Pose.Name,*Data->DisplayName);
+        ++Phase; Deadline=GetWorld()->GetTimeSeconds()+.3; return;
     }
     if (FParse::Param(FCommandLine::Get(), TEXT("ERArsenalGallery")))
     {

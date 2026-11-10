@@ -26,7 +26,8 @@ Rebuild. Worksheet rows are in [WEAPON_TUNING.md](WEAPON_TUNING.md); kit quantit
 7. **Key lists in scripts:** `presentation_labels.py`, `scope_profiles.py` when scoped,
    `setup_world_weapon_pose.py` for firearms, `setup_empty_trigger_audio.py`,
    `prepare_audio_pass.py` plus a palette ([AUDIO.md](AUDIO.md)).
-8. **Grips:** `retarget_weapon_hands.py`, `fix_weapon_muzzles.py`.
+8. **Grips:** `retarget_weapon_hands.py`, `fix_weapon_muzzles.py`, and the firearm key list in
+   `setup_fps_support_elbow.py`.
 9. **Checks that count slots:** `verify_sketchfab_weapons.py` (`complete_ten_slot_catalog`),
    `ERLoadoutTests.cpp`, `ERServerSettingsTests.cpp`.
 10. **Docs:** the Arsenal table below.
@@ -121,10 +122,16 @@ Scales: Pistol .92, SMG .92, Shotgun .90, Assault 1.0, Carbine .95, Sniper .78, 
 Long guns: stock passes under the upper arm at half shoulder span minus 1cm; chest 30°
 neutral / 15° ADS plus clavicles 25° / 30°, neck counterturned; two-hand bounded IK on all
 20 skins. Left palm on the guard underside, wrist yaw 60° toward the muzzle, palm normal +Z.
-The left forearm must align with the palm's long axis. `FERTeamAppearance.
+The Launcher instead seats the left palm on the left flank of its vertical foregrip, facing it,
+with the fingers leading across the front. The left forearm must align with the palm's long axis. `FERTeamAppearance.
 WorldSupportPalmOffsetCm` is a per-skin correction. Pistols use a two-hand cup contact.
 
 `setup_world_weapon_pose.py` updates only the seven firearm presentation profiles.
+
+Items without a reference pose (knife, hand grenades, Claymore) share a two-hand aim base clip.
+`UERPostureMesh` carries them one-handed instead: right hand in a low guard ahead of the ribs with
+the authored wrist rotation, so the grip on `HandGrip_R` is unchanged, and the empty left arm
+relaxed at the hip. The carry fades out with the prone blend; the grenade throw pose applies on top.
 
 Held world poses query full weapon bounds against pawn-blocking geometry and
 try a bounded rearward/upward tuck while preserving aim direction. Movement sweeps
@@ -156,6 +163,11 @@ The rig lives in `Characters/FirstPerson`; skin forearms come from `Teams/{Alpha
 FirstPerson`. Component transform `(-11.2263,1.4908,-159.9167)`, yaw -90, scale 1. Grip data lives
 in project-owned weapon data and poses, never edited in source meshes.
 
+Hand clips must hand over to the idle pose without a jump. The support arm bends toward the idle
+elbow in every fire and reload frame (`retarget_weapon_hands.py`), and `setup_fps_support_elbow.py`
+re-solves saved `A_<Key>_Hands_Fire/Reload` clips that way, fading out any start or end residual
+of either hand. It saves only those clips, after a backup in `Saved/FPSSupportElbowBackup`.
+
 The knife uses a user-set manual pose (`ERKnifeManualGripApproved` metadata,
 `apply_manual_knife_grip.py`), FPS scale .65, and takes precedence over all automatic fitting.
 
@@ -174,6 +186,8 @@ each model's licence, including Milkor's CC BY-NC. Sources: private
 ## Verify
 
 Always `test-reference-weapons.py` (`--render` for viewmodels), then as relevant:
+`-ERFPSPoseGallery` on a standalone `?ERFullArsenalTest` map (idle, scrubbed fire and reload frames
+and iron aim per slot, written to `Saved/Testing/FPSPoses`),
 `test-arsenal.py`, `test-scopes.py --render`, `test-world-poses.py`, `test-network.py --shot-feedback`,
 `test-hit-fidelity.py` (rendered figure against hit bodies; `--lag 0 25 50` for two-peer shot timing).
 Native: `EclipseRecoil.Weapons.ReferenceBallistics`, `EclipseRecoil.Weapons.ShotHistory`. Saved assets: `verify_sketchfab_weapons.py`.

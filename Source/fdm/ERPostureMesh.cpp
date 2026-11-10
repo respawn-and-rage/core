@@ -424,6 +424,44 @@ void UERPostureMesh::FinalizeBoneTransform()
             FitPalm(true,Contact,PalmRotation);
         }
     }
+    if(Mesh && C && Data && !Data->bWorldReferencePose && !C->Health->bDead && !C->IsWeaponStowed() && Blend<1.f)
+    {
+        // The shared base clip is a two-hand aim: with a knife, grenade or
+        // Claymore it left the support arm locked straight ahead and the item
+        // crossed over the chest. Carry the item at the ribs and relax the
+        // empty arm. The grip on HandGrip_R itself is unchanged.
+        const auto& Ref=RigCache;auto& Pose=GetEditableComponentSpaceTransforms();
+        const float Unit=1.f/FMath::Max(.1f,float(GetComponentScale().X));
+        const FVector Up=GetComponentTransform().InverseTransformVectorNoScale(FVector::UpVector).GetSafeNormal();
+        const FVector Forward=GetComponentTransform().InverseTransformVectorNoScale(C->GetActorForwardVector()).GetSafeNormal();
+        const FVector Side=GetComponentTransform().InverseTransformVectorNoScale(C->GetActorRightVector()).GetSafeNormal();
+        auto Carry=[&](bool LeftHand,const FVector& Offset,const FVector& Pole,bool FollowForearm,float TwistDegrees)
+        {
+            const TCHAR* UpperName=LeftHand ? TEXT("upperarm_l"):TEXT("upperarm_r");
+            const TCHAR* LowerName=LeftHand ? TEXT("lowerarm_l"):TEXT("lowerarm_r");
+            const TCHAR* HandName=LeftHand ? TEXT("hand_l"):TEXT("hand_r");
+            const int32 Upper=Ref.FindBoneIndex(UpperName),Lower=Ref.FindBoneIndex(LowerName),Hand=Ref.FindBoneIndex(HandName);
+            if(!Pose.IsValidIndex(Upper) || !Pose.IsValidIndex(Lower) || !Pose.IsValidIndex(Hand))return;
+            const FVector Outward=LeftHand ? -Side:Side;
+            const FVector Target=Pose[Upper].GetLocation()+(Forward*Offset.X+Outward*Offset.Y+Up*Offset.Z)*Unit;
+            const FVector OldForearm=(Pose[Hand].GetLocation()-Pose[Lower].GetLocation()).GetSafeNormal();
+            FitLimb(Ref,Pose,UpperName,LowerName,HandName,FMath::Lerp(Pose[Hand].GetLocation(),Target,1.f-Blend),Pose[Hand].GetRotation(),
+                Forward*Pole.X+Outward*Pole.Y+Up*Pole.Z);
+            const FVector Wrist=Pose[Hand].GetLocation();
+            if(!FollowForearm)return;
+            const FVector Forearm=(Wrist-Pose[Lower].GetLocation()).GetSafeNormal();
+            const FQuat Follow=FQuat(Forearm,FMath::DegreesToRadians(TwistDegrees*(1.f-Blend)))*FQuat::FindBetweenNormals(OldForearm,Forearm);
+            for(int32 Bone=Hand;Bone<Pose.Num();++Bone)if(Ref.InSubtree(Bone,Hand))
+            {
+                Pose[Bone].SetLocation(Wrist+Follow.RotateVector(Pose[Bone].GetLocation()-Wrist));
+                Pose[Bone].SetRotation(Follow*Pose[Bone].GetRotation());
+            }
+        };
+        // The authored grip points the item forward in world space: keep that
+        // wrist rotation and only bring the right forearm to a low guard.
+        Carry(false,FVector(30,-10,-20),FVector(0.f,.7f,-.7f),false,0.f);
+        Carry(true,FVector(8,4,-46),FVector(-.8f,.4f,0.f),true,90.f);
+    }
     if(Mesh && C && Data && !Data->bWorldReferencePose && !C->Health->bDead && !C->IsWeaponStowed())
     {
         const auto& Ref=RigCache;auto& Pose=GetEditableComponentSpaceTransforms();

@@ -3,9 +3,10 @@ from pathlib import Path
 import hashlib,json,math,shutil
 import unreal as ue
 root=Path(ue.Paths.project_dir()).resolve();a=ue.EditorAssetLibrary
-backup=root/'Saved/WorldWeaponPoseBackup/2026-10-26/Revision8';backup.mkdir(parents=True,exist_ok=True)
+backup=root/'Saved/WorldWeaponPoseBackup/2026-10-26/Revision9';backup.mkdir(parents=True,exist_ok=True)
 profiles={'Pistol':(.92,-5.),'SMG':(.92,14.),'Shotgun':(.90,20.),'Assault':(1.,18.),'Carbine':(.95,16.),'Sniper':(.78,18.),'Launcher':(.95,14.)}
 receipt=[]
+GRIP_HEIGHT=5.;GRIP_AXIS=(.75,.65,.1)
 for key,(scale,left_x) in profiles.items():
  path=f'/Game/EclipseRecoil/Weapons/Sketchfab/{key}/DA_{key}'
  data=a.load_asset(path)
@@ -66,6 +67,18 @@ for key,(scale,left_x) in profiles.items():
   # (weapon -Y), so the thumb lies along the guard. This is the desired palm
   # socket location; the measured guard surface remains the reference above.
   left=left+ue.Vector(0,-2./scale,0)
+ left_rotation=ue.MathLibrary.make_rot_from_xz(ue.Vector(math.sin(math.radians(30)),math.cos(math.radians(30)),0),ue.Vector(0,0,1))
+ if key=='Launcher':
+  # Revision 9: the launcher has a vertical foregrip. Cupping the drum left
+  # that grip hanging beside an open hand. Seat the palm on the grip's left
+  # flank, facing it, with the fingers leading forward around the front.
+  ahead=[v for v in vertices if v.x>left.x+8]
+  low=min(v.z for v in ahead)
+  grip=[v for v in ahead if v.z<low+3]
+  grip_x=sum(v.x for v in grip)/len(grip);grip_z=low+GRIP_HEIGHT/scale
+  flank=ue.ERCharacter.get_weapon_surface_contact(mesh,ue.Vector(grip_x,-100,grip_z),ue.Vector(grip_x,100,grip_z),idle)
+  if max(abs(flank.x),abs(flank.y),abs(flank.z))>=1000 or abs(flank.y)>6:raise RuntimeError('No launcher foregrip flank '+str((grip_x,grip_z,flank)))
+  left=flank;left_rotation=ue.MathLibrary.make_rot_from_xz(ue.Vector(*GRIP_AXIS),ue.Vector(0,1,0))
  values=dict(world_reference_pose=True,world_weapon_scale=scale,world_stock_contact=stock,world_right_palm_contact=contact,
              # Wrist-to-knuckles points forward with a small grip rake. A
              # downward longitudinal axis made the whole hand hang from the gun.
@@ -73,10 +86,10 @@ for key,(scale,left_x) in profiles.items():
              # Revision 8: weapon yaw -30 degrees from the old +Y direction
              # appears counterclockwise in the user's overhead screenshot.
              # Keep the palm upward and the same measured/seated anchor.
-             world_left_palm_contact=left,world_left_palm_rotation=ue.MathLibrary.make_rot_from_xz(ue.Vector(math.sin(math.radians(30)),math.cos(math.radians(30)),0),ue.Vector(0,0,1)))
+             world_left_palm_contact=left,world_left_palm_rotation=left_rotation)
  for p,v in values.items():data.set_editor_property(p,v)
  if before!={p:str(data.get_editor_property(p)) for p in protected}:raise RuntimeError('Protected weapon/FPS field changed')
- a.set_metadata_tag(data,'ERWorldReferencePoseRevision','8')
+ a.set_metadata_tag(data,'ERWorldReferencePoseRevision','9')
  if not a.save_loaded_asset(data,False):raise RuntimeError('Cannot save '+path)
  receipt.append(dict(key=key,scale=scale,length_cm=(max(v.x for v in vertices)-rear)*scale,stock=[stock.x,stock.y,stock.z],right_palm=[contact.x,contact.y,contact.z],left_palm=[left.x,left.y,left.z],before_sha256=hashlib.sha256(old.read_bytes()).hexdigest(),after_sha256=hashlib.sha256(file.read_bytes()).hexdigest(),protected=before))
 ref=root/'Assets/characters/SourceAssets/WeaponPoseReferences/2026-10-26';ref.mkdir(parents=True,exist_ok=True)

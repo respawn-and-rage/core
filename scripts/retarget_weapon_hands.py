@@ -97,7 +97,9 @@ def retarget(idle,destination,motion,fps,one_handed=False,right_socket='HandGrip
                 shoulder=add(shoulder,mul(direction,distance-bounded));clamps+=1
             distance=bounded
             pole=(-35,10,130) if side=='r' else (35,30,140)
-            if side=='r' and right_socket=='ER_Palm_R':pole=elbow
+            # The support arm bends toward its fitted idle elbow: a separate pole
+            # made that elbow jump at the first frame of every shot and reload.
+            if side=='l' or right_socket=='ER_Palm_R':pole=elbow
             pole_direction=sub(pole,shoulder)
             bend=unit(sub(pole_direction,mul(direction,dot(pole_direction,direction))))
             along=(upper*upper-lower*lower+distance*distance)/(2*distance)
