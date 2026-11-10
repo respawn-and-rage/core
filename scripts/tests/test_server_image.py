@@ -173,7 +173,13 @@ class StageAndDockerTests(unittest.TestCase):
             self.assertIn(b'USER 10001:10001', dockerfile)
             self.assertIn(b'EXPOSE 7777/udp', dockerfile)
             self.assertIn(b'**/*.debug', (package / '.dockerignore').read_bytes())
+            self.assertIn(b'**/EOS.local.ini', (package / '.dockerignore').read_bytes())
             self.assertEqual(image.validate(archive, VERSION), package)
+            # A credential that appears after staging still blocks the public image.
+            secret = write(package / 'RespawnAndRage/Config/EOS.local.ini', '[EOS]\nClientSecret=x\n')
+            with self.assertRaisesRegex(ValueError, 'EOS credential'):
+                image.validate(archive, VERSION)
+            secret.unlink()
             with self.assertRaisesRegex(ValueError, 'differs'):
                 image.validate(archive, '26.11.09.00000000')
 
@@ -186,6 +192,10 @@ class StageAndDockerTests(unittest.TestCase):
                 image.stage(project, archive, receipt, VERSION)
             with self.assertRaisesRegex(ValueError, 'Invalid game version'):
                 image.stage(project, archive, receipt, 'latest')
+            secret = write(archive / 'LinuxServer/RespawnAndRage/Config/eos.local.ini', 'x')
+            with self.assertRaisesRegex(ValueError, 'must not stage EOS.local.ini'):
+                image.stage(project, archive, receipt, '26.01.01.00000000')
+            secret.unlink()
             receipt.unlink()
             with self.assertRaisesRegex(ValueError, 'receipt'):
                 image.stage(project, archive, receipt, '26.01.01.00000000')

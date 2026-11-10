@@ -198,9 +198,8 @@ void AERLobbyProbe::Tick(float DeltaTime)
             Check(!PC->GetPawn(), TEXT("lobby_has_no_gameplay_pawn"));
             PC->ServerSetName(Host ? TEXT("LobbyHost") : FString::Printf(TEXT("LobbyClient%d"), Client));
             PC->ServerLobbyTeam(Host ? 0 : 1);
-            PC->ServerSetSkins(2, 3);
-            PC->ServerSetPrimary(4);
-            PC->ServerSetSupplies(5, 4, 3, 2);
+            // Ordinary sessions choose a preset kit; per-item RPCs are ERLegacyArsenal fixtures only.
+            PC->ServerSetLoadout(FName(TEXT("marksman")), FName(TEXT("defense")));
             if(FParse::Param(FCommandLine::Get(),TEXT("ERMapSizingLobbyTest")))
             {
                 Check(GS->ServerRules.Get("Map.ExpectedTeamSize")==3,TEXT("creation_sizing_replicates_in_lobby"));
@@ -266,13 +265,28 @@ void AERLobbyProbe::Tick(float DeltaTime)
             UE_LOG(LogTemp,Display,TEXT("ER_LOBBY_PROBE_COMPLETE result=%s"),Failed ? TEXT("FAIL"):TEXT("PASS"));
             Phase=90;Deadline=Now+(Host ? 8:2);return;
         }
-        Check(PS->AlphaSkin == 2 && PS->OmegaSkin == 3 && PS->PrimaryWeapon == 4, TEXT("skin_and_weapon_survive_travel"));
-        Check(PS->SpareMagazines == 5 && PS->HECount == 4 && PS->SmokeCount == 3 && PS->StunCount == 2, TEXT("supplies_survive_travel"));
+        // The lobby choice (marksman/defense, not the rifleman/offense default) must
+        // reach the match: player state, spawned preset, its inventory and skin.
+        const FName Preset(TEXT("marksman")), Variant(TEXT("defense"));
         const auto* C = Cast<AERCharacter>(PC->GetPawn());
-        if (!C || C->Inventory.Num() != 10 || !C->Inventory[4] || !C->Inventory[8] || !C->Inventory[9]) return;
-        Check(C->Inventory[4]->ReserveAmmo == C->Inventory[4]->Data->MagazineSize * 5, TEXT("magazines_applied_on_server"));
-        Check(C->Inventory[8]->MagazineAmmo + C->Inventory[8]->ReserveAmmo == 4, TEXT("he_count_applied"));
-        Check(C->Inventory[9]->MagazineAmmo + C->Inventory[9]->ReserveAmmo == 3, TEXT("smoke_count_applied"));
+        const auto* Kit = GS->LoadoutCatalog.FindByPredicate([&](const FERResolvedLoadout& K)
+            { return K.Preset == Preset && K.Variant == Variant && K.bOmega == (PS->Team == EERTeam::Omega); });
+        if (!C || !Kit || C->ActivePreset.IsNone() || C->Inventory.IsEmpty()) return;
+        bool bItems = C->Inventory.Num() == Kit->Items.Num();
+        for (int32 Slot = 0; bItems && Slot < Kit->Items.Num(); ++Slot)
+        {
+            const auto* Item = C->Inventory[Slot].Get();
+            if (!Item) return; // Inventory actors still replicating.
+            bItems = Item->Data == Kit->Items[Slot].Data;
+        }
+        // Allow replication to settle before judging a mismatch.
+        const bool bSettled = bItems && C->ActivePreset == Preset && C->ActiveVariant == Variant && PS->ActiveSkin == Kit->Skin;
+        if (!bSettled && Deadline == 0) Deadline = Now + 15;
+        if (!bSettled && Now < Deadline) return;
+        Check(PS->LoadoutPreset == Preset && PS->LoadoutVariant == Variant, TEXT("loadout_choice_survives_travel"));
+        Check(C->ActivePreset == Preset && C->ActiveVariant == Variant, TEXT("chosen_preset_spawned"));
+        Check(bItems, TEXT("preset_inventory_spawned"));
+        Check(PS->ActiveSkin == Kit->Skin, TEXT("preset_skin_applied"));
         if (Host)
         {
             auto* Mode = GetWorld()->GetAuthGameMode<AERGameMode>();

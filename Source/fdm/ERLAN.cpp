@@ -67,7 +67,8 @@ bool UERGameInstance::TickDiscovery(float DeltaTime)
     if (bQuitRequested) { CloseDiscoverySocket(); return true; }
     UWorld* World = GetWorld();
     if (!World) return true;
-    const bool Hosting = !GetSubsystem<UEROnline>()->IsOnline() && (World->GetNetMode() == NM_ListenServer || World->GetNetMode() == NM_DedicatedServer);
+    // An EOS dedicated server admits only EOS players: never advertise it on LAN.
+    const bool Hosting = !GetSubsystem<UEROnline>()->IsOnline() && !UEROnline::RequiresOnline() && (World->GetNetMode() == NM_ListenServer || World->GetNetMode() == NM_DedicatedServer);
     const double Now = FPlatformTime::Seconds();
     if (Hosting && !DiscoverySocket)
     {

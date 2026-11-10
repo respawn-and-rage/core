@@ -6,8 +6,9 @@
 ## Sessions
 
 Offline, LAN and Internet share the same teams and gameplay. Listen hosting keeps the
-host's game open. A separate Linux server target and direct-IP launch workflow are available
-in [PACKAGE_DESKTOP.md](PACKAGE_DESKTOP.md); there is no dedicated matchmaking service.
+host's game open. The Linux dedicated server and its Docker image are built as described in
+[PACKAGE_DESKTOP.md](PACKAGE_DESKTOP.md); see [Dedicated server](#dedicated-server). There
+is no matchmaking service.
 
 - **LAN:** UDP discovery or direct IP, port 7777, bound to `0.0.0.0` through MULTIHOME. Needs
   no EOS configuration. Exercised on one Mac only: a physical two-PC LAN needs its own test.
@@ -31,7 +32,9 @@ reuses the same hashed Product User ID. Never delete or reset a Device ID for a 
 Configuration: non-secret IDs in `Config/EOS.example.ini`; private `Config/EOS.local.ini` holds the
 **untrusted Peer2Peer client** secret (ignored, mode 0600, never printed). It is staged as NonUFS
 when present at compile time, so rebuild after adding or removing it. Builds without it keep LAN
-and explain that Internet is not configured. Never ship a trusted server credential. The portal
+and explain that Internet is not configured. Never ship a trusted server credential; the only
+published server client is the Community one (see [Dedicated server](#dedicated-server)), whose
+policy must stay limited to dedicated-session management. The portal
 policy `p2p` includes `matchmaking:managePlayers`.
 
 ## Plugin override
@@ -50,6 +53,35 @@ Lobbies) provide the public browser, with a shared `RespawnAndRage` bucket, so c
 setting. Server names are trimmed to 48 characters. Exit Game waits up to 5s for session destruction.
 `EROnline` releases its world-specific OSS instance while EOSShared is still loaded, after net
 drivers shut down. Late async completions after cancel destroy their session.
+
+## Dedicated server
+
+`-EROnlineServer` (the default of `run-server-linux.py` and the container) makes a dedicated
+server advertise an EOS session; `--direct-ip` turns it off.
+
+- **Credential:** the server reads only `RR_EOS_PRODUCT_ID`, `RR_EOS_SANDBOX_ID`,
+  `RR_EOS_DEPLOYMENT_ID`, `RR_EOS_CLIENT_ID` and `RR_EOS_CLIENT_SECRET`. When none is set,
+  `run-server-linux.py` supplies the **Community** client (`COMMUNITY_CREDENTIAL`): a
+  separate EOS client with a server policy, published on purpose so anyone can host. On
+  abuse, revoke its secret in the portal and publish a new image. Setting all five uses
+  another client; a partial set is an error. A dedicated server never reads
+  `EOS.local.ini`, the Server target never stages it, and the players' client credential
+  is never reused.
+- **Community label:** every dedicated server is Community for now (`IsCommunityServer`,
+  `RR_HOST` "Community server"). The browser prefixes `[Community]` and warns that these
+  servers are run by other players and joined at the player's own risk. A trusted
+  "official" label needs signed sessions, not a self-declared attribute.
+- **Session:** no login, no Device ID, no P2P. OSS EOS runs as a server; `StartDedicated`
+  creates the session on the first `InitGame` (it survives travel) with the browser
+  attributes, `bIsDedicated`, capacity and the map. EOS
+  publishes the host's public IP; the port is a session attribute. Ready logs
+  `ER_ONLINE_DEDICATED ready`; failures log `ER_ONLINE_ERROR` and retry every 60s.
+- **Admission:** until the session is ready `PreLogin` rejects everyone; afterwards only EOS
+  identities. No LAN beacon, no unauthenticated direct-IP fallback.
+- **Clients:** a dedicated result resolves to a literal `IP:port` (validated: no names, URL
+  options or paths); listen hosts still require an EOS P2P address. `ERNetDriverEOS`
+  connects to IP addresses through its IP passthrough, and dedicated servers always listen
+  on IP, so `7777/udp` must be reachable.
 
 ## Slow clients and diagnostics
 
@@ -81,4 +113,6 @@ same-Mac service results separate from cross-network claims.
 `test-online-service.py` (real EOS, two launches, must exit 0), `test-online-unconfigured.py` in an isolated checkout,
 `test-lobby.py`, `test-capacity.py`, `test-network-readiness.py --require-checkpoint` (two local peers; defaults to
 15 FPS client, 75ms outgoing delay per peer, 20ms variance and 2% outgoing loss).
-Native: `EclipseRecoil.Network.*`, `EclipseRecoil.Destruction.Cells.RecoveryCheckpoint`.
+Native: `EclipseRecoil.Network.*` (including `OnlineDedicated`), `EclipseRecoil.Destruction.Cells.RecoveryCheckpoint`.
+Dedicated launcher: `scripts/tests/test_build_server_linux.py`. Real dedicated EOS hosting is proven only by the
+container on a public host with `7777/udp` open and a client on another network finding and joining it.

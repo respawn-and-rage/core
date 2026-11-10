@@ -207,6 +207,8 @@ class ServerLauncherTests(unittest.TestCase):
                         'maps': ['/Game/Maps/Fixture'], 'port': 7777, 'tick_rate': 60}
             command = launch.command(package, settings)
             self.assertEqual(command[1], '/Game/Maps/Fixture')
+            self.assertIn('-EROnlineServer', command)
+            self.assertNotIn('-EROnlineServer', launch.command(package, settings, online=False))
             self.assertNotIn('EROnline=1', command[1])
             for driver in ('fdm.ERNetDriverEOS', 'OnlineSubsystemUtils.IpNetDriver'):
                 for key in ('NetServerMaxTickRate', 'MaxNetTickRate'):
@@ -224,14 +226,70 @@ class ServerLauncherTests(unittest.TestCase):
 
     def test_launcher_check_does_not_start_a_process(self):
         with tempfile.TemporaryDirectory() as temporary:
-            package = Path(temporary)
-            binary = elf_fixture(package / 'RespawnAndRage/Binaries/Linux/RespawnAndRageServer')
-            config = write(package / 'server-settings.json', json.dumps({
-                'binary': str(binary.relative_to(package)), 'map': '/Game/Test',
-                'maps': ['/Game/Test'], 'port': 7777, 'tick_rate': 60}))
+            config = self.launcher_package(Path(temporary))
             with patch.object(launch.os, 'execv') as start, contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(launch.main(['--config', str(config), '--check', '--', '-SomeSetting=1']), 0)
+                self.assertEqual(launch.main(['--config', str(config), '--direct-ip', '--check', '--', '-SomeSetting=1']), 0)
             start.assert_not_called()
+
+    def launcher_package(self, package):
+        binary = elf_fixture(package / 'RespawnAndRage/Binaries/Linux/RespawnAndRageServer')
+        return write(package / 'server-settings.json', json.dumps({
+            'binary': str(binary.relative_to(package)), 'map': '/Game/Test',
+            'maps': ['/Game/Test'], 'port': 7777, 'tick_rate': 60}))
+
+    def run_launcher(self, argv, environment):
+        output, errors = io.StringIO(), io.StringIO()
+        with patch.dict(launch.os.environ, environment, clear=True), patch.object(launch.os, 'execv') as start, \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            code = launch.main(argv)
+            name = launch.os.environ.get('RR_SERVER_NAME')
+        start.assert_not_called()
+        return code, output.getvalue(), errors.getvalue(), name
+
+    def test_eos_is_the_default_with_the_community_client(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = self.launcher_package(Path(temporary))
+            with patch.dict(launch.os.environ, {}, clear=True), patch.object(launch.os, 'execv') as start, \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(launch.main(['--config', str(config), '--check']), 0)
+                applied = {name: launch.os.environ.get(name) for name in launch.EOS_VARIABLES}
+            start.assert_not_called()
+            plan = json.loads(output.getvalue())
+            self.assertTrue(plan['online'])
+            self.assertEqual(plan['credential'], 'community')
+            self.assertIn('-EROnlineServer', plan['command'])
+            self.assertEqual(applied, launch.COMMUNITY_CREDENTIAL)
+            self.assertNotIn(launch.COMMUNITY_CREDENTIAL['RR_EOS_CLIENT_SECRET'], output.getvalue())
+
+    def test_custom_credential_needs_all_five_variables(self):
+        credentials = {name: 'value-' + name for name in launch.EOS_VARIABLES}
+        credentials['RR_EOS_CLIENT_SECRET'] = 'top-secret-value'
+        with tempfile.TemporaryDirectory() as temporary:
+            config = self.launcher_package(Path(temporary))
+            code, output, _, name = self.run_launcher(['--config', str(config), '--check', '--name', ' Arena '], credentials)
+            self.assertEqual(code, 0)
+            plan = json.loads(output)
+            self.assertEqual((plan['credential'], plan['server_name'], name), ('custom', 'Arena', 'Arena'))
+            self.assertNotIn('top-secret-value', output, 'The credential must never be printed')
+            partial = dict(credentials, RR_EOS_CLIENT_SECRET='  ')
+            del partial['RR_EOS_SANDBOX_ID']
+            code, output, errors, _ = self.run_launcher(['--config', str(config), '--check'], partial)
+            self.assertEqual((code, output), (1, ''))
+            self.assertIn('RR_EOS_SANDBOX_ID, RR_EOS_CLIENT_SECRET', errors)
+            self.assertIn('Community', errors)
+            self.assertNotIn('value-', errors)
+
+    def test_direct_ip_needs_no_credentials_and_takes_no_name(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = self.launcher_package(Path(temporary))
+            code, output, _, _ = self.run_launcher(['--config', str(config), '--direct-ip', '--check'], {})
+            self.assertEqual(code, 0)
+            plan = json.loads(output)
+            self.assertFalse(plan['online'])
+            self.assertNotIn('-EROnlineServer', plan['command'])
+            code, _, errors, _ = self.run_launcher(['--config', str(config), '--direct-ip', '--name', 'x', '--check'], {})
+            self.assertEqual(code, 1)
+            self.assertIn('--direct-ip', errors)
 
 
 if __name__ == '__main__':

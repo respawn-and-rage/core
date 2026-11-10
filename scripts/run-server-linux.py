@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Launch a packaged dedicated server; settings belong to this package only."""
+"""Launch a packaged dedicated server; settings belong to this package only.
+
+By default the server advertises itself through Epic Online Services and admits only
+EOS players. It uses the public, revocable Community EOS client unless all RR_EOS_*
+environment variables name another one; the credential never comes from the cooked
+package. --direct-ip starts an unadvertised server without EOS.
+"""
 import argparse
 import json
 import os
@@ -42,6 +48,38 @@ def validate_binary(binary):
     return binary
 
 
+EOS_VARIABLES = ('RR_EOS_PRODUCT_ID', 'RR_EOS_SANDBOX_ID', 'RR_EOS_DEPLOYMENT_ID',
+                 'RR_EOS_CLIENT_ID', 'RR_EOS_CLIENT_SECRET')
+
+
+# Community dedicated-server client: published on purpose so anyone can host a
+# server. Its policy only manages dedicated sessions; abuse is handled by revoking
+# the secret and publishing a new image. Never the players' client credential.
+COMMUNITY_CREDENTIAL = {
+    'RR_EOS_PRODUCT_ID': '27336dbd08d749668ca9a0d31c97fd60',
+    'RR_EOS_SANDBOX_ID': 'db1678e6f21644559b70b6d0aaffbfdb',
+    'RR_EOS_DEPLOYMENT_ID': 'd494e2dc1e974b2b9a79068b4e4080e0',
+    'RR_EOS_CLIENT_ID': 'xyza78915lFSyqwiqTQuBoc2KCdh0pbB',
+    'RR_EOS_CLIENT_SECRET': 'kCEiOeY+vWoEz7q6C/uSKcSgtumfni2pTUSsUBu7HUA',
+}
+
+
+def missing_credentials(environment):
+    """Names of RR_EOS_* variables that are absent or blank (values are never returned)."""
+    return [name for name in EOS_VARIABLES if not environment.get(name, '').strip()]
+
+
+def eos_credential(environment):
+    """Return (variables to add, source): all five RR_EOS_* or none (Community)."""
+    missing = missing_credentials(environment)
+    if len(missing) == len(EOS_VARIABLES):
+        return dict(COMMUNITY_CREDENTIAL), 'community'
+    if missing:
+        raise ValueError('Incomplete EOS server credential: set ' + ', '.join(missing) +
+                         ', or unset every RR_EOS_* variable to use the Community client')
+    return {}, 'custom'
+
+
 def positive_integer(value, maximum):
     if isinstance(value, bool):
         raise ValueError('Expected an integer')
@@ -51,7 +89,7 @@ def positive_integer(value, maximum):
     return integer
 
 
-def command(package, settings, map_url=None, port=None, tick_rate=None, extra=()):
+def command(package, settings, map_url=None, port=None, tick_rate=None, extra=(), online=True):
     binary = (package / settings['binary']).resolve()
     if not binary.is_relative_to(package.resolve()):
         raise ValueError('Server executable must stay inside its package')
@@ -67,7 +105,7 @@ def command(package, settings, map_url=None, port=None, tick_rate=None, extra=()
               for section in ('/Script/fdm.ERNetDriverEOS', '/Script/OnlineSubsystemUtils.IpNetDriver')
               for key in ('NetServerMaxTickRate', 'MaxNetTickRate')]
     return [str(binary), url, f'-port={listen_port}', '-log', '-unattended', '-nosound', '-nullrhi',
-            '-ini:Engine:' + ','.join(fields), *extra]
+            *(['-EROnlineServer'] if online else []), '-ini:Engine:' + ','.join(fields), *extra]
 
 
 def main(argv=None):
@@ -76,6 +114,9 @@ def main(argv=None):
     parser.add_argument('--map', dest='map_url', help='Cooked map URL; URL options are preserved')
     parser.add_argument('--port', type=int)
     parser.add_argument('--tick-rate', type=int)
+    parser.add_argument('--direct-ip', action='store_true',
+                        help='Do not use EOS: no server-browser entry, players connect by IP only')
+    parser.add_argument('--name', help='Server browser name (default: RR_SERVER_NAME, else "Respawn & Rage")')
     parser.add_argument('--check', action='store_true', help='Validate and print the command without starting a server')
     args, extra = parser.parse_known_args(argv)
     if extra[:1] == ['--']:
@@ -83,9 +124,23 @@ def main(argv=None):
     try:
         settings_path = args.config.resolve()
         settings = json.loads(settings_path.read_text())
-        launch = command(settings_path.parent, settings, args.map_url, args.port, args.tick_rate, extra)
+        online = not args.direct_ip
+        if online:
+            defaults, credential = eos_credential(os.environ)
+            os.environ.update(defaults)
+            if args.name is not None:
+                if not args.name.strip():
+                    raise ValueError('--name must not be blank')
+                os.environ['RR_SERVER_NAME'] = args.name.strip()
+        elif args.name is not None:
+            raise ValueError('--name needs EOS mode; it cannot be combined with --direct-ip')
+        launch = command(settings_path.parent, settings, args.map_url, args.port, args.tick_rate, extra, online)
         if args.check:
-            print(json.dumps({'command': launch, 'started': False}, indent=2))
+            # The credential stays in the environment: only the mode and name are shown.
+            print(json.dumps({'command': launch, 'online': online,
+                              'credential': credential if online else None,
+                              'server_name': os.environ.get('RR_SERVER_NAME') if online else None,
+                              'started': False}, indent=2))
             return 0
         if platform.system() != 'Linux' or platform.machine().lower() not in ('x86_64', 'amd64'):
             raise ValueError('Run this package on native Linux x86_64')

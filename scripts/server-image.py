@@ -53,7 +53,9 @@ ENTRYPOINT ["/usr/bin/tini", "--", "python3", "/server/run-server-linux.py"]
 """
 # Debug symbols (.debug) are hundreds of MB and only useful offline; .sym stays
 # for in-process callstacks.
-DOCKERIGNORE = 'Dockerfile\n.dockerignore\n**/*.debug\n'
+# EOS.local.ini is also rejected by stage/validate: the server credential comes
+# only from RR_EOS_* at runtime and the image is public.
+DOCKERIGNORE = 'Dockerfile\n.dockerignore\n**/*.debug\n**/EOS.local.ini\n'
 
 
 def helper(filename):
@@ -204,6 +206,15 @@ def find_package(archive):
     return settings[0].parent
 
 
+def reject_credentials(archive):
+    """The image is public: no EOS client credential may be packaged."""
+    found = sorted(str(path.relative_to(archive)) for path in Path(archive).rglob('*')
+                   if path.name.lower() == 'eos.local.ini')
+    if found:
+        raise ValueError('Server package contains an EOS credential file (' + ', '.join(found) +
+                         '); the Server target must not stage EOS.local.ini')
+
+
 def packaged_version(package):
     stamp = package / 'RespawnAndRage/Build/GameVersion.txt'
     return stamp.read_text(encoding='utf-8-sig').strip() if stamp.is_file() else None
@@ -227,6 +238,7 @@ def stage(project, archive, target_receipt, version):
     # BuildCookRun on Windows writes CRLF launchers; Linux needs LF.
     for launcher in archive.rglob('*.sh'):
         launcher.write_bytes(launcher.read_bytes().replace(b'\r\n', b'\n'))
+    reject_credentials(archive)
     package, digest = builder.finalize_package(archive, Path(target_receipt), maps, DEFAULT_MAP)
     staged = packaged_version(package)
     if staged is not None and staged != version:
@@ -243,6 +255,7 @@ def validate(archive, version):
     for name in ('Dockerfile', '.dockerignore', 'server-build-target.json'):
         if not (package / name).is_file():
             raise ValueError('Staged server package is incomplete: missing ' + name)
+    reject_credentials(package)
     settings = json.loads((package / 'server-settings.json').read_text())
     helper('run-server-linux.py').command(package, settings)
     staged = packaged_version(package)

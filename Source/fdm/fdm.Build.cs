@@ -13,7 +13,8 @@ public class fdm : ModuleRules
         RuntimeDependencies.Add("$(ProjectDir)/Branding/Fonts/Teko/CREDITS.txt", StagedFileType.NonUFS);
         RuntimeDependencies.Add("$(ProjectDir)/Config/GameplayMessages/respawn-and-rage-gameplay-messages.en-US.json", StagedFileType.NonUFS);
         PrivateDependencyModuleNames.Add("Json");
-        if (System.IO.File.Exists(System.IO.Path.Combine(ModuleDirectory, "../../Config/EOS.local.ini")))
+        // Clients ship the untrusted P2P credential; the dedicated server gets its own credential from RR_EOS_* at runtime.
+        if (Target.Type != TargetType.Server && System.IO.File.Exists(System.IO.Path.Combine(ModuleDirectory, "../../Config/EOS.local.ini")))
             RuntimeDependencies.Add("$(ProjectDir)/Config/EOS.local.ini", StagedFileType.NonUFS);
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDependencyModuleNames.AddRange(new [] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "UMG", "Slate", "SlateCore", "AIModule", "Niagara" });

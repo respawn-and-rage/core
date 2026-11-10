@@ -78,7 +78,9 @@ validation as the native Linux helper below (ELF, `.pak`, Server target receipt)
 `run-server-linux.py`, `server-settings.json` and a generated `Dockerfile`, and checks
 that the staged `GameVersion.txt` matches. The image is `debian:bookworm-slim` with
 Python and tini, runs as uid/gid 10001 (Unreal refuses root), exposes `7777/udp`, omits
-`*.debug` symbols and uses `run-server-linux.py` as entry point. It is built for
+`*.debug` symbols and uses `run-server-linux.py` as entry point. The Server target never
+stages `EOS.local.ini`, and `stage`/`validate` refuse a package that contains one: the
+image is public. It is built for
 `linux/amd64` and tagged `<repository>:<GameVersion>` and `:latest`.
 
 Credentials live in the ignored `core/.secrets/dockerhub.json` (never commit it):
@@ -94,15 +96,22 @@ default visibility. The push logs in through stdin
 inside a temporary Docker config, so the token never reaches arguments, logs, receipts
 or your own `docker login`. Built images stay in the local Docker daemon; prune them there.
 
-Run the image with:
+By default the container advertises itself in the Internet server browser as a
+**Community** server, using the public Community EOS client built into the launcher (see
+[ONLINE](ONLINE.md#dedicated-server)). No parameter is required:
 
 ```sh
-docker run --rm -p 7777:7777/udp <repository>:latest
-docker run --rm -p 7777:7777/udp <repository>:latest --map '/Game/EclipseRecoil/Maps/L_Town?Seed=73' -- -log
+docker run --rm -p 7777:7777/udp -e RR_SERVER_NAME='My server' <repository>:latest
+docker run --rm -p 7777:7777/udp <repository>:latest --name 'My server' --map '/Game/EclipseRecoil/Maps/L_Town?Seed=73' -- -log
+docker run --rm -p 7777:7777/udp <repository>:latest --direct-ip
 ```
 
-Arguments are those of `run-server-linux.py` (see below); keep `--port` and the published
-port equal.
+To use another EOS client, set all five `RR_EOS_*` variables (for example from a private
+`--env-file`); a partial set stops the container at once and names the missing ones.
+`--direct-ip` runs without EOS: no browser entry, players connect by IP. Either way
+`7777/udp` must be reachable from the Internet (host firewall, security group, router
+forwarding). Arguments are those of `run-server-linux.py` (see below); keep `--port` and
+the published port equal.
 
 Common preflight problems:
 
@@ -179,10 +188,11 @@ python3 run-server-linux.py --port 7777 --tick-rate 60
 python3 run-server-linux.py --map '/Game/EclipseRecoil/Maps/L_Town?Seed=73' -- -log
 ```
 
-Map URL options and arguments after `--` pass through as individual arguments. Explicit
-`?EROnline=1` retains the existing EOS transport path; it does not provision an EOS
-session or credentials, and dedicated EOS hosting still needs integration verification.
-Direct IP uses the existing IP passthrough in `ERNetDriverEOS` (see [ONLINE](ONLINE.md)).
+Map URL options and arguments after `--` pass through as individual arguments. The
+launcher defaults to EOS mode (`-EROnlineServer`, the Community client unless all five
+`RR_EOS_*` are set, browser name from `--name` or `RR_SERVER_NAME`); `--direct-ip` disables it. The dedicated server always
+listens on IP through `ERNetDriverEOS` (see [ONLINE](ONLINE.md)). `--check` prints the
+command, mode and credential source, never the secret.
 The 60 Hz setting is a cap, not a measured guarantee under load.
 
 ## Verify

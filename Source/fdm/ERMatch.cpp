@@ -144,6 +144,8 @@ void AERGameMode::InitGame(const FString& MapName, const FString& Options, FStri
     MaxHumanPlayers = ERServer::ValidMaxPlayers(UGameplayStatics::GetIntOption(Options, TEXT("ERMaxPlayers"), ERServer::DefaultMaxPlayers));
     // Set before PreLogin, including initial load and seamless travel.
     if (GameSession) GameSession->MaxPlayers = MaxHumanPlayers;
+    // -EROnlineServer: advertise this dedicated server through EOS (idempotent across travel).
+    if (GetNetMode() == NM_DedicatedServer) GetGameInstance()->GetSubsystem<UEROnline>()->StartDedicated(MaxHumanPlayers, MapName);
     for (TActorIterator<AERProceduralMap> It(GetWorld()); It; ++It)
         {
             It->LayoutConfig.ExpectedTeamSize=FMath::RoundToInt(Rules.Get("Map.ExpectedTeamSize"));
@@ -321,7 +323,10 @@ void AERGameMode::PreLogin(const FString& Options, const FString& Address, const
     if (!bFull && !bStationaryBots && !bConfiguredBots)
         while (!TestBots.IsEmpty() && GetNumPlayers()+TestBots.Num()+PendingHumanSlots.Num() >= MaxHumanPlayers) RemoveBot();
     Super::PreLogin(Options, Address, UniqueId, ErrorMessage);
-    if (GetGameInstance()->GetSubsystem<UEROnline>()->IsOnline() && (!UniqueId.IsValid() || UniqueId.GetType() != FName(TEXT("EOS")))) ErrorMessage = TEXT("Epic sign-in is required for this Internet server.");
+    const auto* OnlineService = GetGameInstance()->GetSubsystem<UEROnline>();
+    // An EOS dedicated server never falls back to unauthenticated direct IP.
+    if (UEROnline::RequiresOnline() && !OnlineService->IsOnline()) ErrorMessage = TEXT("Server is connecting to online services. Try again shortly.");
+    else if (OnlineService->IsOnline() && (!UniqueId.IsValid() || UniqueId.GetType() != FName(TEXT("EOS")))) ErrorMessage = TEXT("Epic sign-in is required for this Internet server.");
     if (bLobbyTravelPending) ErrorMessage = TEXT("Match is starting. Try again shortly.");
     if (bFull) ErrorMessage = FString::Printf(TEXT("Server full: maximum %d players."), MaxHumanPlayers);
     if (ErrorMessage.IsEmpty()) PendingHumanSlots.Add(GetWorld()->GetTimeSeconds()+30);

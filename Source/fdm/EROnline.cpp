@@ -11,6 +11,10 @@
 #include "Kismet/GameplayStatics.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/Paths.h"
+#include "Misc/CoreMisc.h"
+#include "Misc/PackageName.h"
+#include "HAL/PlatformMisc.h"
+#include "TimerManager.h"
 
 #if !RR_EOS_DEVICE_ID
 #error Prepare the project EOS plugin with scripts/prepare-eos-guest.py before building.
@@ -20,6 +24,29 @@ namespace
 {
 const FName VersionKey(TEXT("RR_VERSION"));
 const FName GameKey(TEXT("RR_GAME"));
+FOnlineSessionSettings MakeSessionSettings(int32 Capacity, const FString& ServerName, const FString& Host, const FString& Version, const FString& Map)
+{
+    FOnlineSessionSettings Settings;
+    Settings.Set(OSSEOS_BUCKET_ID_ATTRIBUTE_KEY, FString(TEXT("RespawnAndRage")), EOnlineDataAdvertisementType::ViaOnlineService);
+    Settings.bIsLANMatch = false;
+    Settings.bShouldAdvertise = true;
+    Settings.bAllowJoinInProgress = true;
+    Settings.bUseLobbiesIfAvailable = false;
+    Settings.bUsesPresence = false;
+    Settings.NumPublicConnections = Capacity;
+    Settings.NumPrivateConnections = 0;
+    Settings.Set(FName(TEXT("RR_SERVER_NAME")), UEROnline::SanitizeServerName(ServerName), EOnlineDataAdvertisementType::ViaOnlineService);
+    Settings.Set(GameKey, FString(TEXT("RespawnAndRage")), EOnlineDataAdvertisementType::ViaOnlineService);
+    Settings.Set(FName(TEXT("RR_HOST")), Host, EOnlineDataAdvertisementType::ViaOnlineService);
+    Settings.Set(VersionKey, Version, EOnlineDataAdvertisementType::ViaOnlineService);
+    Settings.Set(SETTING_MAPNAME, Map, EOnlineDataAdvertisementType::ViaOnlineService);
+    return Settings;
+}
+bool IsPort(const FString& Text)
+{
+    int32 Port = 0;
+    return !Text.IsEmpty() && Text.Len() <= 5 && Text.IsNumeric() && LexTryParseString(Port, *Text) && Port >= 1 && Port <= 65535;
+}
 FString PlayerOptions(UERGameInstance* GI)
 {
     return GI->LoadoutOptions() + FString::Printf(TEXT("?Name=%s?Team=%d?Primary=%d?AlphaSkin=%d?OmegaSkin=%d?Magazines=%d?HE=%d?Smoke=%d?Stun=%d"),
@@ -33,21 +60,97 @@ void UEROnline::Fail(const FString& Message)
     Status = Message;
     UE_LOG(LogTemp, Warning, TEXT("ER_ONLINE_ERROR %s"), *Message);
 }
+bool FEROnlineCredentials::IsComplete() const
+{
+    return !ProductId.IsEmpty() && !SandboxId.IsEmpty() && !DeploymentId.IsEmpty() && !ClientId.IsEmpty() && !ClientSecret.IsEmpty();
+}
+FEROnlineCredentials UEROnline::CredentialsFromConfig(const FConfigFile& File)
+{
+    FEROnlineCredentials Result;
+    File.GetString(TEXT("EOS"), TEXT("ProductId"), Result.ProductId);
+    File.GetString(TEXT("EOS"), TEXT("SandboxId"), Result.SandboxId);
+    File.GetString(TEXT("EOS"), TEXT("DeploymentId"), Result.DeploymentId);
+    File.GetString(TEXT("EOS"), TEXT("ClientId"), Result.ClientId);
+    File.GetString(TEXT("EOS"), TEXT("ClientSecret"), Result.ClientSecret);
+    return Result;
+}
+FEROnlineCredentials UEROnline::CredentialsFromEnvironment(TFunctionRef<FString(const TCHAR*)> Read)
+{
+    FEROnlineCredentials Result;
+    Result.ProductId = Read(TEXT("RR_EOS_PRODUCT_ID")).TrimStartAndEnd();
+    Result.SandboxId = Read(TEXT("RR_EOS_SANDBOX_ID")).TrimStartAndEnd();
+    Result.DeploymentId = Read(TEXT("RR_EOS_DEPLOYMENT_ID")).TrimStartAndEnd();
+    Result.ClientId = Read(TEXT("RR_EOS_CLIENT_ID")).TrimStartAndEnd();
+    Result.ClientSecret = Read(TEXT("RR_EOS_CLIENT_SECRET")).TrimStartAndEnd();
+    return Result;
+}
+bool UEROnline::IsJoinEndpointValid(const FString& Address, bool bDedicated)
+{
+    if (!bDedicated) return Address.StartsWith(TEXT("[EOS:"));
+    // A dedicated session advertises the public IP EOS observed plus our port
+    // attribute. Accept only a literal address and port: nothing that could
+    // carry a map path or URL options into ClientTravel.
+    FString Host, Port;
+    if (Address.StartsWith(TEXT("[")))
+    {
+        const int32 Close = Address.Find(TEXT("]:"));
+        if (Close <= 1) return false;
+        Host = Address.Mid(1, Close - 1);
+        Port = Address.Mid(Close + 2);
+        for (const TCHAR C : Host) if (!FChar::IsHexDigit(C) && C != TEXT(':') && C != TEXT('.')) return false;
+        return Host.Contains(TEXT(":")) && IsPort(Port);
+    }
+    if (!Address.Split(TEXT(":"), &Host, &Port) || Port.Contains(TEXT(":"))) return false;
+    TArray<FString> Parts;
+    if (Host.ParseIntoArray(Parts, TEXT("."), false) != 4) return false;
+    for (const FString& Part : Parts)
+    {
+        int32 Value = -1;
+        if (Part.IsEmpty() || Part.Len() > 3 || !Part.IsNumeric() || !LexTryParseString(Value, *Part) || Value < 0 || Value > 255) return false;
+    }
+    return IsPort(Port);
+}
+FString UEROnline::BrowserLabel(const FOnlineSessionSettings& Settings, int32 OpenSlots)
+{
+    FString HostName, ServerName;
+    Settings.Get(FName(TEXT("RR_HOST")), HostName);
+    Settings.Get(FName(TEXT("RR_SERVER_NAME")), ServerName);
+    const FString Name = SanitizeServerName(ServerName.IsEmpty() ? HostName : ServerName);
+    return FString::Printf(TEXT("Join %s%s · %d / %d players"), IsCommunityServer(Settings) ? TEXT("[Community] ") : TEXT(""), *Name,
+        Settings.NumPublicConnections - OpenSlots, Settings.NumPublicConnections);
+}
+bool UEROnline::RequiresOnline()
+{
+    return IsRunningDedicatedServer() && FParse::Param(FCommandLine::Get(), TEXT("EROnlineServer"));
+}
 bool UEROnline::Configure()
 {
     if (Sessions.IsValid() && Identity.IsValid()) return true;
-    // Runtime-only private configuration: never flush these values to public ini.
-    FConfigFile Private;
-    Private.Read(FPaths::ProjectConfigDir() / TEXT("EOS.local.ini"));
+    FEROnlineCredentials Credentials;
+    if (IsRunningDedicatedServer())
+    {
+        // The server credential is supplied at runtime only; the Server target
+        // never stages EOS.local.ini.
+        Credentials = CredentialsFromEnvironment([](const TCHAR* Name) { return FPlatformMisc::GetEnvironmentVariable(Name); });
+        if (!Credentials.IsComplete())
+        { Fail(TEXT("EOS server credentials missing: set RR_EOS_PRODUCT_ID, RR_EOS_SANDBOX_ID, RR_EOS_DEPLOYMENT_ID, RR_EOS_CLIENT_ID and RR_EOS_CLIENT_SECRET.")); return false; }
+    }
+    else
+    {
+        // Runtime-only private configuration: never flush these values to public ini.
+        FConfigFile Private;
+        Private.Read(FPaths::ProjectConfigDir() / TEXT("EOS.local.ini"));
+        Credentials = CredentialsFromConfig(Private);
+        if (!Credentials.IsComplete())
+        { Fail(TEXT("Internet play is not configured in this build. LAN play is available.")); return false; }
+    }
     FArtifactSettings Artifact;
     Artifact.ArtifactName = TEXT("RespawnAndRage");
-    Private.GetString(TEXT("EOS"), TEXT("ProductId"), Artifact.ProductId);
-    Private.GetString(TEXT("EOS"), TEXT("SandboxId"), Artifact.SandboxId);
-    Private.GetString(TEXT("EOS"), TEXT("DeploymentId"), Artifact.DeploymentId);
-    Private.GetString(TEXT("EOS"), TEXT("ClientId"), Artifact.ClientId);
-    Private.GetString(TEXT("EOS"), TEXT("ClientSecret"), Artifact.ClientSecret);
-    if (Artifact.ProductId.IsEmpty() || Artifact.SandboxId.IsEmpty() || Artifact.DeploymentId.IsEmpty() || Artifact.ClientId.IsEmpty() || Artifact.ClientSecret.IsEmpty())
-    { Fail(TEXT("Internet play is not configured in this build. LAN play is available.")); return false; }
+    Artifact.ProductId = Credentials.ProductId;
+    Artifact.SandboxId = Credentials.SandboxId;
+    Artifact.DeploymentId = Credentials.DeploymentId;
+    Artifact.ClientId = Credentials.ClientId;
+    Artifact.ClientSecret = Credentials.ClientSecret;
     auto* Settings = GetMutableDefault<UEOSSettings>();
     Settings->DefaultArtifactName = Artifact.ArtifactName;
     Settings->Artifacts = {Artifact};
@@ -124,20 +227,8 @@ void UEROnline::Continue()
     if (bHostAfterLogin)
     {
         GI->CommitServerRules();
-        FOnlineSessionSettings Settings;
-        Settings.Set(OSSEOS_BUCKET_ID_ATTRIBUTE_KEY, FString(TEXT("RespawnAndRage")), EOnlineDataAdvertisementType::ViaOnlineService);
-        Settings.bIsLANMatch = false;
-        Settings.bShouldAdvertise = true;
-        Settings.bAllowJoinInProgress = true;
-        Settings.bUseLobbiesIfAvailable = false;
-        Settings.bUsesPresence = false;
-        Settings.NumPublicConnections = GI->MaxPlayers;
-        Settings.NumPrivateConnections = 0;
-        Settings.Set(FName(TEXT("RR_SERVER_NAME")), SanitizeServerName(GI->InternetServerName), EOnlineDataAdvertisementType::ViaOnlineService);
-        Settings.Set(GameKey, FString(TEXT("RespawnAndRage")), EOnlineDataAdvertisementType::ViaOnlineService);
-        Settings.Set(FName(TEXT("RR_HOST")), AERGameMode::SanitizeName(GI->LocalName), EOnlineDataAdvertisementType::ViaOnlineService);
-        Settings.Set(VersionKey, GI->GetNetworkBuildVersion(), EOnlineDataAdvertisementType::ViaOnlineService);
-        Settings.Set(SETTING_MAPNAME, FString(TEXT("Lobby")), EOnlineDataAdvertisementType::ViaOnlineService);
+        const FOnlineSessionSettings Settings = MakeSessionSettings(GI->MaxPlayers, GI->InternetServerName,
+            AERGameMode::SanitizeName(GI->LocalName), GI->GetNetworkBuildVersion(), TEXT("Lobby"));
         Operation = EOperation::Create;
         Status = TEXT("Creating Internet server...");
         CreateHandle = Sessions->AddOnCreateSessionCompleteDelegate_Handle(FOnCreateSessionCompleteDelegate::CreateUObject(this, &UEROnline::CreateComplete));
@@ -175,6 +266,49 @@ void UEROnline::CreateComplete(FName Name, bool Success)
     UE_LOG(LogTemp, Display, TEXT("ER_ONLINE_HOST capacity=%d"), GI->MaxPlayers);
     UGameplayStatics::OpenLevel(GetWorld(), TEXT("/Game/EclipseRecoil/Maps/L_MainMenu"), true, Options);
 }
+void UEROnline::StartDedicated(int32 Capacity, const FString& MapName)
+{
+    if (!RequiresOnline()) return;
+    DedicatedCapacity = FMath::Max(1, Capacity);
+    DedicatedMap = FPackageName::GetShortName(MapName);
+    if (IsBusy() || bOnline) return;
+    GetGameInstance()->GetTimerManager().ClearTimer(DedicatedRetry);
+    if (!Configure()) { GetGameInstance()->GetTimerManager().SetTimer(DedicatedRetry, this, &UEROnline::RetryDedicated, 60.f, false); return; }
+    // A stale local session (e.g. after a failed update) is cleared first.
+    if (Sessions->GetNamedSession(NAME_GameSession))
+    { Destroy(); GetGameInstance()->GetTimerManager().SetTimer(DedicatedRetry, this, &UEROnline::RetryDedicated, 60.f, false); return; }
+    const auto* GI = CastChecked<UERGameInstance>(GetGameInstance());
+    // No user login: OSS EOS runs as a server (bIsServer) and EOS advertises
+    // this host's public IP plus the game port. Players connect over IP.
+    FOnlineSessionSettings Settings = MakeSessionSettings(DedicatedCapacity, FPlatformMisc::GetEnvironmentVariable(TEXT("RR_SERVER_NAME")),
+        TEXT("Community server"), GI->GetNetworkBuildVersion(), DedicatedMap);
+    Settings.bIsDedicated = true;
+    Operation = EOperation::Create;
+    Status = TEXT("Creating dedicated Internet session...");
+    CreateHandle = Sessions->AddOnCreateSessionCompleteDelegate_Handle(FOnCreateSessionCompleteDelegate::CreateUObject(this, &UEROnline::DedicatedCreateComplete));
+    if (!Sessions->CreateSession(0, NAME_GameSession, Settings) && Operation == EOperation::Create)
+    {
+        Sessions->ClearOnCreateSessionCompleteDelegate_Handle(CreateHandle);
+        Fail(TEXT("Could not create the dedicated Internet session; retrying in 60s."));
+        GetGameInstance()->GetTimerManager().SetTimer(DedicatedRetry, this, &UEROnline::RetryDedicated, 60.f, false);
+    }
+}
+void UEROnline::DedicatedCreateComplete(FName Name, bool Success)
+{
+    Sessions->ClearOnCreateSessionCompleteDelegate_Handle(CreateHandle);
+    Operation = EOperation::None;
+    if (!Success)
+    {
+        Fail(TEXT("Dedicated Internet session creation failed (check the EOS server client policy); retrying in 60s."));
+        GetGameInstance()->GetTimerManager().SetTimer(DedicatedRetry, this, &UEROnline::RetryDedicated, 60.f, false);
+        return;
+    }
+    bOnline = true;
+    Status = TEXT("Dedicated Internet session ready.");
+    if (auto* State = GetWorld() ? GetWorld()->GetGameState<AERGameState>() : nullptr) State->bOnline = true;
+    UE_LOG(LogTemp, Display, TEXT("ER_ONLINE_DEDICATED ready capacity=%d map=%s"), DedicatedCapacity, *DedicatedMap);
+}
+void UEROnline::RetryDedicated() { StartDedicated(DedicatedCapacity, DedicatedMap); }
 void UEROnline::FindComplete(bool Success)
 {
     Sessions->ClearOnFindSessionsCompleteDelegate_Handle(FindHandle);
@@ -212,8 +346,10 @@ void UEROnline::JoinComplete(FName Name, EOnJoinSessionCompleteResult::Type Resu
     if (Result != EOnJoinSessionCompleteResult::Success)
     { Status = Result == EOnJoinSessionCompleteResult::SessionIsFull ? TEXT("Server full. Search again.") : TEXT("Unable to join. The server may have closed; search again."); Destroy(); return; }
     FString Address;
-    if (!Sessions->GetResolvedConnectString(NAME_GameSession, Address) || !Address.StartsWith(TEXT("[EOS:")))
-    { Status = TEXT("This server did not provide a valid EOS P2P endpoint."); Destroy(); return; }
+    const auto* Joined = Sessions->GetNamedSession(NAME_GameSession);
+    const bool bDedicated = Joined && Joined->SessionSettings.bIsDedicated;
+    if (!Sessions->GetResolvedConnectString(NAME_GameSession, Address) || !IsJoinEndpointValid(Address, bDedicated))
+    { Status = TEXT("This server did not provide a valid connection endpoint."); Destroy(); return; }
     auto* GI = CastChecked<UERGameInstance>(GetGameInstance());
     auto* PC = GI->GetFirstLocalPlayerController();
     if (!PC) { Status = TEXT("Local player unavailable."); Destroy(); return; }
@@ -269,6 +405,7 @@ void UEROnline::Deinitialize()
     // Release our lazily-created EOS instance now, while EOSShared and its SDK
     // are still loaded, rather than relying on the later module unload order.
     if (Identity.IsValid()) Identity->ClearOnLoginCompleteDelegate_Handle(0, LoginHandle);
+    if (auto* GI = GetGameInstance()) GI->GetTimerManager().ClearTimer(DedicatedRetry);
     if (Sessions.IsValid())
     {
         Sessions->ClearOnCreateSessionCompleteDelegate_Handle(CreateHandle);

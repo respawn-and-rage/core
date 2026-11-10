@@ -438,15 +438,17 @@ void AERPlayerController::ShowMenu(bool bShow)
                     {
                         if (!Online->Results.IsValidIndex(I)) return FText::GetEmpty();
                         const auto& Session = Online->Results[I].Session;
-                        FString HostName;
-                        Session.SessionSettings.Get(FName(TEXT("RR_HOST")), HostName);
-                        FString ServerName;
-                        Session.SessionSettings.Get(FName(TEXT("RR_SERVER_NAME")), ServerName);
-                        HostName = UEROnline::SanitizeServerName(ServerName.IsEmpty() ? HostName : ServerName);
-                        return FText::FromString(FString::Printf(TEXT("Join %s · %d / %d players"), *HostName,
-                            Session.SessionSettings.NumPublicConnections - Session.NumOpenPublicConnections, Session.SessionSettings.NumPublicConnections));
+                        return FText::FromString(UEROnline::BrowserLabel(Session.SessionSettings, Session.NumOpenPublicConnections));
                     })]);
             Add(Panel, SNew(SBox).MaxDesiredHeight(240)[SNew(SScrollBox) + SScrollBox::Slot()[Servers]]);
+            Add(Panel, SNew(STextBlock).Font(MenuFont(21)).AutoWrapText(true)
+                .Visibility_Lambda([GI, Online]()
+                {
+                    const bool bCommunity = GI->bInternetMenu && Online->Results.ContainsByPredicate([](const FOnlineSessionSearchResult& Result)
+                        { return UEROnline::IsCommunityServer(Result.Session.SessionSettings); });
+                    return bCommunity ? EVisibility::Visible : EVisibility::Collapsed;
+                })
+                .Text(FText::FromString(TEXT("[Community] servers are run by other players, not by Respawn & Rage. Join them at your own risk."))));
             Add(Panel, Button(TEXT("Search Servers"), [GI, Online]() { if (GI->bInternetMenu) Online->Search(); else { Online->Cancel(); GI->FindLANServer(); } return FReply::Handled(); }));
             Add(Panel, Button(TEXT("Cancel"), Back));
         }
