@@ -25,6 +25,11 @@
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimSingleNodeInstance.h"
 #include "HAL/IConsoleManager.h"
+#include "ERServerSettings.h"
+
+// Worksheet values are authored; the server applies its global dispersion scale.
+static float SpreadScale(const AActor* Probe){return ERServer::Get(Probe->GetWorld(),"Weapons.Spread");}
+static float ScaledDegrees(const AActor* Probe,float Raw){return ERWeaponAccuracy::Degrees(Raw*SpreadScale(Probe));}
 
 AERReferenceWeaponProbe::AERReferenceWeaponProbe()
 {
@@ -438,7 +443,7 @@ void AERReferenceWeaponProbe::Tick(float DeltaTime)
             // Teleport notifications can restore falling. This is a stationary
             // headshot fixture, not a random shot with AK's 14-degree air cone.
             H->GetCharacterMovement()->DisableMovement();
-            Check(FMath::IsNearlyEqual(Gun->GetSpreadDegrees(),ERWeaponAccuracy::Degrees(7.01f),.001f),
+            Check(FMath::IsNearlyEqual(Gun->GetSpreadDegrees(),ScaledDegrees(this,7.01f),.001f),
                 TEXT("headshot_fixture_uses_production_stationary_accuracy"));
             // Aim at the collision body's centre, not the animation joint at
             // its lower edge. Keep the production cone and real trace intact.
@@ -536,9 +541,9 @@ void AERReferenceWeaponProbe::TickScopes()
         Check(H->Weapon->ScopeLevel==1 && FMath::IsNearlyEqual(Hip,H->Weapon->GetSpreadDegrees()),TEXT("assault_ads_does_not_improve_accuracy"));
         H->Weapon->ServerCycleScope();Check(H->Weapon->ScopeLevel==0,TEXT("assault_two_click_toggle"));
         H->ServerSelectWeapon(6);H->Weapon->ServerCycleScope();
-        Check(FMath::IsNearlyEqual(H->Weapon->GetSpreadDegrees(),ERWeaponAccuracy::Degrees(2.2f),.001f),TEXT("marksman_scope_uses_workbook_nonzero_minimum"));
+        Check(FMath::IsNearlyEqual(H->Weapon->GetSpreadDegrees(),ScaledDegrees(this,2.2f),.001f),TEXT("marksman_scope_uses_workbook_nonzero_minimum"));
         H->Weapon->StartFire();H->Weapon->StopFire();
-        Check(FMath::IsNearlyEqual(H->Weapon->LastShotSpreadDegrees,ERWeaponAccuracy::Degrees(2.2f),.001f) && H->Weapon->ScopeLevel==0,
+        Check(FMath::IsNearlyEqual(H->Weapon->LastShotSpreadDegrees,ScaledDegrees(this,2.2f),.001f) && H->Weapon->ScopeLevel==0,
             TEXT("marksman_real_scoped_ray_uses_workbook_and_exits"));
         auto* M=CastChecked<UERMovement>(H->GetCharacterMovement());
         M->SetMovementMode(MOVE_Walking);
@@ -550,11 +555,11 @@ void AERReferenceWeaponProbe::TickScopes()
             Optical->LastSpreadShotServerTime=Now-10;
             M->Locomotion.HalfHeight=92.5f;M->Locomotion.ProneBlend=0;M->bWantsToCrouch=false;M->Velocity=FVector::ZeroVector;
             const float HipRaw=Slot==5?26.1f:81.f;
-            Check(FMath::IsNearlyEqual(Optical->GetSpreadDegrees(),ERWeaponAccuracy::Degrees(HipRaw),.001f),
+            Check(FMath::IsNearlyEqual(Optical->GetSpreadDegrees(),ScaledDegrees(this,HipRaw),.001f),
                 FString::Printf(TEXT("optical_%d_workbook_hip_standing"),Slot));
             M->Locomotion.HalfHeight=62.5f;M->bWantsToCrouch=true;
             const float HipLow=Slot==5?19.65f:60.8f;
-            Check(FMath::IsNearlyEqual(Optical->GetSpreadDegrees(),ERWeaponAccuracy::Degrees(HipLow),.001f),
+            Check(FMath::IsNearlyEqual(Optical->GetSpreadDegrees(),ScaledDegrees(this,HipLow),.001f),
                 FString::Printf(TEXT("optical_%d_workbook_hip_crouching"),Slot));
             Optical->ServerCycleScope();
             const float ScopeLow=Slot==5?1.8f:1.7f;
@@ -562,21 +567,21 @@ void AERReferenceWeaponProbe::TickScopes()
             const float MaxSpeed=(Slot==5?120.f:100.f)*2.54f;
             M->Velocity=FVector(100,0,0);
             const float CrouchMotion=Optical->GetSpreadDegrees();
-            Check(FMath::IsNearlyEqual(CrouchMotion,ERWeaponAccuracy::Degrees(ScopeLow+MoveRaw*100/MaxSpeed),.001f),
+            Check(FMath::IsNearlyEqual(CrouchMotion,ScaledDegrees(this,ScopeLow+MoveRaw*100/MaxSpeed),.001f),
                 FString::Printf(TEXT("optical_%d_workbook_scoped_crouch_motion"),Slot));
             M->Locomotion.HalfHeight=34;M->Locomotion.ProneBlend=1;M->Velocity=FVector(55,0,0);
             const float CrawlMotion=Optical->GetSpreadDegrees();
-            Check(FMath::IsNearlyEqual(CrawlMotion,ERWeaponAccuracy::Degrees(ScopeLow+MoveRaw*55/MaxSpeed),.001f),
+            Check(FMath::IsNearlyEqual(CrawlMotion,ScaledDegrees(this,ScopeLow+MoveRaw*55/MaxSpeed),.001f),
                 FString::Printf(TEXT("optical_%d_crawl_uses_crouch_profile_and_actual_speed"),Slot));
             M->Velocity=FVector::ZeroVector;
-            Check(FMath::IsNearlyEqual(Optical->GetSpreadDegrees(),ERWeaponAccuracy::Degrees(ScopeLow),.001f),
+            Check(FMath::IsNearlyEqual(Optical->GetSpreadDegrees(),ScaledDegrees(this,ScopeLow),.001f),
                 FString::Printf(TEXT("optical_%d_stationary_prone_keeps_workbook_minimum"),Slot));
             M->Locomotion.HalfHeight=62.5f;M->Locomotion.ProneBlend=0;
-            Check(FMath::IsNearlyEqual(Optical->GetSpreadDegrees(),ERWeaponAccuracy::Degrees(ScopeLow),.001f),
+            Check(FMath::IsNearlyEqual(Optical->GetSpreadDegrees(),ScaledDegrees(this,ScopeLow),.001f),
                 FString::Printf(TEXT("optical_%d_stationary_crouch_keeps_workbook_minimum"),Slot));
             Optical->ClearScope();M->Locomotion.HalfHeight=34;M->Locomotion.ProneBlend=1;M->Velocity=FVector(55,0,0);
             const float HipMax=(Slot==5?215.f:200.f)*2.54f;
-            Check(FMath::IsNearlyEqual(Optical->GetSpreadDegrees(),ERWeaponAccuracy::Degrees(HipLow+MoveRaw*55/HipMax),.001f),
+            Check(FMath::IsNearlyEqual(Optical->GetSpreadDegrees(),ScaledDegrees(this,HipLow+MoveRaw*55/HipMax),.001f),
                 FString::Printf(TEXT("optical_%d_workbook_crawl_without_scope"),Slot));
             UE_LOG(LogTemp,Display,TEXT("ER_SCOPE_ACCURACY slot=%d hip=%.3f crouch=%.3f crawl=%.3f"),Slot,ERWeaponAccuracy::Degrees(HipRaw),CrouchMotion,CrawlMotion);
         }
@@ -592,9 +597,9 @@ void AERReferenceWeaponProbe::TickScopes()
     Check(W->ScopeLevel==Expected[Phase-100],FString::Printf(TEXT("scope_server_level_%d"),Phase));
     const float AccuracyResidual=W->GetFiringInaccuracy()+(W->AccuracyLandingSpeed>0 ?
         ERWeaponAccuracy::Recover(W->AccuracyLandingImpulse,Now-W->AccuracyLandingServerTime,W->AccuracyLandingRecoveryTime):0.f);
-    if(Phase==103 || Phase==107)Check(FMath::IsNearlyEqual(W->GetSpreadDegrees(),ERWeaponAccuracy::Degrees((Phase==103?26.1f:81.f)+AccuracyResidual),.001f),TEXT("optical_owner_has_updated_hip_spread"));
+    if(Phase==103 || Phase==107)Check(FMath::IsNearlyEqual(W->GetSpreadDegrees(),ERWeaponAccuracy::Degrees((Phase==103?26.1f:81.f)*SpreadScale(this)+AccuracyResidual),.001f),TEXT("optical_owner_has_updated_hip_spread"));
     if(Phase==104 || Phase==108)
-        Check(FMath::IsNearlyEqual(W->GetSpreadDegrees(),ERWeaponAccuracy::Degrees((Phase==104?2.3f:2.2f)+AccuracyResidual),.001f) && W->GetScopeFOV()==40.f,TEXT("settled_stationary_scope_has_workbook_minimum_fov40"));
+        Check(FMath::IsNearlyEqual(W->GetSpreadDegrees(),ERWeaponAccuracy::Degrees((Phase==104?2.3f:2.2f)*SpreadScale(this)+AccuracyResidual),.001f) && W->GetScopeFOV()==40.f,TEXT("settled_stationary_scope_has_workbook_minimum_fov40"));
     if(Phase==105 || Phase==109)Check(W->GetScopeFOV()==10.f,TEXT("second_zoom_fov10"));
     if(Phase==112)Check(W->AuthorizedShotCount>0 && W->ScopeLevel==0,TEXT("marksman_shot_exits_scope"));
     if(Phase==115)Check(W->AuthorizedShotCount>0 && W->ScopeLevel==1,TEXT("sniper_shot_keeps_scope"));

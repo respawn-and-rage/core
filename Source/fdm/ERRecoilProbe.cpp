@@ -109,7 +109,7 @@ void AERRecoilProbe::Tick(float DeltaTime)
     {
         auto* W=H->Weapon.Get();const auto Before=ERWeaponRecoil::At(H->RecoilState,Now);
         const FRotator Aim=H->GetViewRotation();const FVector Eye=H->Camera->GetComponentLocation();
-        const FVector Muzzle=Eye+Aim.RotateVector(FVector(45,12,-12));
+        const FVector Muzzle=W->HasOpticalScope() && W->ScopeLevel ? Eye:Eye+Aim.RotateVector(FVector(45,12,-12));
         const FVector Expected=(Eye+Aim.Vector()*W->Data->HitscanRange-Muzzle).GetSafeNormal();
         const uint32 Count=W->AuthorizedShotCount;H->ServerStartFire();H->ServerStopFire();
         Check(W->AuthorizedShotCount==Count+1 && W->LastShotAimDirection.Equals(Expected,.0001),TEXT("next_bullet_uses_server_recoiled_eyes_once"));

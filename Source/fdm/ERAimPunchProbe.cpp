@@ -172,7 +172,7 @@ void AERAimPunchProbe::Tick(float DeltaTime)
         const float SpreadBefore=W->GetSpreadDegrees();Hit(H,20);
         Check(FMath::IsNearlyEqual(SpreadBefore,W->GetSpreadDegrees(),.00001f),TEXT("punch_adds_no_spread_penalty"));
         const auto Aim=H->GetEffectiveAimRotation();const FVector Eye=H->Camera->GetComponentLocation();
-        const FVector Muzzle=Eye+Aim.RotateVector(FVector(45,12,-12));
+        const FVector Muzzle=W->HasOpticalScope() && W->ScopeLevel ? Eye:Eye+Aim.RotateVector(FVector(45,12,-12));
         const FVector Expected=(Eye+Aim.Vector()*W->Data->HitscanRange-Muzzle).GetSafeNormal();
         const uint32 Shots=W->AuthorizedShotCount;H->ServerStartFire();H->ServerStopFire();
         Check(W->AuthorizedShotCount==Shots+1 && W->LastShotAimDirection.Equals(Expected,.0001f),TEXT("all_guns_scopes_launcher_effective_trace_once"));

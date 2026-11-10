@@ -490,7 +490,10 @@ void AERWeapon::TryFire()
         ERShotTrace::Pellet(GetWorld(),ViewHit,Eye,Far,Params,ShotTime,Context) :
         GetWorld()->LineTraceSingleByChannel(ViewHit, Eye, Far, ECC_GameTraceChannel1, Params);
     const FVector Target = bViewHit ? ViewHit.ImpactPoint : Far;
-    FVector IntendedMuzzle = Eye + Aim.RotateVector(FVector(45, 12, -12));
+    // Through an optic the player sees only the eye line: a bullet leaving the hip muzzle
+    // (12cm right and below) would strike sills and cover edges the scope looks past.
+    const bool bScopeAxis = Tuned()->Payload == EERPayload::Bullet && HasOpticalScope() && ScopeLevel;
+    FVector IntendedMuzzle = bScopeAxis ? Eye : Eye + Aim.RotateVector(FVector(45, 12, -12));
     if(Tuned()->Payload==EERPayload::LaunchedHE && Character->GetIronAimBlend()>0)
     {
         // Use the raised rig in the authoritative aim frame, never a client camera
@@ -511,7 +514,7 @@ void AERWeapon::TryFire()
         ERWeaponAccuracy::Sample(LastShotAimDirection,GetAccuracyMode().Spread,ShotInaccuracy,ShotRandom) :
         ShotRandom.VRandCone(LastShotAimDirection, FMath::DegreesToRadians(LastShotSpreadDegrees));
     FHitResult MuzzleHit;
-    const bool bBlocked = GetWorld()->SweepSingleByChannel(MuzzleHit, Eye, IntendedMuzzle, FQuat::Identity, ECC_GameTraceChannel1, FCollisionShape::MakeSphere(3), Params);
+    const bool bBlocked = !bScopeAxis && GetWorld()->SweepSingleByChannel(MuzzleHit, Eye, IntendedMuzzle, FQuat::Identity, ECC_GameTraceChannel1, FCollisionShape::MakeSphere(3), Params);
     if (Tuned()->Payload != EERPayload::Melee) --MagazineAmmo;
     NextAllowedShotTime = Now + Tuned()->ShotInterval; Character->Health->ProtectionEndServerTime = 0;
     // Only an authorized shot changes burst buildup. Owners recover it against the server clock.

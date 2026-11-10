@@ -109,7 +109,9 @@ toggles; optical cycles 40/10/off FOV. Launcher has iron-style ADS at 75 FOV.
 Iron aim moves the complete FPS rig over .2s, smoothstepped, with integration capped at 50ms.
 Assault and Launcher hold the gun low (`iron_sight_drop`) with its barrel converging on the
 screen centre, leaving the reticle clear; Assault also sits closer (`iron_sight_eye_distance`).
-Optical rifles hide the centre reticle, keeping the ammo ring. Carbine keeps zoom after
+Optical rifles hide the centre reticle, keeping the ammo ring. While an optic is up, bullets
+leave from the eye along the scope axis with no muzzle obstruction check, so near cover that the
+scope looks past cannot stop them; every other shot starts at the hip muzzle. Carbine keeps zoom after
 shots; Sniper unscopes (`bUnscopeAfterShot`). `scope_profiles.py` preserves values through
 setup scripts.
 
