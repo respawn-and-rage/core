@@ -92,7 +92,9 @@ void FSettings::Apply() const
         return;
     }
     // Scalability groups first: they rewrite the individual r.* values set below.
-    Set(TEXT("sg.GlobalIlluminationQuality"),GI ? 2+LumenQuality:1);
+    // Medium Lumen is the engine's irradiance-volume gather: on these maps it keeps the bounce
+    // light of the screen-probe gather at a lower GPU cost. High uses the top group.
+    Set(TEXT("sg.GlobalIlluminationQuality"),GI && LumenQuality ? 3:1);
     Set(TEXT("sg.ReflectionQuality"),Reflections==2 ? 2+LumenQuality:1);
     Set(TEXT("sg.PostProcessQuality"),PostProcess);
     Set(TEXT("t.MaxFPS"),FrameCaps[FrameCap]);

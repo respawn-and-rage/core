@@ -129,6 +129,8 @@ with the fingers leading across the front. The left forearm must align with the 
 WorldSupportPalmOffsetCm` is a per-skin correction. Pistols use a two-hand cup contact.
 
 `setup_world_weapon_pose.py` updates only the seven firearm presentation profiles.
+The server and headless peers refresh these bones every frame (hit bodies, probes); a rendering
+client refreshes a remote pawn's bones only while it is drawn, and its pose still ticks.
 
 Items without a reference pose (knife, hand grenades, Claymore) share a two-hand aim base clip.
 `UERPostureMesh` carries them one-handed instead: right hand in a low guard ahead of the ribs with

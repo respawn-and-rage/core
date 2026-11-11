@@ -1,4 +1,5 @@
 #include "ERPostureMesh.h"
+#include "Misc/App.h"
 #include "ERCharacter.h"
 #include "ERMovement.h"
 #include "Engine/SkeletalMesh.h"
@@ -129,7 +130,10 @@ void UERPostureMesh::TickComponent(float DeltaTime,ELevelTick TickType,FActorCom
     if(D && D->bWorldReferencePose)
     {
         bEnableUpdateRateOptimizations=false;
-        VisibilityBasedAnimTickOption=EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+        // The server needs current bones for hit bodies, and a headless peer never draws.
+        // A rendering client refreshes a remote pawn's bones only while it is drawn; its pose still ticks.
+        const bool RemoteView=C->GetLocalRole()==ROLE_SimulatedProxy && FApp::CanEverRender();
+        VisibilityBasedAnimTickOption=RemoteView ? EVisibilityBasedAnimTickOption::AlwaysTickPose:EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
     }
     Super::TickComponent(DeltaTime,TickType,ThisTickFunction);
 }

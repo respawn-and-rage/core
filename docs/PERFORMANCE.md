@@ -13,6 +13,7 @@ applies the base profile for local and packaged runs; do not restore launcher ov
 | Quality | auto | TSR | Lumen high + HW RT | Lumen | high | high | ultra | ultra | 90 |
 
 Fresh profiles, `SetDefaults` and legacy `Defaults=1` select Balanced; saved custom choices stay.
+Lumen medium is the engine's group 1 (irradiance-volume final gather) and Lumen high its group 3.
 Sun shadows use the engine's top virtual shadow map resolution only at high shadows; medium
 keeps the standard resolution.
 `r.MaterialQualityLevel` stays High when effects are minimum, a workaround for orange Paragon

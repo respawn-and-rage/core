@@ -484,6 +484,9 @@ void AERReferenceWeaponProbe::TickScopes()
         if(ClientPhase!=Phase)
         {
             ClientPhase=Phase;ClientChangedAt=Now;PC->SetControlRotation(FRotator(0,45,0));
+            // A real mouse or keyboard over the test window must not turn or move the pawn
+            // between a shot and its check: the phases drive every input themselves.
+            PC->ResetIgnoreLookInput();PC->SetIgnoreLookInput(true);PC->ResetIgnoreMoveInput();PC->SetIgnoreMoveInput(true);
             const FKey Keys[]={EKeys::Five,EKeys::RightMouseButton,EKeys::RightMouseButton,
                 EKeys::Six,EKeys::RightMouseButton,EKeys::RightMouseButton,EKeys::RightMouseButton,
                 EKeys::Seven,EKeys::RightMouseButton,EKeys::RightMouseButton,EKeys::RightMouseButton,
@@ -535,6 +538,7 @@ void AERReferenceWeaponProbe::TickScopes()
         auto* H=CastChecked<AERCharacter>(Host->GetPawn());auto* C=CastChecked<AERCharacter>(Client->GetPawn());
         H->TeleportTo(FVector(-1300,-1500,95),FRotator::ZeroRotator);C->TeleportTo(FVector(-850,-1500,95),FRotator(0,45,0));
         Host->SetControlRotation(FRotator(65,0,0));Client->SetControlRotation(FRotator(0,45,0));
+        Host->ResetIgnoreLookInput();Host->SetIgnoreLookInput(true);Host->ResetIgnoreMoveInput();Host->SetIgnoreMoveInput(true);
         H->GetCharacterMovement()->SetMovementMode(MOVE_Walking);H->GetCharacterMovement()->Velocity=FVector::ZeroVector;
         for(auto Item:H->Inventory)if(Item){Item->AccuracyLandingSpeed=0;Item->FiringInaccuracyAtLastShot=0;}
         H->ServerSelectWeapon(4);const float Hip=H->Weapon->GetSpreadDegrees();H->Weapon->ServerCycleScope();

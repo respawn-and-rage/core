@@ -59,17 +59,16 @@ void AERHUD::DrawKillStreak()
     if (!Self || Self->KillStreak.Num() < 2) return;
 
     const FERHUDLayout Layout(FVector2D(Canvas->SizeX, Canvas->SizeY));
-    const int32 Count = Self->KillStreak.Num() - 1;
+    const int32 Count = Self->KillStreak.Num();
     const float MaxWidth = Layout.Position(760, 0).X;
     constexpr float GapRatio = .18f;
     const float Height = FMath::Min(38.f * Layout.Scale, MaxWidth / (Count * BadgeAspect + (Count - 1) * GapRatio));
     const float Step = Height * (BadgeAspect + GapRatio);
     FVector2D At = Layout.Position(640, 688);
     At.X -= (Count * Step - Height * GapRatio) * .5f;
-    // The first kill establishes the streak; badges start with the second kill.
-    for (int32 Index = 1; Index < Self->KillStreak.Num(); ++Index)
+    for (const uint8 Headshot : Self->KillStreak)
     {
-        DrawKillBadge(Self->KillStreak[Index] != 0, At, Height, 1.f);
+        DrawKillBadge(Headshot != 0, At, Height, 1.f);
         At.X += Step;
     }
 }

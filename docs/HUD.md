@@ -27,8 +27,8 @@ without pixel caps, recomputed from the live viewport. Font: Teko SemiBold throu
   crops as the inventory), victim name, both in team colours. TK marks teamkills and a skull
   with a red reticle marks headshots; deaths without a catalog weapon show FELL, DIED or KILLED. Rows involving the local
   player have a darker backing and a white edge. Hidden on the results screen.
-- **Kill streak** (`ERMatchHUD`): a centred row at the bottom, with one skull per enemy kill
-  starting with the second in the same life. Headshot kills use the red reticle skull. The row
+- **Kill streak** (`ERMatchHUD`): a centred row at the bottom that appears at the second enemy kill
+  in the same life and shows every kill in the streak. Headshots use the red reticle skull. The row
   clears on death or a new round and is hidden with the scoreboard. Both textures are assigned
   in `BP_ERMatchHUD` and imported by `scripts/setup_hud_kill_icons.py`.
 - **Kill camera** (`ERMatchHUD`): one row above the killer's head with the name in team colour and

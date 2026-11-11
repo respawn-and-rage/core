@@ -1209,14 +1209,36 @@ void AERHUD::DrawHUD()
     if (const auto* Weapon = Character && !Character->Health->bDead && !Character->IsWeaponStowed() ? Character->Weapon.Get() : nullptr; Weapon && Weapon->HasOpticalScope() && Weapon->ScopeLevel)
     {
         const float R = FMath::Min(W,H)*.48f, CX=W*.5f, CY=H*.5f;
-        // Opaque outside a circular lens, including ultrawide side bars.
-        for (int32 Y=0; Y<FMath::CeilToInt(H); ++Y)
+        // Opaque outside a circular lens, including ultrawide side bars: four bars around the
+        // lens square, then the ring between that square and the circle as one triangle list.
+        DrawRect(FLinearColor::Black,0,0,CX-R,H);DrawRect(FLinearColor::Black,CX+R,0,W-CX-R,H);
+        DrawRect(FLinearColor::Black,CX-R,0,2.f*R,CY-R);DrawRect(FLinearColor::Black,CX-R,CY+R,2.f*R,H-CY-R);
+        // A multiple of 8 samples the square's corners exactly; the chord error stays under .1px.
+        constexpr int32 LensSegments=256;
+        static TArray<FCanvasUVTri> Lens;static FVector LensFrame=FVector::ZeroVector;
+        if(Lens.Num()!=2*LensSegments || !LensFrame.Equals(FVector(CX,CY,R),.01))
         {
-            const float DY=Y+.5f-CY;
-            const float X=FMath::Abs(DY)<R ? FMath::Sqrt(R*R-DY*DY) : 0.f;
-            DrawRect(FLinearColor::Black,0,Y,CX-X,1);
-            DrawRect(FLinearColor::Black,CX+X,Y,W-CX-X,1);
+            LensFrame=FVector(CX,CY,R);Lens.Reset(2*LensSegments);
+            // The ring overlaps the bars by a pixel, leaving no hairline between them.
+            auto Rim=[&](int32 I,bool Square)
+            {
+                float Sin,Cos;FMath::SinCos(&Sin,&Cos,2.f*PI*I/LensSegments);
+                const float Reach=Square ? (R+1.f)/FMath::Max(FMath::Abs(Cos),FMath::Abs(Sin)):R;
+                return FVector2D(CX+Cos*Reach,CY+Sin*Reach);
+            };
+            auto Triangle=[&](FVector2D A,FVector2D B,FVector2D C)
+            {
+                FCanvasUVTri Tri;Tri.V0_Pos=A;Tri.V1_Pos=B;Tri.V2_Pos=C;
+                Tri.V0_UV=Tri.V1_UV=Tri.V2_UV=FVector2D::ZeroVector;
+                Tri.V0_Color=Tri.V1_Color=Tri.V2_Color=FLinearColor::Black;Lens.Add(Tri);
+            };
+            for(int32 I=0;I<LensSegments;++I)
+            {
+                Triangle(Rim(I,false),Rim(I,true),Rim(I+1,true));
+                Triangle(Rim(I,false),Rim(I+1,true),Rim(I+1,false));
+            }
         }
+        FCanvasTriangleItem LensMask(Lens,GWhiteTexture);LensMask.BlendMode=SE_BLEND_Translucent;Canvas->DrawItem(LensMask);
         const float Blur=Weapon->GetScopeBlur();
         for(int32 I=-4; I<=4; ++I)
         {

@@ -64,6 +64,8 @@ bool FERPerformancePreferencesTest::RunTest(const FString&)
     TestEqual(TEXT("Default selects balanced frame cap"),Value(TEXT("t.MaxFPS")),90);
     TestEqual(TEXT("Default keeps authored material quality"),Value(TEXT("r.MaterialQualityLevel")),1);
     TestEqual(TEXT("Default uses balanced shadows"),Value(TEXT("sg.ShadowQuality")),2);
+    TestEqual(TEXT("Default keeps Lumen"),Value(TEXT("r.DynamicGlobalIlluminationMethod")),1);
+    TestEqual(TEXT("Default uses the medium Lumen group"),Value(TEXT("sg.GlobalIlluminationQuality")),1);
     ERPerformance::FSettings Restored; Restored.Load();
     TestEqual(TEXT("Default preset is saved"),Restored.Defaults,0);
     TestEqual(TEXT("Default uses automatic resolution"),Restored.Automatic,1);
