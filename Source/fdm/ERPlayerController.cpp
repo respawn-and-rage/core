@@ -1373,7 +1373,11 @@ void AERHUD::DrawHUD()
             }
             DrawHUDText(Value, X, AtY, Color, Scale);
         };
-        if (!Results) DrawKillFeed(GS, X, Y);
+        if (!Results)
+        {
+            DrawKillFeed(GS, X, Y);
+            if (Character && !Character->Health->bDead && !PC->bAwaitingRespawn) DrawKillStreak();
+        }
         for (int32 I = 0; I < PC->KillConfirmations.Num(); ++I)
         {
             const auto& Item = PC->KillConfirmations[I];

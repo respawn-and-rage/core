@@ -13,7 +13,9 @@ is no matchmaking service.
 - **LAN:** UDP discovery or direct IP, port 7777, bound to `0.0.0.0` through MULTIHOME. Needs
   no EOS configuration. Exercised on one Mac only: a physical two-PC LAN needs its own test.
 - **Internet:** Start Server → Connection: Internet (Epic Online Services), or Play Online →
-  Search Servers.
+  Internet → Search Servers. Use Connect Directly to enter a hostname or IP and port
+  (default 7777) for an IP server. Enable Epic Online Services sign-in for servers
+  started with `-EROnlineServer`. EOS P2P listen hosts are joined through search.
 - **Capacity:** Start Server saves a positive human capacity (default 16, host included), with
   no fixed cap. GameSession, admission, LAN availability, lobby status and travel all use it.
   Test bots are additional. Occupied starts overflow to safe positions near the base, waiting
@@ -34,9 +36,10 @@ reuses the same hashed Product User ID. Never delete or reset a Device ID for a 
 
 Configuration: non-secret IDs in `Config/EOS.example.ini`; private `Config/EOS.local.ini` holds the
 **untrusted Peer2Peer client** secret (ignored, mode 0600, never printed). It is staged as NonUFS
-when present at compile time, so rebuild after adding or removing it. Builds without it keep LAN
-and explain that Internet is not configured. Never ship a trusted server credential; the only
-published server client is the Community one (see [Dedicated server](#dedicated-server)), whose
+when present at compile time, so rebuild after adding or removing it. Builds without it can
+still use LAN and direct connections to IP servers that do not require EOS. Never ship a
+trusted server credential; the only published server client is the Community one
+(see [Dedicated server](#dedicated-server)), whose
 policy must stay limited to dedicated-session management. The portal
 policy `p2p` includes `matchmaking:managePlayers`.
 
@@ -114,8 +117,9 @@ same-Mac service results separate from cross-network claims.
 ## Verify
 
 `test-online-service.py` (real EOS, two launches, must exit 0), `test-online-unconfigured.py` in an isolated checkout,
-`test-lobby.py`, `test-capacity.py`, `test-network-readiness.py --require-checkpoint` (two local peers; defaults to
-15 FPS client, 75ms outgoing delay per peer, 20ms variance and 2% outgoing loss).
+`test-lobby.py` (use `--direct` for hostname and IPv4 on a custom port), `test-capacity.py`,
+`test-network-readiness.py --require-checkpoint` (two local peers; defaults to 15 FPS client,
+75ms outgoing delay per peer, 20ms variance and 2% outgoing loss).
 Native: `EclipseRecoil.Network.*` (including `OnlineDedicated`), `EclipseRecoil.Destruction.Cells.RecoveryCheckpoint`.
 Dedicated launcher: `scripts/tests/test_build_server_linux.py`. Real dedicated EOS hosting is proven only by the
 container on a public host with `7777/udp` open and a client on another network finding and joining it.

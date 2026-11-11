@@ -28,6 +28,8 @@ public:
     UPROPERTY(Replicated, BlueprintReadOnly) EERTeam PendingTeam = EERTeam::None;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 Kills = 0;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 Deaths = 0;
+    // Owner-only streak in kill order: 1 for a headshot, 0 for a regular kill.
+    UPROPERTY(Replicated) TArray<uint8> KillStreak;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 TeamKills = 0;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 Skulls = 0;
     UPROPERTY(Replicated, BlueprintReadOnly) int32 ActiveClaymores = 0;

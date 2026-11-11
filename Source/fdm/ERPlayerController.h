@@ -42,6 +42,9 @@ public:
     int32 SmokeCount = 2;
     int32 StunCount = 2;
     bool bInternetMenu = true;
+    FString DirectServerHost;
+    FString DirectServerPort = TEXT("7777");
+    bool bDirectServerUsesEOS = false;
     FString InternetServerName = TEXT("Respawn & Rage");
     int32 SessionMode = 0; // local, listen server, client
     // Server-only session history; survives seamless map travel, never saved.
@@ -342,6 +345,10 @@ private:
     void DrawPreMatchCountdown(const class AERGameState* GS);
     // Top-left kill feed; advances Y below the drawn rows.
     void DrawKillFeed(const class AERGameState* GS, float X, float& Y);
+    void DrawKillStreak();
+    void DrawKillBadge(bool bHeadshot, FVector2D Position, float Height, float Opacity);
+    UPROPERTY(EditDefaultsOnly, Category="Kill Icons") TObjectPtr<class UTexture2D> SkullBadge;
+    UPROPERTY(EditDefaultsOnly, Category="Kill Icons") TObjectPtr<class UTexture2D> HeadshotBadge;
     void DrawScoreboard(const class AERGameState* GS);
     // Kill camera: killer name with the HUD health and armor icons above the head.
     void DrawKillerHealth(const class AERCharacter* Victim);

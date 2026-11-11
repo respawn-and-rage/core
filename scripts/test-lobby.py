@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real LAN discovery, strict-majority lobby and seamless loadout travel tests."""
+"""Real LAN discovery or direct join, strict-majority lobby and seamless travel tests."""
 from pathlib import Path
 import argparse
 import os
@@ -12,6 +12,7 @@ parser.add_argument('--village', action='store_true', help='Vote for Village and
 parser.add_argument('--rooms', action='store_true', help='Vote for Rooms and verify its generated bases on every peer')
 parser.add_argument('--map-sizing', action='store_true', help='Creation-time sizing, frozen lobby snapshot, independent capacity and travel descriptor')
 parser.add_argument('--skull-hunt', action='store_true', help='Verify the mode vote and Skull Hunt scoring over LAN')
+parser.add_argument('--direct', action='store_true', help='Join via hostname and IPv4 on a custom port instead of LAN discovery')
 parser.add_argument('--timeout', action='store_true', help='Also check the real 30-second no-server timeout')
 parser.add_argument('--settings', action='store_true', help='Check fullscreen defaults and preferences across two graphical launches')
 parser.add_argument('--focus', action='store_true', help='Graphical foreground fullscreen/menu/game mouse capture recovery probe')
@@ -22,7 +23,7 @@ if sum((args.industrial, args.village, args.rooms)) > 1:
 voted_map = 4 if args.rooms else 5 if args.village else 0 if args.industrial else 2
 root = Path(__file__).resolve().parents[1]
 exe = Path(os.environ.get('UE_ROOT', '/Users/Shared/Epic Games/UE_5.8')) / 'Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor'
-out = root / 'Saved/Testing' / ('SkullHunt' if args.skull_hunt else 'Lobby')
+out = root / 'Saved/Testing' / ('SkullHunt' if args.skull_hunt else 'LobbyDirect' if args.direct else 'Lobby')
 out.mkdir(parents=True, exist_ok=True)
 common = [str(exe), str(root / 'RespawnAndRage.uproject'), '-game', '-nosound', '-unattended', '-NoSplash', '-Multiprocess', '-stdout', '-FullStdOutLogOutput', '-ExecCmds=t.MaxFPS 60,sg.GlobalIlluminationQuality 0,sg.ReflectionQuality 0,sg.ShadowQuality 1']
 if args.map_sizing:
@@ -85,7 +86,8 @@ try:
         sockets = subprocess.check_output(['/usr/sbin/lsof', '-nP', '-a', '-p', str(host.pid), '-iUDP'], text=True)
         assert '*:17941' in sockets and '*:17942' in sockets, sockets
         print('Server game/discovery sockets bound to 0.0.0.0', flush=True)
-        clients = [launch('client' + str(i), ['-nullrhi', '-ERDiscoveryPort=17942', '-ERLobbyProbeClient=' + str(i)]) for i in (1, 2)]
+        join_options = ['-ERLobbyProbeDirectPort=17941'] if args.direct else []
+        clients = [launch('client' + str(i), ['-nullrhi', '-ERDiscoveryPort=17942', '-ERLobbyProbeClient=' + str(i)] + join_options) for i in (1, 2)]
         for role, process in [('host', host), ('client1', clients[0]), ('client2', clients[1])]:
             wait_for(role, process, 'ER_LOBBY_PROBE_COMPLETE result=PASS', 100)
             output = log(role)
@@ -93,7 +95,8 @@ try:
             print('\n'.join(line for line in output.splitlines() if 'ER_LOBBY_' in line or 'ER_LAN_FOUND' in line), flush=True)
         assert 'one_of_three_ready_does_not_start' in log('host')
         assert f'ER_LOBBY_START humans=3 ready=2 map={voted_map}' in log('host')
-        assert all('ER_LAN_FOUND' in log('client' + str(i)) for i in (1, 2))
+        joined = 'ER_LOBBY_PASS direct_travel_requested' if args.direct else 'ER_LAN_FOUND'
+        assert all(joined in log('client' + str(i)) for i in (1, 2))
         if args.skull_hunt:
             for process in [*clients, host]:
                 assert process.wait(timeout=20) == 0, f'Unreal process {process.pid} failed during shutdown'
@@ -102,7 +105,7 @@ try:
             timeout.wait(timeout=65)
             assert timeout.returncode == 0 and 'ER_LOBBY_PASS discovery_timeout_has_actionable_status' in log('timeout')
             print('Real 30-second discovery timeout: PASS', flush=True)
-        print('LAN lobby integration: PASS', flush=True)
+        print(('Direct connection' if args.direct else 'LAN discovery') + ' lobby integration: PASS', flush=True)
 finally:
     for process in children:
         if process.poll() is None:

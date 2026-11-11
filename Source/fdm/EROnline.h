@@ -39,6 +39,7 @@ public:
     void Host();
     void Search();
     void Join(int32 Index);
+    void ConnectDirect(const FString& Host, const FString& Port, bool bUseEOS);
     void Cancel();
     void Leave();
     void RegisterPlayer(APlayerController* Player);
@@ -55,6 +56,7 @@ private:
     bool bCancelled = false;
     bool bOnline = false;
     bool bHostAfterLogin = false;
+    FString DirectEndpointAfterLogin;
     FName EOSInstanceIdentifier;
     bool bOwnEOSInstance = false;
     IOnlineIdentityPtr Identity;
@@ -67,7 +69,8 @@ private:
     void DedicatedCreateComplete(FName Name, bool Success);
     void RetryDedicated();
     bool Configure();
-    void Begin(bool Hosting);
+    void Begin(bool Hosting, const FString& DirectEndpoint = FString());
+    void TravelToServer(const FString& Address);
     void Continue();
     void LoginComplete(int32 User, bool Success, const FUniqueNetId& Id, const FString& Error);
     void CreateComplete(FName Name, bool Success);

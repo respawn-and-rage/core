@@ -24,9 +24,13 @@ without pixel caps, recomputed from the live viewport. Font: Teko SemiBold throu
   centre; the top timer holds the full match duration until the match starts.
 - **Kill feed** (`ERMatchHUD`): top left above the kill confirmations, up to five rows for 8s
   with a .6s fade: killer name, cropped weapon icon (`AERHUD::DrawWeaponIcon`, same art and
-  crops as the inventory), victim name, both in team colours. TK and HS tags mark teamkills and
-  headshots; deaths without a catalog weapon show FELL, DIED or KILLED. Rows involving the local
+  crops as the inventory), victim name, both in team colours. TK marks teamkills and a skull
+  with a red reticle marks headshots; deaths without a catalog weapon show FELL, DIED or KILLED. Rows involving the local
   player have a darker backing and a white edge. Hidden on the results screen.
+- **Kill streak** (`ERMatchHUD`): a centred row at the bottom, with one skull per enemy kill
+  starting with the second in the same life. Headshot kills use the red reticle skull. The row
+  clears on death or a new round and is hidden with the scoreboard. Both textures are assigned
+  in `BP_ERMatchHUD` and imported by `scripts/setup_hud_kill_icons.py`.
 - **Kill camera** (`ERMatchHUD`): one row above the killer's head with the name in team colour and
   the killer's replicated health and armor drawn with the vitals icons (`AERHUD::DrawVitalIcon`,
   same art and 16-sector rule, 30 units). It is kept below the top-centre score, timer and network

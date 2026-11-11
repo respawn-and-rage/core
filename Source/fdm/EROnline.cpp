@@ -15,6 +15,8 @@
 #include "Misc/PackageName.h"
 #include "HAL/PlatformMisc.h"
 #include "TimerManager.h"
+#include "Engine/EngineBaseTypes.h"
+#include "SocketSubsystem.h"
 
 #if !RR_EOS_DEVICE_ID
 #error Prepare the project EOS plugin with scripts/prepare-eos-guest.py before building.
@@ -46,6 +48,45 @@ bool IsPort(const FString& Text)
 {
     int32 Port = 0;
     return !Text.IsEmpty() && Text.Len() <= 5 && Text.IsNumeric() && LexTryParseString(Port, *Text) && Port >= 1 && Port <= 65535;
+}
+bool IsAsciiDigit(TCHAR C)
+{
+    return C >= TEXT('0') && C <= TEXT('9');
+}
+FString MakeDirectEndpoint(const FString& RawHost, const FString& RawPort)
+{
+    FString Host = RawHost.TrimStartAndEnd();
+    const FString Port = RawPort.TrimStartAndEnd();
+    for (const TCHAR C : Port) if (!IsAsciiDigit(C)) return {};
+    if (!IsPort(Port) || Host.IsEmpty() || Host.Len() > 254) return {};
+
+    if (Host.StartsWith(TEXT("[")) && Host.EndsWith(TEXT("]"))) Host = Host.Mid(1, Host.Len() - 2);
+    if (Host.Contains(TEXT(":")))
+    {
+        for (const TCHAR C : Host)
+            if (!FChar::IsHexDigit(C) && C != TEXT(':') && C != TEXT('.')) return {};
+        auto* Sockets = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+        if (!Sockets || !Sockets->GetAddressFromString(Host).IsValid()) return {};
+        Host = TEXT("[") + Host + TEXT("]");
+    }
+    else
+    {
+        const FString Name = Host.EndsWith(TEXT(".")) ? Host.LeftChop(1) : Host;
+        if (Name.IsEmpty() || Name.Len() > 253) return {};
+        TArray<FString> Labels;
+        Name.ParseIntoArray(Labels, TEXT("."), false);
+        for (const FString& Label : Labels)
+        {
+            if (Label.IsEmpty() || Label.Len() > 63 || Label[0] == TEXT('-') || Label.EndsWith(TEXT("-"))) return {};
+            for (const TCHAR C : Label)
+                if (!IsAsciiDigit(C) && !(C >= TEXT('a') && C <= TEXT('z')) &&
+                    !(C >= TEXT('A') && C <= TEXT('Z')) && C != TEXT('-')) return {};
+        }
+    }
+    // An explicit protocol keeps FURL from treating a hostname without dots as a protocol.
+    const FString Endpoint = FURL::UrlConfig.DefaultProtocol + TEXT("://") + Host + TEXT(":") + Port;
+    const FURL Parsed(nullptr, *Endpoint, TRAVEL_Absolute);
+    return Parsed.Valid && !Parsed.Host.IsEmpty() && Parsed.Port == FCString::Atoi(*Port) ? Endpoint : FString();
 }
 FString PlayerOptions(UERGameInstance* GI)
 {
@@ -193,14 +234,28 @@ void UEROnline::SetDiscoveryFilter(FOnlineSessionSearch& Search)
 }
 void UEROnline::Host() { Begin(true); }
 void UEROnline::Search() { Begin(false); }
-void UEROnline::Begin(bool Hosting)
+void UEROnline::ConnectDirect(const FString& Host, const FString& Port, bool bUseEOS)
+{
+    if (IsBusy() || bOnline || GetWorld()->GetNetMode() != NM_Standalone) return;
+    auto* GI = CastChecked<UERGameInstance>(GetGameInstance());
+    GI->LastError.Empty();
+    const FString Endpoint = MakeDirectEndpoint(Host, Port);
+    if (Endpoint.IsEmpty())
+    { Status = TEXT("Enter a valid hostname or IP address and a port from 1 to 65535."); return; }
+    if (bUseEOS) { Begin(false, Endpoint); return; }
+    GI->CancelLANSearch();
+    TravelToServer(Endpoint);
+}
+void UEROnline::Begin(bool Hosting, const FString& DirectEndpoint)
 {
     if (IsBusy() || bOnline) return;
     auto* GI = Cast<UERGameInstance>(GetGameInstance());
     if (!GI || GetWorld()->GetNetMode() != NM_Standalone) return;
     GI->CancelLANSearch();
     GI->SaveProfile();
+    GI->LastError.Empty();
     Results.Empty(); bCancelled = false; bHostAfterLogin = Hosting;
+    DirectEndpointAfterLogin = DirectEndpoint;
     if (!Configure()) return;
     if (Sessions->GetNamedSession(NAME_GameSession))
     { Status = TEXT("Leaving the previous session. Please retry shortly."); Destroy(); return; }
@@ -228,7 +283,13 @@ void UEROnline::Continue()
 {
     auto* GI = CastChecked<UERGameInstance>(GetGameInstance());
     if (auto* Player = GI->GetFirstGamePlayer()) Player->SetCachedUniqueNetId(Identity->GetUniquePlayerId(0));
-    if (bHostAfterLogin)
+    if (!DirectEndpointAfterLogin.IsEmpty())
+    {
+        const FString Endpoint = MoveTemp(DirectEndpointAfterLogin);
+        DirectEndpointAfterLogin.Reset();
+        TravelToServer(Endpoint);
+    }
+    else if (bHostAfterLogin)
     {
         GI->CommitServerRules();
         const FOnlineSessionSettings Settings = MakeSessionSettings(GI->MaxPlayers, GI->InternetServerName,
@@ -354,10 +415,15 @@ void UEROnline::JoinComplete(FName Name, EOnJoinSessionCompleteResult::Type Resu
     const bool bDedicated = Joined && Joined->SessionSettings.bIsDedicated;
     if (!Sessions->GetResolvedConnectString(NAME_GameSession, Address) || !IsJoinEndpointValid(Address, bDedicated))
     { Status = TEXT("This server did not provide a valid connection endpoint."); Destroy(); return; }
+    TravelToServer(Address);
+}
+void UEROnline::TravelToServer(const FString& Address)
+{
     auto* GI = CastChecked<UERGameInstance>(GetGameInstance());
     auto* PC = GI->GetFirstLocalPlayerController();
     if (!PC) { Status = TEXT("Local player unavailable."); Destroy(); return; }
     GI->SaveProfile();
+    GI->LastError.Empty();
     GI->SessionMode = 2;
     bOnline = true;
     Status = TEXT("Connecting to Internet server...");
@@ -367,6 +433,7 @@ void UEROnline::JoinComplete(FName Name, EOnJoinSessionCompleteResult::Type Resu
 void UEROnline::Cancel()
 {
     Results.Empty();
+    DirectEndpointAfterLogin.Reset();
     if (IsBusy()) { bCancelled = true; Status = TEXT("Cancelling the current online request..."); }
     else Status.Empty();
 }

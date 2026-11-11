@@ -6,12 +6,17 @@
 #include "ERRecon.h"
 #include "ERHUDLayout.h"
 #include "Engine/Canvas.h"
+#include "Engine/Texture2D.h"
 #include "CanvasItem.h"
 
 namespace
 {
     constexpr double KillFeedSeconds = 8.0;
     constexpr double KillFeedFade = .6;
+    // Same crop on both supplied textures, preserving the transparent outline.
+    const FVector2D BadgeUV0(206.0 / 1254.0, 163.0 / 1254.0);
+    const FVector2D BadgeUV1(1031.0 / 1254.0, 1113.0 / 1254.0);
+    constexpr float BadgeAspect = 825.f / 950.f;
 
     FString ShortName(const FString& Name, int32 Length = 18)
     {
@@ -35,6 +40,38 @@ void AERHUD::DrawPreMatchCountdown(const AERGameState* GS)
         Seconds <= 3 ? FLinearColor(1.f,.55f,.25f) : FLinearColor(1.f,.82f,.42f), 3.4f, FVector2D(.5f,0));
     DrawHUDTextAnchored(TEXT("Movement and weapons unlock when the countdown ends"), FVector2D(CX, Layout.Position(0,330).Y),
         FLinearColor(.72f,.76f,.82f), .7f, FVector2D(.5f,0));
+}
+
+void AERHUD::DrawKillBadge(bool bHeadshot, FVector2D Position, float Height, float Opacity)
+{
+    const UTexture2D* Texture = bHeadshot ? HeadshotBadge.Get() : SkullBadge.Get();
+    if (!Texture || !Texture->GetResource()) return;
+    const FVector2D Size(Height * BadgeAspect, Height);
+    FCanvasTileItem Tile(Position - FVector2D(0, Height * .5f), Texture->GetResource(), Size,
+        BadgeUV0, BadgeUV1, FLinearColor(1, 1, 1, Opacity));
+    Tile.BlendMode = SE_BLEND_Translucent;
+    Canvas->DrawItem(Tile);
+}
+
+void AERHUD::DrawKillStreak()
+{
+    const auto* Self = PlayerOwner ? PlayerOwner->GetPlayerState<AERPlayerState>() : nullptr;
+    if (!Self || Self->KillStreak.Num() < 2) return;
+
+    const FERHUDLayout Layout(FVector2D(Canvas->SizeX, Canvas->SizeY));
+    const int32 Count = Self->KillStreak.Num() - 1;
+    const float MaxWidth = Layout.Position(760, 0).X;
+    constexpr float GapRatio = .18f;
+    const float Height = FMath::Min(38.f * Layout.Scale, MaxWidth / (Count * BadgeAspect + (Count - 1) * GapRatio));
+    const float Step = Height * (BadgeAspect + GapRatio);
+    FVector2D At = Layout.Position(640, 688);
+    At.X -= (Count * Step - Height * GapRatio) * .5f;
+    // The first kill establishes the streak; badges start with the second kill.
+    for (int32 Index = 1; Index < Self->KillStreak.Num(); ++Index)
+    {
+        DrawKillBadge(Self->KillStreak[Index] != 0, At, Height, 1.f);
+        At.X += Step;
+    }
 }
 
 void AERHUD::DrawKillFeed(const AERGameState* GS, float X, float& Y)
@@ -61,7 +98,8 @@ void AERHUD::DrawKillFeed(const AERGameState* GS, float X, float& Y)
         // Without a catalog icon (fall, world, unknown weapon) a short word takes its place.
         const FString Cause = IconWidth > 0 ? FString() : Entry.bFall ? TEXT("FELL") : bSuicide ? TEXT("DIED") : TEXT("KILLED");
         const float CauseWidth = Cause.IsEmpty() ? 0.f : MeasureHUDText(Cause, .6f).X;
-        const float HeadshotWidth = Entry.bHeadshot ? MeasureHUDText(TEXT("HS"), .55f).X + Gap : 0.f;
+        const float BadgeHeight = 19.f * S;
+        const float HeadshotWidth = Entry.bHeadshot && HeadshotBadge ? BadgeHeight * BadgeAspect + Gap : 0.f;
         const float VictimWidth = MeasureHUDText(Victim, TextScale).X;
         const float Width = Pad * 2 + (bSuicide ? 0.f : KillerWidth + Gap + TagWidth) + FMath::Max(IconWidth, CauseWidth) + Gap + HeadshotWidth + VictimWidth;
         const bool bMine = !SelfName.IsEmpty() && (Entry.Killer == SelfName || Entry.Victim == SelfName);
@@ -91,9 +129,9 @@ void AERHUD::DrawKillFeed(const AERGameState* GS, float X, float& Y)
             Cursor += SlotWidth;
         }
         Cursor += Gap;
-        if (Entry.bHeadshot)
+        if (HeadshotWidth > 0.f)
         {
-            DrawHUDTextAnchored(TEXT("HS"), FVector2D(Cursor, MidY), FLinearColor(1.f,.45f,.35f,Opacity), .55f, FVector2D(0,.5f));
+            DrawKillBadge(true, FVector2D(Cursor, MidY), BadgeHeight, Opacity);
             Cursor += HeadshotWidth;
         }
         DrawHUDTextAnchored(Victim, FVector2D(Cursor, MidY), NameColor(Entry.VictimTeam).CopyWithNewOpacity(Opacity), TextScale, FVector2D(0,.5f));

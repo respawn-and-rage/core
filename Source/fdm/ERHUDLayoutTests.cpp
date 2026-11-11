@@ -57,6 +57,8 @@ void AERHUD::TickHUDLayoutGallery()
             }
         }
         PC->bShowScoreboard=false;
+        if (auto* PS = PC->GetPlayerState<AERPlayerState>())
+            PS->KillStreak = {0, 1, 0, 1};
         // Sample kill feed rows: both teams, teamkill, headshot, explosive and a fall.
         if(auto* GS=GetWorld()->GetGameState<AERGameState>())
         {

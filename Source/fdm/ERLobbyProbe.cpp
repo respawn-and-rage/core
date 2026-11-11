@@ -183,7 +183,21 @@ void AERLobbyProbe::Tick(float DeltaTime)
             Phase = 1;
             GI->LocalName = Host ? TEXT("LobbyHost") : FString::Printf(TEXT("LobbyClient%d"), Client);
             if (Host) { if(FParse::Param(FCommandLine::Get(),TEXT("ERMapSizingLobbyTest")))GI->ServerRules.Set("Map.ExpectedTeamSize",3); GI->AlphaBots = bSkullHuntProbe ? 0 : 1; GI->OmegaBots = 0; GI->StartLANServer(); }
-            else GI->FindLANServer();
+            else
+            {
+                FString DirectPort;
+                if (FParse::Value(FCommandLine::Get(), TEXT("ERLobbyProbeDirectPort="), DirectPort))
+                {
+                    auto* Online = GI->GetSubsystem<UEROnline>();
+                    Online->ConnectDirect(TEXT("localhost?Name=Injected"), DirectPort, false);
+                    Check(!Online->IsOnline() && Online->Status.Contains(TEXT("valid hostname")), TEXT("direct_rejects_travel_options"));
+                    Online->ConnectDirect(TEXT("localhost"), TEXT("65536"), false);
+                    Check(!Online->IsOnline() && Online->Status.Contains(TEXT("65535")), TEXT("direct_rejects_invalid_port"));
+                    Online->ConnectDirect(Client == 1 ? TEXT("localhost") : TEXT("127.0.0.1"), DirectPort, false);
+                    Check(Online->IsOnline(), TEXT("direct_travel_requested"));
+                }
+                else GI->FindLANServer();
+            }
         }
         if (Timeout && Phase == 1 && !GI->IsSearchingLAN())
         {

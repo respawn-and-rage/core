@@ -57,6 +57,7 @@
 #include "GameFramework/GameSession.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
+#include "UObject/ConstructorHelpers.h"
 #include "TimerManager.h"
 #include "HAL/PlatformTime.h"
 #include "ERBotLoadoutProbe.h"
@@ -71,6 +72,7 @@ void AERPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AERPlayerState, PendingTeam); DOREPLIFETIME(AERPlayerState, Team); DOREPLIFETIME(AERPlayerState, Kills);
     DOREPLIFETIME(AERPlayerState, Deaths); DOREPLIFETIME(AERPlayerState, TeamKills);
     DOREPLIFETIME(AERPlayerState, ActiveClaymores);
+    DOREPLIFETIME_CONDITION(AERPlayerState, KillStreak, COND_OwnerOnly);
     DOREPLIFETIME(AERPlayerState, LoadoutPreset); DOREPLIFETIME(AERPlayerState, LoadoutVariant);
     DOREPLIFETIME(AERPlayerState, PrimaryWeapon);
     DOREPLIFETIME(AERPlayerState, AlphaSkin); DOREPLIFETIME(AERPlayerState, OmegaSkin); DOREPLIFETIME(AERPlayerState, ActiveSkin);
@@ -131,7 +133,8 @@ AERGameMode::AERGameMode()
     PlayerControllerClass = AERPlayerController::StaticClass();
     PlayerStateClass = AERPlayerState::StaticClass();
     GameStateClass = AERGameState::StaticClass();
-    HUDClass = AERHUD::StaticClass();
+    static ConstructorHelpers::FClassFinder<AERHUD> MatchHUD(TEXT("/Game/EclipseRecoil/Art/HUDKillIcons/BP_ERMatchHUD"));
+    HUDClass = MatchHUD.Succeeded() ? MatchHUD.Class.Get() : AERHUD::StaticClass();
     bDelayedStart = true;
     bUseSeamlessTravel = false;
 }
@@ -448,7 +451,7 @@ void AERGameMode::RestartPlayer(AController* Player)
     if (auto* PS=Player->GetPlayerState<AERPlayerState>(); PS && PS->PendingTeam!=EERTeam::None)
     {
         AERClaymore::RemoveFor(GetWorld(),PS);
-        PS->Team=PS->PendingTeam;PS->PendingTeam=EERTeam::None;PS->ForceNetUpdate();
+        PS->Team=PS->PendingTeam;PS->PendingTeam=EERTeam::None;PS->KillStreak.Reset();PS->ForceNetUpdate();
     }
     // The engine's generic fallback may use an occupied cached start or world origin.
     // A team match must wait for an actually clear start instead.
@@ -518,7 +521,12 @@ void AERGameMode::HandleMatchHasStarted()
     State->Winner = EERTeam::None;
     State->CountdownEndServerTime = 0;
     State->MatchEndServerTime = State->GetServerWorldTimeSeconds() + MatchDuration;
-    for (APlayerState* Item : State->PlayerArray) if (auto* PS = Cast<AERPlayerState>(Item)) PS->Kills = PS->Deaths = PS->TeamKills = PS->Skulls = 0;
+    for (APlayerState* Item : State->PlayerArray)
+        if (auto* PS = Cast<AERPlayerState>(Item))
+        {
+            PS->Kills = PS->Deaths = PS->TeamKills = PS->Skulls = 0;
+            PS->KillStreak.Reset();
+        }
     GetWorld()->GetSubsystem<UERGameplayMessages>()->MatchStarted();
     UE_LOG(LogTemp, Display, TEXT("ER_MATCH_STARTED players=%d duration=%.1f"), GetNumPlayers(), MatchDuration);
 }
@@ -594,7 +602,11 @@ void AERGameMode::ResetRound(bool AllowMapTravel)
         if (APawn* Old = Controller->GetPawn()) { Controller->UnPossess(); Old->Destroy(); }
         if (PC) { PC->bAwaitingRespawn = false; PC->RespawnAllowedAt = 0; }
         if (Bot) Bot->ResetLife();
-        if (auto* PS = Controller->GetPlayerState<AERPlayerState>()) PS->Kills = PS->Deaths = PS->TeamKills = PS->Skulls = 0;
+        if (auto* PS = Controller->GetPlayerState<AERPlayerState>())
+        {
+            PS->Kills = PS->Deaths = PS->TeamKills = PS->Skulls = 0;
+            PS->KillStreak.Reset();
+        }
     }
     // Production archetypes start the next round with a fresh deterministic
     // seed. Publish the new epoch before spawning anyone into its collision.
@@ -636,7 +648,11 @@ void AERGameMode::RecordDeath(AERCharacter* Victim, AController* Killer, const F
         }
         Scores->MulticastKillFeed(Entry);
     }
-    if (VictimPS) ++VictimPS->Deaths;
+    if (VictimPS)
+    {
+        ++VictimPS->Deaths;
+        VictimPS->KillStreak.Reset();
+    }
     if (VictimPS && VictimPS->Team != EERTeam::None)
     {
         if (!SpawnMemory) SpawnMemory = MakeShared<FERSpawnMemory>();
@@ -647,7 +663,13 @@ void AERGameMode::RecordDeath(AERCharacter* Victim, AController* Killer, const F
     if (VictimPS && KillerPS && KillerPS != VictimPS)
     {
         const bool bTeamKill = VictimPS->Team == KillerPS->Team;
-        if (bTeamKill) ++KillerPS->TeamKills; else ++KillerPS->Kills;
+        if (bTeamKill) ++KillerPS->TeamKills;
+        else
+        {
+            ++KillerPS->Kills;
+            if (KillerPS->Team != EERTeam::None && VictimPS->Team != EERTeam::None && !KillerPS->IsABot())
+                KillerPS->KillStreak.Add(Facts && Facts->Headshot ? 1 : 0);
+        }
         if (MatchMode == EERMatchMode::SkullHunt)
             bDropSkull = !bTeamKill && KillerPS->Team != EERTeam::None && VictimPS->Team != EERTeam::None;
         else

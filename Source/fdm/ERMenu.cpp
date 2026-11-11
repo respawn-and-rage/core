@@ -447,8 +447,8 @@ void AERPlayerController::ShowMenu(bool bShow)
                 [GI]() { return GI->bInternetMenu ? 0 : 1; },
                 [GI, Online](int32 I) { Online->Cancel(); GI->CancelLANSearch(); GI->bInternetMenu = I == 0; });
             Add(Panel, SNew(STextBlock).Font(MenuFont(28)).AutoWrapText(true).Text_Lambda([GI, Online]()
-            { return FText::FromString(GI->bInternetMenu ? Online->Status : GI->IsSearchingLAN() ? FString::Printf(TEXT("Searching LAN... %ds"), GI->LANSecondsLeft()) : GI->LastError); }));
-            Add(Panel, Text(TEXT("Internet: no account required; choose a server. LAN: we connect automatically to an available local server."), 21));
+            { return FText::FromString(GI->bInternetMenu ? (Online->Status.IsEmpty() ? GI->LastError : Online->Status) : GI->IsSearchingLAN() ? FString::Printf(TEXT("Searching LAN... %ds"), GI->LANSecondsLeft()) : GI->LastError); }));
+            Add(Panel, Text(TEXT("Internet: search for a server or connect directly. LAN: we connect automatically to an available local server."), 21));
             auto Servers = SNew(SVerticalBox);
             for (int32 I = 0; I < 100; ++I)
                 Add(Servers, SNew(SButton).ContentPadding(8)
@@ -471,6 +471,35 @@ void AERPlayerController::ShowMenu(bool bShow)
                 })
                 .Text(FText::FromString(TEXT("[Community] servers are run by other players, not by Respawn & Rage. Join them at your own risk."))));
             Add(Panel, Button(TEXT("Search Servers"), [GI, Online]() { if (GI->bInternetMenu) Online->Search(); else { Online->Cancel(); GI->FindLANServer(); } return FReply::Handled(); }));
+            auto Direct = SNew(SVerticalBox)
+                .Visibility_Lambda([GI]() { return GI->bInternetMenu ? EVisibility::Visible : EVisibility::Collapsed; });
+            auto JoinDirect = [GI, Online]()
+            {
+                Online->ConnectDirect(GI->DirectServerHost, GI->DirectServerPort, GI->bDirectServerUsesEOS);
+                return FReply::Handled();
+            };
+            auto HostField = SNew(SVerticalBox);
+            Add(HostField, Text(TEXT("Hostname or IP"), 21));
+            Add(HostField, SNew(SEditableTextBox).Font(MenuFont(24))
+                .HintText(FText::FromString(TEXT("server.example.com")))
+                .Text(FText::FromString(GI->DirectServerHost))
+                .OnTextChanged_Lambda([GI](const FText& Value) { GI->DirectServerHost = Value.ToString(); }));
+            auto PortField = SNew(SVerticalBox);
+            Add(PortField, Text(TEXT("Port"), 21));
+            Add(PortField, SNew(SEditableTextBox).Font(MenuFont(24))
+                .Text(FText::FromString(GI->DirectServerPort))
+                .OnTextChanged_Lambda([GI](const FText& Value) { GI->DirectServerPort = Value.ToString(); }));
+            Add(Direct, SNew(SHorizontalBox)
+                + SHorizontalBox::Slot().FillWidth(3).Padding(0, 0, 12, 0)[HostField]
+                + SHorizontalBox::Slot().FillWidth(1)[PortField]);
+            Add(Direct, SNew(SCheckBox)
+                .IsChecked_Lambda([GI]() { return GI->bDirectServerUsesEOS ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+                .OnCheckStateChanged_Lambda([GI](ECheckBoxState State) { GI->bDirectServerUsesEOS = State == ECheckBoxState::Checked; })
+                [Text(TEXT("Use Epic Online Services sign-in"), 21)]);
+            Add(Direct, SNew(SButton).ContentPadding(FMargin(18, 10))
+                .IsEnabled_Lambda([Online]() { return !Online->IsBusy() && !Online->IsOnline(); })
+                .OnClicked_Lambda(JoinDirect)[Text(TEXT("Connect Directly"), 25)]);
+            Add(Panel, Direct);
             Add(Panel, Button(TEXT("Cancel"), Back));
         }
         else if (MenuPage == 4)
