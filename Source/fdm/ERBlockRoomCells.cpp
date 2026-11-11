@@ -78,6 +78,9 @@ void AERBlockRoom::BuildCellComponents()
                 Mesh->SetRelativeTransform(Panel.Transform);
                 // Mesh and collision are rebuilt together, explicitly, once per batch.
                 Mesh->SetDeferredCollisionUpdatesEnabled(true, false);
+                // Panels change only on damage: cache their draw commands instead of
+                // collecting mesh batches for every view on every frame.
+                Mesh->SetMeshDrawPath(EDynamicMeshDrawPath::StaticDraw);
                 Mesh->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
                 Mesh->CollisionType = CTF_UseSimpleAsComplex; Mesh->bEnableComplexCollision = false;
                 Mesh->SetCollisionProfileName(TEXT("BlockAll"));
@@ -119,6 +122,34 @@ void AERBlockRoom::RebuildCellChunk(int32 Index)
     DirtyCellGroups.Add(ChunkGroups[Index]);
 }
 
+// A world raycast lying exactly in the plane between two boxes of one body misses both,
+// while sweeps hit. Chunk boxes that adjoin with the same cross-section become one box,
+// so an intact panel has no internal seam on the chunk grid.
+static void MergeAdjoiningBoxes(TArray<FBox>& Boxes)
+{
+    for (int32 Axis : {0, 2})
+    {
+        const int32 U = (Axis + 1) % 3, V = (Axis + 2) % 3;
+        Boxes.Sort([Axis, U, V](const FBox& A, const FBox& B)
+        {
+            if (A.Min[U] != B.Min[U]) return A.Min[U] < B.Min[U];
+            if (A.Max[U] != B.Max[U]) return A.Max[U] < B.Max[U];
+            if (A.Min[V] != B.Min[V]) return A.Min[V] < B.Min[V];
+            if (A.Max[V] != B.Max[V]) return A.Max[V] < B.Max[V];
+            return A.Min[Axis] < B.Min[Axis];
+        });
+        int32 Kept = 0;
+        for (int32 I = 1; I < Boxes.Num(); ++I)
+        {
+            FBox& Last = Boxes[Kept]; const FBox& Next = Boxes[I];
+            if (Last.Min[U] == Next.Min[U] && Last.Max[U] == Next.Max[U] && Last.Min[V] == Next.Min[V] && Last.Max[V] == Next.Max[V] && Last.Max[Axis] == Next.Min[Axis])
+                Last.Max[Axis] = Next.Max[Axis];
+            else Boxes[++Kept] = Next;
+        }
+        if (!Boxes.IsEmpty()) Boxes.SetNum(Kept + 1);
+    }
+}
+
 void AERBlockRoom::FlushCellGroups()
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(ERCell_FlushGroups);
@@ -157,7 +188,10 @@ void AERBlockRoom::FlushCellGroups()
         Component->SetMesh(MoveTemp(Mesh));
         const double MeshEnd = FPlatformTime::Seconds();
         FKAggregateGeom Geometry;
-        for (int32 Chunk : Members) for (const FBox& Box : ChunkBoxCache[Chunk])
+        TArray<FBox> GroupBoxes;
+        for (int32 Chunk : Members) GroupBoxes.Append(ChunkBoxCache[Chunk]);
+        MergeAdjoiningBoxes(GroupBoxes);
+        for (const FBox& Box : GroupBoxes)
         {
             FVector Size = Box.GetSize();
             for (int32 Axis = 0; Axis < 3; ++Axis) Size[Axis] = FMath::Max(Size[Axis], double(CellSettings.MinCollisionThickness));
@@ -191,7 +225,7 @@ void AERBlockRoom::FlushSkinMeshes()
         {
             Mesh=NewObject<UDynamicMeshComponent>(this,*FString::Printf(TEXT("Cells_Skin_P%d"),P.Id));AddInstanceComponent(Mesh);
             Mesh->SetMobility(EComponentMobility::Movable);Mesh->SetNetAddressable();Mesh->SetupAttachment(RootComponent);Mesh->SetRelativeTransform(P.Transform);
-            Mesh->SetDeferredCollisionUpdatesEnabled(true,false);Mesh->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
+            Mesh->SetDeferredCollisionUpdatesEnabled(true,false);Mesh->SetMeshDrawPath(EDynamicMeshDrawPath::StaticDraw);Mesh->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
             Mesh->bEnableComplexCollision=!P.bSolidSkin;Mesh->CollisionType=P.bSolidSkin ? CTF_UseSimpleAsComplex:CTF_UseComplexAsSimple;Mesh->SetCollisionProfileName(TEXT("BlockAll"));Mesh->SetCanEverAffectNavigation(false);
             Mesh->ComponentTags.Add(TEXT("ERDestructibleShell"));Mesh->ComponentTags.Add(P.SkinName);
             const FString Structure=P.SkinName.ToString();
@@ -476,7 +510,9 @@ bool AERBlockRoom::ValidateCells() const
         int32 Expected = 0, ExpectedBoxes = 0, Triangles = 0;
         for (int32 Chunk : CellGroupChunks[Group]) { Expected += ChunkQuads[Chunk]; ExpectedBoxes += ChunkBoxes[Chunk]; ++Grouped; }
         Mesh->ProcessMesh([&Triangles](const FDynamicMesh3& M) { Triangles = M.TriangleCount(); });
-        if (Triangles != 2 * Expected || Mesh->GetSimpleCollisionShapes().BoxElems.Num() != ExpectedBoxes || CellGroupBoxes[Group] != ExpectedBoxes) return false;
+        // The body holds the chunk boxes after merging across chunk borders.
+        const int32 Merged = CellGroupBoxes[Group];
+        if (Triangles != 2 * Expected || Mesh->GetSimpleCollisionShapes().BoxElems.Num() != Merged || Merged > ExpectedBoxes || (Merged == 0) != (ExpectedBoxes == 0)) return false;
         if (ExpectedBoxes && Mesh->GetCollisionEnabled() != ECollisionEnabled::NoCollision && !Mesh->GetBodyInstance()->IsValidBodyInstance()) return false;
     }
     return Ordinary==Grouped && CellGroupChunks.Num()==CellComponentChunks.Num() && CheckedSkins.Num()==SkinMeshes.Num();

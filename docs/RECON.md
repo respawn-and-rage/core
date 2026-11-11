@@ -9,10 +9,13 @@ Team vision, fog of war, drones and graffiti.
 Owner-only `UERReconComponent` snapshots carry each team's 64×64 explored mask and currently
 visible contacts: never derive enemy markers by enumerating client pawns.
 
-- Server sight at 4Hz: living players and bots (120°, map extent), active drone (360°, 42m
-  horizontal footprint), through real geometry, two head/torso samples.
-  Sample player poses once and evaluate each target once per observing team; owner snapshots
-  reuse the result without exposing the other team's visibility.
+- Server sight: living players and bots (120°, map extent), active drone (360°, 42m
+  horizontal footprint), through real geometry. Contacts and snapshots update at 4Hz with
+  two head/torso samples: sample player poses once and evaluate each target once per
+  observing team; owner snapshots reuse the result without exposing the other team's
+  visibility.
+- Terrain fog is traced in a slice on every server tick (`ExploreFog`): one grid pass per
+  0.25s and at most one trace per two cells, never a whole pass in a single frame.
 - Contacts expire on lost sight (1s HUD stale timeout); terrain persists within a round. Late
   join and respawn keep fog and stock; round reset or generation epoch clears them.
 - Smoke hides sightings and new terrain by integrating 48 density samples along the ray, with

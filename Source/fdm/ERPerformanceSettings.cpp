@@ -111,7 +111,8 @@ void FSettings::Apply() const
     Set(TEXT("r.Shadow.MaxResolution"),Shadows==0 ? 256:Shadows==1 ? 512:Shadows==2 ? 1024:2048);
     Set(TEXT("r.Shadow.DistanceScale"),Shadows==0 ? .25f:Shadows==1 ? .5f:1.f);
     Set(TEXT("r.Shadow.Virtual.ResolutionLodBiasLocal"),Shadows<=1 ? 2:0);
-    Set(TEXT("r.Shadow.Virtual.ResolutionLodBiasDirectional"),Shadows<=1 ? 1: -1.5f);
+    // Only the high level pays for the engine's top sun-shadow resolution.
+    Set(TEXT("r.Shadow.Virtual.ResolutionLodBiasDirectional"),Shadows<=1 ? 1.f:Shadows==2 ? 0.f: -1.5f);
     Set(TEXT("r.ReflectionMethod"),Reflections==2 ? 1:Reflections==1 ? 2:0);
     Set(TEXT("r.SSR.Quality"),Reflections ? 1:0);
     Set(TEXT("r.ReflectionEnvironment"),Reflections ? 1:0);

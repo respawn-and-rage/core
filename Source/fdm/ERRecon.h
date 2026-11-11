@@ -164,6 +164,8 @@ private:
     uint32 SourceMapEpoch = MAX_uint32;
     uint32 CapturedEpoch = 0;
     double NextUpdate = 0;
+    // Fraction of one fog grid pass owed to the next server ticks.
+    float FogPass = 0;
     double CaptureAfter = 0;
     bool bCapturePending = false;
     UPROPERTY(Transient) TArray<TObjectPtr<class AERBlockDebris>> LocalDebris;
@@ -182,6 +184,7 @@ private:
     UPROPERTY(Transient) TObjectPtr<class ACameraActor> GraffitiCamera;
     void ConfigureMap();
     void LaunchDrone(int32 Team);
+    void ExploreFog(float DeltaSeconds);
     void UpdateVisibility();
     void CaptureBirdView();
     void ClearFleet();

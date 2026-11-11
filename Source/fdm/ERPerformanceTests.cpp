@@ -57,7 +57,10 @@ bool FERPerformancePreferencesTest::RunTest(const FString&)
     Loaded.ApplyPreset(ERPerformance::EPreset::Quality);
     TestEqual(TEXT("Quality preset uses Lumen"),Value(TEXT("r.DynamicGlobalIlluminationMethod")),1);
     TestEqual(TEXT("Quality preset uses high Lumen group"),Value(TEXT("sg.GlobalIlluminationQuality")),3);
+    const auto* SunShadowBias=IConsoleManager::Get().FindConsoleVariable(TEXT("r.Shadow.Virtual.ResolutionLodBiasDirectional"));
+    TestEqual(TEXT("Quality preset keeps the top sun shadow resolution"),SunShadowBias->GetFloat(),-1.5f);
     Loaded.SetDefaults();
+    TestEqual(TEXT("Default uses the standard sun shadow resolution"),SunShadowBias->GetFloat(),0.f);
     TestEqual(TEXT("Default selects balanced frame cap"),Value(TEXT("t.MaxFPS")),90);
     TestEqual(TEXT("Default keeps authored material quality"),Value(TEXT("r.MaterialQualityLevel")),1);
     TestEqual(TEXT("Default uses balanced shadows"),Value(TEXT("sg.ShadowQuality")),2);

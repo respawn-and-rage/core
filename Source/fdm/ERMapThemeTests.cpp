@@ -62,7 +62,6 @@ bool FERMapThemeTest::RunTest(const FString& Parameters)
             }
             if(Saved->Archetype==EERMapArchetype::MiddleEasternAlleys)
             {
-                TSet<EERBlockMaterial> HouseMaterials;
                 for(const auto& D:After.Panels)if(D.SkinName.ToString().StartsWith(TEXT("AlleyModule_")))
                 {
                     const FString Role=D.SkinName.ToString();
@@ -75,12 +74,11 @@ bool FERMapThemeTest::RunTest(const FString& Parameters)
                     }
                     else
                     {
-                        TestTrue(TEXT("alley houses are stone or brick"),D.Material==EERBlockMaterial::Stone || D.Material==EERBlockMaterial::Brick);
+                        // Houses are lime-coloured brick; stone is reserved for permanent structures.
+                        TestEqual(TEXT("alley houses are brick"),D.Material,EERBlockMaterial::Brick);
                         TestEqual(TEXT("house walls show their physical material"),D.Surface,Palette.Materials[uint8(D.Material)].Get());
-                        HouseMaterials.Add(D.Material);
                     }
                 }
-                if(HouseMaterials.Num()>0 && After.Houses.Num()>=4)TestEqual(TEXT("both stone and brick houses appear"),HouseMaterials.Num(),2);
             }
             TestEqual(TEXT("panel count unchanged"),Before.Panels.Num(),After.Panels.Num());
             for(int32 I=0;I<Before.Panels.Num();++I)

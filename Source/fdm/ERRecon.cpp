@@ -405,33 +405,43 @@ bool AERReconDirector::SightClear(const FVector& Eye, const FVector& Target, con
     for (auto* Cloud:Clouds) { Depth+=Cloud->ReconOpticalDepth(Eye,Target); if (Depth>=1.f) return false; }
     return true;
 }
-void AERReconDirector::UpdateVisibility()
+namespace
 {
-    TRACE_CPUPROFILER_EVENT_SCOPE(ERRecon_Visibility);
-    struct FObserver { FVector Eye, Forward; bool Drone=false; };
-    struct FPlayerSample { AERCharacter* Character; FVector Head; FERReconContact Contact; };
-    TArray<FPlayerSample,TInlineAllocator<24>> Players;
-    TArray<FObserver> Observers[2];
+struct FObserver { FVector Eye, Forward; bool Drone=false; };
+// Living, network-ready team members observe terrain and contacts alike.
+const AERPlayerState* ObservingState(const AERCharacter& Character)
+{
+    const auto* PS=Character.GetPlayerState<AERPlayerState>();
+    return PS && PS->Team!=EERTeam::None && !Character.Health->bDead && Character.bNetworkReady ? PS:nullptr;
+}
+}
+void AERReconDirector::ExploreFog(float DeltaSeconds)
+{
+    TRACE_CPUPROFILER_EVENT_SCOPE(ERRecon_Fog);
+    // One grid pass per 0.25s with one trace per two cells, as a slice per server
+    // tick: the same reveal rate without a burst of traces in a single frame.
+    constexpr int32 Cells=ERRecon::Grid*ERRecon::Grid;
+    FogPass=FMath::Min(1.f,FogPass+DeltaSeconds*4);
+    const int32 Slice=FMath::FloorToInt32(FogPass*Cells);
+    if (Slice<=0) return;
+    FogPass-=float(Slice)/Cells;
+    TArray<FObserver,TInlineAllocator<24>> Observers[2];
+    for (TActorIterator<AERCharacter> It(GetWorld()); It; ++It)
+        if (const auto* PS=ObservingState(**It))
+        {
+            FVector Eye; FRotator Aim; It->GetActorEyesViewPoint(Eye,Aim);
+            Observers[TeamIndex(PS->Team)].Add({It->Camera->GetComponentLocation(),Aim.Vector(),false});
+        }
     const float PlayerAngle=ERServer::Get(GetWorld(),"Recon.PlayerAngle");
     const float PlayerRange=SightRange(false),DroneRange=SightRange(true);
-    for (TActorIterator<AERCharacter> It(GetWorld()); It; ++It)
-    {
-        const auto* PS = It->GetPlayerState<AERPlayerState>();
-        if (!PS || PS->Team == EERTeam::None || It->Health->bDead || !It->bNetworkReady) continue;
-        FVector Eye; FRotator Aim; It->GetActorEyesViewPoint(Eye,Aim);
-        Eye=It->Camera->GetComponentLocation();
-        Observers[TeamIndex(PS->Team)].Add({Eye,Aim.Vector(),false});
-        FERReconContact Contact;Contact.Position=It->GetActorLocation();Contact.Yaw=Aim.Yaw;Contact.Team=PS->Team;
-        Players.Add({*It,Eye,Contact});
-    }
     const auto Query = SightQuery();
     TArray<AERSmokeCloud*> Clouds;
     for (TActorIterator<AERSmokeCloud> It(GetWorld()); It; ++It) Clouds.Add(*It);
     for (int32 Index=0; Index<2; ++Index)
     {
         if (Teams[Index].Drone.IsValid()) Observers[Index].Add({Teams[Index].Drone->GetActorLocation(),FVector::ForwardVector,true});
-        int32 TraceBudget=2048;
-        for (int32 Visited=0; Visited<ERRecon::Grid*ERRecon::Grid && TraceBudget>0; ++Visited)
+        int32 TraceBudget=FMath::DivideAndRoundUp(Slice,2);
+        for (int32 Visited=0; Visited<Slice && TraceBudget>0; ++Visited)
         {
             const int32 Cell=Teams[Index].FogCursor;
             Teams[Index].FogCursor=(Cell+1)%(ERRecon::Grid*ERRecon::Grid);
@@ -450,6 +460,30 @@ void AERReconDirector::UpdateVisibility()
             }
         }
     }
+}
+void AERReconDirector::UpdateVisibility()
+{
+    TRACE_CPUPROFILER_EVENT_SCOPE(ERRecon_Visibility);
+    struct FPlayerSample { AERCharacter* Character; FVector Head; FERReconContact Contact; };
+    TArray<FPlayerSample,TInlineAllocator<24>> Players;
+    TArray<FObserver> Observers[2];
+    const float PlayerAngle=ERServer::Get(GetWorld(),"Recon.PlayerAngle");
+    const float PlayerRange=SightRange(false),DroneRange=SightRange(true);
+    for (TActorIterator<AERCharacter> It(GetWorld()); It; ++It)
+    {
+        const auto* PS = ObservingState(**It);
+        if (!PS) continue;
+        FVector Eye; FRotator Aim; It->GetActorEyesViewPoint(Eye,Aim);
+        Eye=It->Camera->GetComponentLocation();
+        Observers[TeamIndex(PS->Team)].Add({Eye,Aim.Vector(),false});
+        FERReconContact Contact;Contact.Position=It->GetActorLocation();Contact.Yaw=Aim.Yaw;Contact.Team=PS->Team;
+        Players.Add({*It,Eye,Contact});
+    }
+    const auto Query = SightQuery();
+    TArray<AERSmokeCloud*> Clouds;
+    for (TActorIterator<AERSmokeCloud> It(GetWorld()); It; ++It) Clouds.Add(*It);
+    for (int32 Index=0; Index<2; ++Index)
+        if (Teams[Index].Drone.IsValid()) Observers[Index].Add({Teams[Index].Drone->GetActorLocation(),FVector::ForwardVector,true});
     // Sight depends on the team, never on the receiving controller. Keep one
     // observation per team/target; personalize only the self marker afterwards.
     TBitArray<> VisiblePlayers[2];
@@ -513,6 +547,7 @@ void AERReconDirector::Tick(float DeltaSeconds)
         uint32 Epoch=0;
         if (TActorIterator<AERProceduralMap> It(GetWorld()); It) Epoch=It->GetMapEpoch();
         if (SourceMapEpoch != Epoch) ConfigureMap();
+        ExploreFog(DeltaSeconds);
         const double Now=ServerTime(GetWorld());
         if (Now >= NextUpdate)
         {

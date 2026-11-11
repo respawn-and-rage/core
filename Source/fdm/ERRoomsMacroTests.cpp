@@ -46,8 +46,20 @@ bool FERRoomsMacroLayoutTest::RunTest(const FString&)
         TestEqual(*(Case+TEXT(": flag off stays legacy")),Legacy.RoomsMacroVariant,int32(INDEX_NONE));
         TestEqual(*(Case+TEXT(": same seed picks the same plan")),L.RoomsMacroVariant,Again.RoomsMacroVariant);
         TestEqual(*(Case+TEXT(": repeatable links")),L.RoomLinks.Num(),Again.RoomLinks.Num());
-        TestEqual(*(Case+TEXT(": rooms and starts follow the same sampling")),L.Rooms.Num(),Legacy.Rooms.Num());
-        TestEqual(*(Case+TEXT(": arena budget is untouched")),L.ArenaSize,Legacy.ArenaSize);
+        if(Team==0)
+        {
+            // Without team sizing nothing refits the plan: the macro only swaps the spine.
+            TestEqual(*(Case+TEXT(": rooms and starts follow the same sampling")),L.Rooms.Num(),Legacy.Rooms.Num());
+            TestEqual(*(Case+TEXT(": arena budget is untouched")),L.ArenaSize,Legacy.ArenaSize);
+        }
+        else
+        {
+            // Team sizing fits room dimensions to the real floor, corridors included, so a
+            // macro plan may settle on other rooms: it must still meet the same area budget.
+            const double Target=ERProcedural::TargetAreaM2(Team);
+            TestTrue(*(Case+TEXT(": macro plan keeps the team area budget")),FMath::Abs(ERProcedural::PlayableAreaM2(L)-Target)<=Target*.1+.01);
+            TestTrue(*(Case+TEXT(": complete room graph")),L.Rooms.Num()>=4 && L.Rooms.Num()<=10 && L.Rooms.Num()%2==0);
+        }
         if(L.RoomsMacroVariant==INDEX_NONE)
         {
             ++Fallback;
@@ -68,7 +80,10 @@ bool FERRoomsMacroLayoutTest::RunTest(const FString&)
         }
         for(int32 D:Degree)TestTrue(*(Case+TEXT(": no dead end")),D>=2);
         const auto Report=ERPlayability::Analyze(L,On,ERPlayability::PolicyFor(T->Archetype,Team));
-        TestEqual(*(Case+TEXT(": every room connects")),Report.Find(TEXT("CONNECTED_ZONES"))->Status,EERPlayabilityStatus::Pass);
+        // A secondary spawn pocket joined inside a room stays unconfirmed until the physical stage:
+        // that is a warning, not a break in the graph.
+        const auto* Reach=Report.Find(TEXT("CONNECTED_ZONES"));
+        TestTrue(*(Case+TEXT(": every room connects")),Reach->Status!=EERPlayabilityStatus::Fail && Reach->Violations.IsEmpty() && Reach->Value(TEXT("isolated_nodes"))==0);
         TestTrue(*(Case+TEXT(": at least two independent paths")),Report.Find(TEXT("BASE_EXIT_PATHS"))->Value(TEXT("alpha_independent_paths"))>=2);
         TestEqual(*(Case+TEXT(": no common choke")),Report.Find(TEXT("BASE_EXIT_PATHS"))->Value(TEXT("alpha_chokes")),0.);
     }

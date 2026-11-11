@@ -168,6 +168,9 @@ Enable it on the authority with `?RoomsMacroGraph=1` or `-ERRoomsMacroGraph` (no
 `FERProceduralConfig::bEnablePCGExMacroGraph` travels in the descriptor, so clients build the same
 plan and never read a local flag. Rollback: omit the option. Off, or with no usable plan, the builder
 keeps the legacy spine. Selection hashes the seed and consumes no geometry RNG.
+With team sizing the area fit counts the macro corridors, so the same seed can settle on
+smaller rooms or another room count than the legacy plan; both meet the same area budget.
+Without team sizing the arena and rooms are identical to the legacy plan.
 
 | Step | Where | Runs |
 | --- | --- | --- |

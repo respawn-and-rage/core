@@ -13,6 +13,11 @@ chunk; one `UDynamicMeshComponent` (`Cells_P<id>_G<group>`) draws and collides f
 to 8×8 chunks of one panel, so most panels are a single component, intact or damaged. Dirty
 chunks and their face neighbours rebuild their caches; each touched group then uploads mesh and
 collision together, once per batch. Group names are deterministic movement bases.
+A group's body merges chunk boxes that adjoin with the same cross-section, so an intact panel
+is one box: a world raycast lying exactly in the plane between two boxes of one body misses
+both (sweeps hit). Probe floors with a sweep, or off the chunk grid, on damaged panels.
+Cell and skin components use the static draw path (`EDynamicMeshDrawPath::StaticDraw`), so
+update them with `SetMesh` only: fast vertex or index updates are not compatible with it.
 
 - Layouts emit `FERCellPanelDesc`. Door and window openings are holes (absent cells, never
   "destroyed"). Each axis holds `round(L/5cm)` equal cells (`FERCellWorld::FitCell`): pieces
