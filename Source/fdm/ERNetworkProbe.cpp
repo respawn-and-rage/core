@@ -9,6 +9,8 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "ERMatch.h"
 #include "ERPlayerController.h"
+#include "ERMovement.h"
+#include "InputKeyEventArgs.h"
 #include "ERWeapon.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -18,6 +20,19 @@
 
 namespace
 {
+void SetProbeKeys(AERPlayerController* PC, std::initializer_list<FKey> Keys, EInputEvent Event)
+{
+    for (const FKey& DefaultKey : Keys)
+    {
+        FInputKeyEventArgs Args;
+        Args.Key = PC->ControlKey(DefaultKey);
+        Args.Event = Event;
+        Args.AmountDepressed = Event == IE_Pressed ? 1.f : 0.f;
+        Args.EventTimestamp = FPlatformTime::Cycles64();
+        PC->InputKey(Args);
+    }
+}
+
 bool ProtectionMaterialsMatch(AERCharacter* Character, bool Protected)
 {
     int32 Checked = 0;
@@ -79,8 +94,22 @@ void AERNetworkProbe::ClientStep()
                 Victim->IsInDeathBeat(), Victim->IsDeathCameraActive(), *Punch.ToString());
         }
     }
-    if (!PC || !PC->IsLocalController() || !PC->GetPawn() || ClientPhase == Phase) return;
+    if (!PC || !PC->IsLocalController() || !PC->GetPawn()) return;
     auto* Pawn = Cast<AERCharacter>(PC->GetPawn()); if (!Pawn || !Pawn->Weapon) return;
+    const auto SetSprintKeys = [PC](EInputEvent Event) { SetProbeKeys(PC, {EKeys::W, EKeys::E}, Event); };
+    // Give the sprint saved moves time to reach the host, then release before the shooting fixture.
+    if (Phase == 6 && !bClientReleasedRespawnSprint && !Pawn->Health->bDead
+        && Cast<UERMovement>(Pawn->GetCharacterMovement())->IsSprinting())
+    {
+        const double Now = GetWorld()->GetTimeSeconds();
+        if (ClientRespawnSprintAt < 0) ClientRespawnSprintAt = Now;
+        if (Now - ClientRespawnSprintAt >= .15)
+        {
+            SetSprintKeys(IE_Released);
+            bClientReleasedRespawnSprint = true;
+        }
+    }
+    if (ClientPhase == Phase) return;
     // Probe phase and pawn properties travel on different actor channels.
     // The kill camera starts after the owner's lethal beat.
     if (Phase == 5 && (!Pawn->Health->bDead || !Pawn->bHasDeathFocus || !Pawn->IsDeathCameraActive() || PC->KillConfirmations.IsEmpty())) return;
@@ -149,9 +178,11 @@ void AERNetworkProbe::ClientStep()
             UE_LOG(LogTemp, Display, TEXT("ER_MESSAGE_CLIENT_%s mandatory_death_and_killer_camera"), Camera && Message ? TEXT("PASS") : TEXT("FAIL"));
         }
             if (FParse::Param(FCommandLine::Get(),TEXT("ERSkinProbe"))) PC->ServerSetSkins(1,FParse::Param(FCommandLine::Get(),TEXT("ERPhaseBelicaProbe")) ? 7 : 2);
+            SetSprintKeys(IE_Pressed);
             PC->ServerRequestRespawn(); break;
         case 6: PC->ServerRequestRespawn(); break;
         case 7:
+            SetSprintKeys(IE_Released);
             UE_LOG(LogTemp, Display, TEXT("ER_MESSAGE_CLIENT_%s respawn_clears_killer_camera"), !Pawn->Health->bDead && !Pawn->bHasDeathFocus ? TEXT("PASS") : TEXT("FAIL"));
             PC->SetControlRotation(FRotator(0,180,0)); Pawn->ServerStartFire(); Pawn->ServerStopFire(); break;
         case 8: case 9: Pawn->ServerReload(); break;
@@ -188,8 +219,10 @@ void AERNetworkProbe::Tick(float DeltaTime)
         Check(Host->GetPlayerState<AERPlayerState>()->Team != Client->GetPlayerState<AERPlayerState>()->Team,TEXT("T03_balanced_teams"));
         Advance(1,.6f); return;
     }
-    if (GetWorld()->GetTimeSeconds() < Deadline) return;
     auto* H = Cast<AERCharacter>(Host->GetPawn()); auto* C = Cast<AERCharacter>(Client->GetPawn());
+    if (Phase == 6 && C && !C->Health->bDead && Cast<UERMovement>(C->GetCharacterMovement())->IsSprinting())
+        bSawRespawnSprint = true;
+    if (GetWorld()->GetTimeSeconds() < Deadline) return;
     if (!H || !C || !H->Weapon || !C->Weapon) { Check(false,TEXT("valid_pawns_and_weapons")); FPlatformMisc::RequestExitWithStatus(false,1); return; }
     const bool bNewCharacters = FParse::Param(FCommandLine::Get(),TEXT("ERPhaseBelicaProbe"));
     const int32 HostSkin = bNewCharacters ? 8 : 3, ClientSkin = bNewCharacters ? 9 : 4, NextSkin = bNewCharacters ? 7 : 2;
@@ -243,6 +276,7 @@ void AERNetworkProbe::Tick(float DeltaTime)
             Check(FirstCorpse.IsValid() && FirstCorpse->Body->GetSocketLocation(TEXT("pelvis")).Z < FirstCorpse->GetActorLocation().Z - 35.f,
                 TEXT("Death_corpse_falls_to_ground"));
             Check(!C->Health->bDead && C->Health->Health==100 && C->Weapon->MagazineAmmo==30 && C->Health->IsProtected(),TEXT("T12_requested_respawn_T13_no_shot"));
+            Check(bSawRespawnSprint, TEXT("Sprint_keys_held_before_respawn_start_sprint"));
             Check(ProtectionMaterialsMatch(C,true),TEXT("Protection_opaque_gray_after_respawn"));
             PlacePlayers(); H->Health->ProtectionEndServerTime=0; Advance(7,1.f); break;
         case 7:
@@ -303,6 +337,7 @@ void AERNetworkProbe::Tick(float DeltaTime)
             Check(GS->IsMatchInProgress() && GS->AlphaScore==0 && GS->OmegaScore==0 && !C->Health->bDead && H->Health->Health==100,TEXT("T16_round_restarts"));
             H->Health->ProtectionEndServerTime=0; H->Weapon->MagazineAmmo=20;
             H->ServerReload(); H->Health->ReceiveDamage(100,nullptr); H->Health->ReceiveDamage(100,nullptr);
+            SetProbeKeys(Host, {EKeys::RightShift, EKeys::LeftControl}, IE_Pressed);
             Advance(17,3.4f); break;
         case 17:
             Check(H->Health->bDead && !H->Weapon->bReloading && H->Weapon->MagazineAmmo==20 && Host->GetPlayerState<AERPlayerState>()->Deaths==1,TEXT("T10_reload_cancel_T15_single_death"));
@@ -311,6 +346,9 @@ void AERNetworkProbe::Tick(float DeltaTime)
             for (TActorIterator<AERCorpse> It(GetWorld()); It; ++It)
                 Check(It->HasValidRagdollPose(), TEXT("Death_alpha_limbs_and_hidden_accessories_after_settle"));
             Check(!H->Health->bDead && H->Weapon->MagazineAmmo==30 && H->Weapon->ReserveAmmo==90,TEXT("T10_new_life_ammo_unchanged"));
+            Check(Cast<UERMovement>(H->GetCharacterMovement())->bWalkHeld, TEXT("Walk_key_held_before_respawn"));
+            Check(H->bIsCrouched, TEXT("Crouch_key_held_before_respawn"));
+            SetProbeKeys(Host, {EKeys::RightShift, EKeys::LeftControl}, IE_Released);
             GS->AlphaScore=50; Advance(19,.6f); break;
         case 19:
             Check(GS->GetMatchState()==MatchState::WaitingPostMatch && GS->Winner==EERTeam::Alpha,TEXT("T16_score_limit_winner"));

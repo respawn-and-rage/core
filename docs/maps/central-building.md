@@ -15,18 +15,17 @@ the wall layout is an ellipse stretched along the spawn axis, moving both starts
 
 The seed retains its hill configuration, one of four building profiles (rectangle,
 H, cross or stepped wings), and one of three crossing rules across geometry retries.
-Some open lateral-hill layouts place the villa beside a long shallow-entry pool that
-follows the curved perimeter in joined sections. A timber boardwalk lines the shore;
-the dry side keeps the mirrored spawn approaches and secondary buildings, with mixed cover from 2v2 onward,
-and the opposite hill. The pool floor is 90cm below its waterline, with a 20cm
-entry shelf along the landward edge.
+Some open lateral-hill layouts flood the west side from a straight shoreline to the
+curved perimeter wall. The villa overhangs the water on concrete foundations.
+Mirrored water-side stairs lead to ground-floor doors, and dry doors face the
+spawn approaches. The basin is 90cm deep with a shallow bank along the shoreline.
 The light concrete villa stays within 15 × 22m even on large arenas. Width and
 depth vary independently. A solid concrete floor follows the ground-floor plan
 and sits 5cm above the outdoor terrain. Main entrances sit on the west-facing
 side walls of each half. Every window has destructible clear glass. Wide front
 bays have low sills and multiple panes separated by concrete mullions.
 
-The villa has two storeys in 1v1, three in 2v2 and 3v3, and four from 4v4 onward. One central interior ramp per level connects every storey and reaches the roof when it has a pool. Destructible glass panes follow both sides of the treads, rising with each step under a continuous sloping metal cap; a separate destructible glass guard encloses the upper floor opening. The seed chooses which team's side has the low end of the ramp; every floor uses the same direction. The ramp is the sole deliberate exception to the arena's mirror geometry; spawns and exterior approaches remain mirrored. Divided rooms on every floor have wide openings, destructible timber tables with open space beneath their tops, and low counters without blocking the central passage. Doors lead onto recessed first-floor terraces. Stairs use
+The villa has two storeys in 1v1, three in 2v2 and 3v3, and four from 4v4 onward. One central interior ramp per level connects every storey and reaches the roof when it has a pool. Destructible glass panes follow both sides of the treads, rising with each step under a continuous sloping metal cap; a separate destructible glass guard encloses the upper floor opening. The seed chooses which team's side has the low end of the ramp; every floor uses the same direction. The ramp is the sole deliberate exception to the arena's mirror geometry; spawns and exterior approaches remain mirrored. Rooms on every floor use 10cm destructible drywall partitions with wide openings, destructible timber tables with open space beneath their tops, and low counters without blocking the central passage. Where the approach has room, mirrored exterior flights lead to the recessed first-floor terraces and their doors. Stairs use
 20cm risers and 25cm tread depth, and main doors are 240cm wide.
 
 Some open central-hill layouts have one wide central pool; other central-hill layouts can have two mirrored recessed courtyard pools. Their solid concrete
@@ -36,7 +35,7 @@ Water detection stays within 105cm below the surface, excluding rooms beneath ro
 Wading reduces movement speed progressively from 90% near the surface to 50% at 100cm depth.
 The wall separator extends below the local terrain grade so its underside stays hidden on slopes.
 `setup_pool_water.py` creates the owned translucent water material in Unreal.
-Open layouts on the central hill can have a compact roof pool even in 1v1. Its waterline is flush with the roof, its basin extends 100cm into the slab, and five square treads in a corner of each mirrored half lead from the rim to the floor. The interior stairwell extends to the roof beside the pool.
+Open layouts on the central hill can have a compact roof pool even in 1v1. Its waterline is flush with the roof, its basin extends 100cm into the slab, and five square treads in a corner of each mirrored half lead from the rim to the floor. The 120cm roof assembly keeps a 300cm interior ceiling under the basin. The interior stairwell extends five treads to the raised roof beside the pool.
 
 - Open: connected ground routes, with no central separator.
 - Wall division: 340cm exterior Brick separator, above the default jump and climb
@@ -46,8 +45,10 @@ Open layouts on the central hill can have a compact roof pool even in 1v1. Its w
 - The wall division also has paired exterior stairs on the flank, away from
   the main building.
 
-Lateral-hill layouts include 2–4 enterable secondary Brick or Concrete buildings, with seeded plain, parapet or entrance-canopy profiles. Each has
-an open doorway, destructible roof and a level terrain foundation. Flank routes
+Lateral-hill layouts include 2–4 enterable secondary Brick, Concrete or Wood buildings, with seeded plain, parapet or entrance-canopy profiles. Each has
+an open doorway, destructible roof and a level terrain foundation. Fixed ladders on
+the side away from the villa reach the roofs, with clear gaps in any parapets.
+Timber buildings use timber ladders. The railing annex has mirrored roof ladders. Flank routes
 pass beside them. The shared 1–3 spawn-zone generator retains screened, paired
 starts; every opposing start pair is occluded on the intact map.
 

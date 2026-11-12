@@ -48,6 +48,7 @@ void AERHUD::DrawWeaponInventory(const AERCharacter* Character)
     const float Right=Canvas->SizeX-Edge.X, Bottom=Canvas->SizeY-Edge.Y;
     const auto& Bounds=IconBounds;
     const auto* PlayerState=Character->GetPlayerState<AERPlayerState>();
+    const auto* PC = Cast<AERPlayerController>(PlayerOwner);
     const FLinearColor TeamColor=PlayerState?ERRecon::TeamColor(PlayerState->Team):FLinearColor::White;
     int32 Row=0;
     for(int32 Slot=0;Slot<Character->Inventory.Num();++Slot)
@@ -66,15 +67,14 @@ void AERHUD::DrawWeaponInventory(const AERCharacter* Character)
         const float Opacity=Empty?.33f:.9f;
         FLinearColor IconColor=Selected?TeamColor:FLinearColor::White;
         IconColor.A=Opacity;
-        FCanvasTileItem Tile(FVector2D(Right-28*S-Size.X,CenterY-Size.Y*.5f),Texture->GetResource(),Size,
+        // Presets bind stable catalog keys, independent of inventory ordering.
+        const FKey DefaultKey = FERControls::SlotKey(Character->UsesReferenceArsenal() ? Key : Slot);
+        const FString Input = FERControls::ShortLabel(PC ? PC->ControlKey(DefaultKey) : DefaultKey);
+        const float KeyColumnWidth = FMath::Max(28.0 * S, MeasureHUDText(Input, .5f).X + 8.0 * S);
+        FCanvasTileItem Tile(FVector2D(Right-KeyColumnWidth-Size.X,CenterY-Size.Y*.5f),Texture->GetResource(),Size,
             FVector2D(float(B.Min.X)/Texture->GetSizeX(),float(B.Min.Y)/Texture->GetSizeY()),
             FVector2D(float(B.Max.X)/Texture->GetSizeX(),float(B.Max.Y)/Texture->GetSizeY()),IconColor);
         Tile.BlendMode=SE_BLEND_Translucent;Canvas->DrawItem(Tile);
-        // Presets bind stable catalog keys, independent of inventory ordering.
-        FString Input;
-        if(Character->bPresetInventory || Character->UsesReferenceArsenal())
-            Input=Key==8?TEXT("F"):Key==9?TEXT("G"):Key==10?TEXT("H"):FString::FromInt(Key+1);
-        else Input=FString::FromInt(Slot+1);
         // Center the visible Teko capitals/digits, excluding the line box descender space.
         DrawHUDTextAnchored(Input,FVector2D(Right,CenterY),FLinearColor(1,1,1,Opacity),.5f,FVector2D(1,.447f));
         ++Row;

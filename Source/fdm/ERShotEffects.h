@@ -33,7 +33,7 @@ public:
         const FVector& Position, const FVector& Right, const FVector& Forward, float VisualScale = 1.f);
 };
 
-// Short local tracer with fixed world-space endpoints.
+// Local tracer with a fixed world-space path.
 UCLASS()
 class FDM_API AERAttachedTracer : public AActor
 {
@@ -44,14 +44,22 @@ public:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
     static AERAttachedTracer* Spawn(class AERCharacter* Character, class UNiagaraSystem* System,
-        const FVector& End, bool bFirstPerson, float Duration = .016f);
+        const FVector& End, bool bFirstPerson, float Duration = .016f, const FVector* PredictedMuzzle = nullptr);
+    static void SpawnMuzzleStreak(class AERCharacter* Character, class UNiagaraSystem* System, uint32 ShotKey);
     FVector LastStart = FVector::ZeroVector;
     FVector LastEnd = FVector::ZeroVector;
     uint32 UpdatedFrames = 0;
 private:
+    static AERAttachedTracer* SpawnSegment(class AERCharacter* Character, class UNiagaraSystem* System,
+        const FVector& Start, const FVector& End, bool bFirstPerson, float Duration, bool bTravel,
+        TOptional<uint32> PredictedShot = {});
+    void BeginMuzzleStreak(AERCharacter& Character);
+    void SetVisibleSegment(const FVector& Start, const FVector& End);
     TWeakObjectPtr<class AERCharacter> Source;
     TWeakObjectPtr<class UERWeaponData> ShotData;
     bool bFirstPerson = false;
+    bool bTravel = false;
+    TOptional<uint32> PredictedShotKey;
     double VisibleSince = -1;
     float DurationSeconds = .016f;
 };

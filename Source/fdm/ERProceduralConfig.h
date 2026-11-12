@@ -7,6 +7,8 @@ struct FERProceduralConfig
     GENERATED_BODY()
     UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<class UERMapTemplate> TemplateAsset;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) int32 Seed=42;
+    // Authority-selected cosmetic seed, carried across regenerations.
+    UPROPERTY() uint32 OutdoorLightingSeed=0;
     // Zero preserves authored recipes for editor studies; hosted sessions use the server rule.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0",ClampMax="16")) int32 ExpectedTeamSize=0;
     // Replicated test witness only. Production always samples the seed (zero).

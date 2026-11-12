@@ -60,8 +60,11 @@ does not affect bot vision. Stationary targets keep team, skin and start across 
 | Crouch / prone transition | 0.4s / 1.1s |
 | Fall damage | safe ≤3m, lethal from 11m; bypasses armor, authority only |
 
-Sprint: double-tap W within 300ms and hold, or hold E with W. Partial stamina can be
-spent by a fresh gesture; a held key never auto-restarts. Hold Ctrl/C to crouch, double
+Sprint: double-tap W within 300ms and hold, or hold E with W. Holding both keys
+through the countdown or respawn starts a sprint as soon as forward movement is allowed. Partial stamina can be
+spent by a fresh gesture, including releasing and pressing Sprint again while holding forward.
+Holding Walk or Crouch through the countdown or respawn applies that input when play resumes.
+Hold Ctrl/C to crouch, double
 tap to latch prone, press again to rise; prone entry passes through crouch before
 lowering to the floor. Standing waits for ceiling clearance. Forward
 input vaults; Space+forward climbs, also while airborne. `FindLedge` handles parapets
@@ -88,10 +91,15 @@ floor checks and ceiling clearance remain active.
 
 ## Controls
 
+**Setup → Controls** rebinds keyboard and mouse buttons, including alternate bindings,
+and saves them locally in GameUserSettings. Assigning a used key swaps the two bindings.
+The wheel is reserved for cycling items. Sprint and prone double taps follow the active
+forward and crouch keys. The countdown guide, inventory and prone hint show the active keys.
+
 Mouse smoothing is disabled in the project input settings. Mouse acceleration defaults
 to zero and can be adjusted in the menu. Saved mouse preferences are preserved.
 
-WASD, mouse, left click fire, right click scope, Space jump/climb/respawn, Shift walk,
+Defaults: WASD, mouse, left click fire, right click scope, Space jump/climb/respawn, Shift walk,
 double-tap W or hold E sprint, Ctrl/C crouch and prone, R reload, 1–8 / F / G / H or
 wheel select (the wheel has a 250ms quiet period), Tab scoreboard, Esc menu, P screenshots.
 P saves the current viewport (including HUD) plus front, right, left, back and top
@@ -164,6 +172,7 @@ automatic respawn, bomb or capture modes. Competitive balance needs real playtes
 | --- | --- |
 | Any gameplay | `test-network.py`; add `--accuracy`, `--skins` as relevant |
 | Movement, posture, stamina | `test-movement.py` (`--posture-only --render`), `test-player-mechanics.py` |
+| Control bindings | `test-movement.py --remapped-controls`, `test-hud.py --render --countdown` |
 | Server settings | `test-server-settings.py` (`--regressions`, `--network`, `--render`) |
 | Lobby, rotation, capacity | `test-lobby.py`, `test-round-rotation.py`, `test-capacity.py`, `test-admission.py --bots`, `test-session.py` |
 | Skull Hunt | `test-lobby.py --skull-hunt` |

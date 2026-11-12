@@ -173,6 +173,7 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Shot feedback") TObjectPtr<class UMaterialInterface> MuzzleFlashMaterial;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<class UStaticMeshComponent> FirstPersonMuzzleFlash;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<class UStaticMeshComponent> WorldMuzzleFlash;
+    UPROPERTY(VisibleAnywhere) TObjectPtr<class UPointLightComponent> MuzzleLight;
     // Local counter for the opt-in integration probe; never drives gameplay or replication.
     uint32 ShotFeedbackCount = 0;
     uint32 PredictedShotFeedbackCount=0;
@@ -215,14 +216,22 @@ public:
     void ApplyDeathVisuals();
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 private:
+    friend class AERAttachedTracer;
     FERFireInputState ServerFireInput;
     FERShotPresentationWindow ShotPresentation;
+    struct FPredictedTracer
+    {
+        uint32 ShotKey;
+        FVector Muzzle;
+    };
+    TArray<FPredictedTracer, TInlineAllocator<16>> PredictedTracers;
     uint16 ServerFireOrdinal=0,PredictedFireSequence=0,PredictedFireOrdinal=0;
     int32 PredictedMagazineLimit=0;
     bool bPredictingFire=false;
     double NextPredictedFireTime=0;
     TWeakObjectPtr<class AERWeapon> PredictedFireWeapon;
     void UpdatePredictedFire();
+    void RecordPredictedTracer(uint32 ShotKey, const FVector& Muzzle);
     void PlayShotPresentation(class UERWeaponData* FiredData);
     void UpdateFireAcknowledgement();
     UFUNCTION(Client, Reliable)
@@ -278,4 +287,7 @@ private:
     TMap<const UEROneShotAudio*, FERAudioShuffle> ShotShuffles;
     float CameraKick = 0;
     double MuzzleFlashUntil = 0;
+    UPROPERTY() TArray<TObjectPtr<class UStaticMeshComponent>> MuzzleFlashJets;
+    float MuzzleFlashDuration = 0.f;
+    float MuzzleLightPeak = 0.f;
 };

@@ -28,4 +28,6 @@ private:
     UPROPERTY() TObjectPtr<class AERPlayerController> Client;
     void Check(bool Value, const TCHAR* Label);
     void Advance(int32 Next, float Delay);
+    void TickMuzzleGallery();
+    FVector FirstFlashScale = FVector::ZeroVector;
 };

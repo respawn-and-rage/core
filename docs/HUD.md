@@ -20,8 +20,11 @@ without pixel caps, recomputed from the live viewport. Font: Teko SemiBold throu
   in Teko 9 above it. Online clients show ping, RTT variation, packet loss and server frame
   period below the timer; pending destruction adds snapshot age. Synchronization shows
   verified-page progress before entering combat.
-- **Pre-match countdown** (`ERMatchHUD`): "MATCH STARTS IN" and the remaining seconds in the
-  centre; the top timer holds the full match duration until the match starts.
+- **Pre-match countdown** (`ERMatchHUD`): "MATCH STARTS IN", the remaining seconds and the
+  unlock hint stack above the reticle. The guide below it shows outlined keys on translucent rows;
+  the inventory shows the exact shortcuts for the current kit. The scoreboard or respawn prompt
+  takes precedence over the countdown. Combat notices give way during the countdown, and the top
+  timer holds the full match duration until the match starts.
 - **Kill feed** (`ERMatchHUD`): top left above the kill confirmations, up to five rows for 8s
   with a .6s fade: killer name, cropped weapon icon (`AERHUD::DrawWeaponIcon`, same art and
   crops as the inventory), victim name, both in team colours. TK marks teamkills and a skull
@@ -56,6 +59,8 @@ into larger quads; boundary cells retain clipping and feathering, and unknown ce
 
 ## Verify
 
-`test-hud.py` (`--render`, `--render --weapons`); the render gallery seeds sample kill feed rows.
-Running the gallery with `-ERMatchCountdown=12` also holds forward and jump through the countdown
-and logs `ER_HUD_COUNTDOWN_FROZEN moved=<cm>`, which must be 0. Native: `EclipseRecoil.Player.HUDViewportLayout`.
+`test-hud.py` (`--render`, `--render --weapons`, `--render --countdown`); the render gallery seeds
+sample kill feed rows. The countdown option holds the countdown across all gallery viewports.
+Use `--render --countdown-sprint` to verify that movement stays frozen and held forward plus
+sprint starts a sprint when the countdown ends. Use `--render --countdown-posture` to verify
+held Walk and Crouch at unlock. Native: `EclipseRecoil.Player.HUDViewportLayout`.

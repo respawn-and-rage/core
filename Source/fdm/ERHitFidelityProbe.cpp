@@ -19,6 +19,7 @@
 #include "PhysicsEngine/BodyInstance.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "StaticMeshResources.h"
+#include "UnrealClient.h"
 namespace
 {
 constexpr float HitProbeCellSize=2.f;
@@ -316,6 +317,12 @@ void AERHitFidelityProbe::TickLagClient()
 }
 void AERHitFidelityProbe::TickFireInputClient(AERCharacter* Me)
 {
+    const bool bTracerStrafe = FParse::Param(FCommandLine::Get(), TEXT("ERTracerStrafe"));
+    if (bTracerStrafe && (FireInputPhase <= 1 || FireInputPhase == 3))
+    {
+        Me->GetController()->SetControlRotation(FRotator(35, 0, 0));
+        Me->AddMovementInput(FVector::YAxisVector, MoveSign);
+    }
     if(FireInputPhase>=6 || Age<NextShot)return;
     auto Check=[this](bool Pass,const TCHAR* Label)
     {
@@ -329,7 +336,13 @@ void AERHitFidelityProbe::TickFireInputClient(AERCharacter* Me)
     {
         // Shoot away from the moving target: this probe checks transport and
         // presentation, without a death/respawn obscuring release ordering.
-        Me->GetController()->SetControlRotation(FRotator(70,0,0));
+        if (bTracerStrafe && FMath::Abs(Me->GetVelocity().Y) < 100.)
+        {
+            MoveSign = -MoveSign;
+            NextShot = Age + .4f;
+            return;
+        }
+        if (!bTracerStrafe) Me->GetController()->SetControlRotation(FRotator(70,0,0));
         const int32 Ammo=Me->Weapon->MagazineAmmo;
         const uint32 Presented=Me->PredictedShotFeedbackCount;
         Me->SetFireInputHeld(true);
@@ -346,6 +359,8 @@ void AERHitFidelityProbe::TickFireInputClient(AERCharacter* Me)
     case 3:
         Check(Ack.Sequence==FireInputSequence && !Ack.Firing && Ack.ShotOrdinal==ReleasedShotCount,TEXT("release_does_not_restart_on_later_moves"));
         Me->SetFireInputHeld(true);Me->SetFireInputHeld(false);
+        if (bTracerStrafe)
+            FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir()/TEXT("Testing/Tracer-Strafe.png"), false, false);
         FireInputSequence=CastChecked<UERMovement>(Me->GetCharacterMovement())->FireInput.Sequence;
         NextShot=Age+1.5f;break;
     case 4:

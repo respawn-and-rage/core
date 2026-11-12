@@ -4,6 +4,9 @@
 #include "ERCharacter.h"
 #include "ERWeapon.h"
 #include "ERMatch.h"
+#include "ERMovement.h"
+#include "InputKeyEventArgs.h"
+#include "TimerManager.h"
 #include "Engine/Canvas.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/CommandLine.h"
@@ -21,16 +24,62 @@ void AERHUD::TickHUDLayoutGallery()
     // countdown and report how far the pawn actually moved once it ends.
     if(auto* GS=GetWorld()->GetGameState<AERGameState>(); GS && PC)
     {
+        const bool bPostureCheck = FParse::Param(FCommandLine::Get(), TEXT("ERCountdownPostureProbe"));
+        const auto SetHeldKeys = [bPostureCheck](AERPlayerController* LocalController, EInputEvent Event)
+        {
+            const FKey Keys[] = {EKeys::W, bPostureCheck ? EKeys::LeftShift : EKeys::E,
+                bPostureCheck ? EKeys::C : EKeys::Invalid};
+            for (const FKey& DefaultKey : Keys)
+            {
+                if (!DefaultKey.IsValid()) continue;
+                FInputKeyEventArgs Args;
+                Args.Key = LocalController->ControlKey(DefaultKey);
+                Args.Event = Event;
+                Args.AmountDepressed = Event == IE_Pressed ? 1.f : 0.f;
+                Args.EventTimestamp = FPlatformTime::Cycles64();
+                LocalController->InputKey(Args);
+            }
+        };
         auto* C=Cast<AERCharacter>(PC->GetPawn());
         if(GS->IsPreMatchCountdown() && C)
         {
-            if(!bGalleryCountdownSeen){bGalleryCountdownSeen=true;GalleryCountdownStart=C->GetActorLocation();}
-            C->AddMovementInput(C->GetActorForwardVector(),1.f);C->Jump();
+            if (!bGalleryCountdownSeen)
+            {
+                bGalleryCountdownSeen = true;
+                GalleryCountdownStart = C->GetActorLocation();
+                SetHeldKeys(PC, IE_Pressed);
+            }
+            if (GS->CountdownEndServerTime - GS->GetServerWorldTimeSeconds() > .5) C->Jump();
+            else C->StopJumping();
         }
         else if(bGalleryCountdownSeen && !bGalleryCountdownReported && GS->IsMatchInProgress() && C)
         {
             bGalleryCountdownReported=true;
             UE_LOG(LogTemp,Display,TEXT("ER_HUD_COUNTDOWN_FROZEN moved=%.2f"),FVector::Dist(GalleryCountdownStart,C->GetActorLocation()));
+            C->StopJumping();
+            FTimerHandle HeldInputCheck;
+            const TWeakObjectPtr<AERPlayerController> LocalPC(PC);
+            GetWorld()->GetTimerManager().SetTimer(HeldInputCheck, [LocalPC, SetHeldKeys, bPostureCheck]()
+            {
+                if (auto* LocalController = LocalPC.Get())
+                {
+                    const auto* Pawn = Cast<AERCharacter>(LocalController->GetPawn());
+                    const auto* Movement = Pawn ? Cast<UERMovement>(Pawn->GetCharacterMovement()) : nullptr;
+                    if (bPostureCheck)
+                    {
+                        UE_LOG(LogTemp, Display, TEXT("ER_HUD_COUNTDOWN_WALK %s"),
+                            Movement && Movement->bWalkHeld ? TEXT("PASS") : TEXT("FAIL"));
+                        UE_LOG(LogTemp, Display, TEXT("ER_HUD_COUNTDOWN_CROUCH %s"),
+                            Pawn && Pawn->bIsCrouched ? TEXT("PASS") : TEXT("FAIL"));
+                    }
+                    else
+                    {
+                        UE_LOG(LogTemp, Display, TEXT("ER_HUD_COUNTDOWN_SPRINT %s"),
+                            Movement && Movement->IsSprinting() ? TEXT("PASS") : TEXT("FAIL"));
+                    }
+                    SetHeldKeys(LocalController, IE_Released);
+                }
+            }, .2f, false);
         }
     }
     if (!PC || !PC->Recon || !PC->Recon->Snapshot.Epoch || GetWorld()->GetTimeSeconds()<HUDGalleryNextAt) return;

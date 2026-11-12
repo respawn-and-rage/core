@@ -103,6 +103,69 @@ FSlateFontInfo MenuFont(int32 Size)
 {
     return ERInterface::Font(Size);
 }
+
+class SControlKeyButton : public SCompoundWidget
+{
+public:
+    SLATE_BEGIN_ARGS(SControlKeyButton) {}
+        SLATE_ATTRIBUTE(FText, KeyText)
+        SLATE_ARGUMENT(TFunction<void(const FKey&)>, OnSelected)
+    SLATE_END_ARGS()
+
+    void Construct(const FArguments& Args)
+    {
+        KeyText = Args._KeyText;
+        OnSelected = Args._OnSelected;
+        ChildSlot[SNew(SButton).ContentPadding(FMargin(10, 3))
+            .OnClicked_Lambda([this]()
+            {
+                bSelecting = true;
+                return FReply::Handled().SetUserFocus(SharedThis(this), EFocusCause::SetDirectly);
+            })
+            [SNew(STextBlock).Font(MenuFont(22)).Text_Lambda([this]()
+            {
+                return bSelecting ? FText::FromString(TEXT("Press a key…")) : KeyText.Get();
+            })]];
+    }
+
+    bool SupportsKeyboardFocus() const override { return true; }
+    void OnFocusLost(const FFocusEvent& Event) override
+    {
+        bSelecting = false;
+        SCompoundWidget::OnFocusLost(Event);
+    }
+    FReply OnPreviewKeyDown(const FGeometry&, const FKeyEvent&) override
+    {
+        return bSelecting ? FReply::Handled() : FReply::Unhandled();
+    }
+    FReply OnKeyUp(const FGeometry&, const FKeyEvent& Event) override
+    {
+        return Select(Event.GetKey());
+    }
+    FReply OnPreviewMouseButtonDown(const FGeometry&, const FPointerEvent& Event) override
+    {
+        return Select(Event.GetEffectingButton());
+    }
+    FReply OnMouseWheel(const FGeometry&, const FPointerEvent& Event) override
+    {
+        if (Event.GetWheelDelta() == 0.f) return FReply::Unhandled();
+        return Select(Event.GetWheelDelta() > 0.f ? EKeys::MouseScrollUp : EKeys::MouseScrollDown);
+    }
+
+private:
+    FReply Select(const FKey& Key)
+    {
+        if (!bSelecting) return FReply::Unhandled();
+        bSelecting = false;
+        OnSelected(Key);
+        return FReply::Handled();
+    }
+
+    bool bSelecting = false;
+    TAttribute<FText> KeyText;
+    TFunction<void(const FKey&)> OnSelected;
+};
+
 TSharedRef<STextBlock> Text(const FString& Value, int32 Size = 24)
 {
     return SNew(STextBlock).Text(FText::FromString(Value)).Font(MenuFont(Size))
@@ -161,10 +224,11 @@ void Choice(TSharedRef<SVerticalBox> Panel, const FString& Title, TArray<FString
         .MenuContent()[SNew(SBox).MaxDesiredHeight(420)[SNew(SScrollBox) + SScrollBox::Slot()[Items]]]);
 }
 }
-void AERPlayerController::ERMenu(int32 Page) { OpenMenuPage(FMath::Clamp(Page, 0, 10)); }
+void AERPlayerController::ERMenu(int32 Page) { OpenMenuPage(FMath::Clamp(Page, 0, 11)); }
 void AERPlayerController::OpenMenuPage(int32 Page)
 {
     if(Page==10 && MenuPage!=10)ServerRulesParent=MenuPage;
+    if (Page == 11) ControlBindingFeedback = FText::GetEmpty();
     if (Page == 5) Page = 6; // Compatibility with existing menu commands.
     if ((Page == 5 || Page == 6 || Page == 7) && MenuPage != 5 && MenuPage != 6 && MenuPage != 7 && MenuPage != 9) SubmenuParent = MenuPage;
     if(Page==6 && MenuPage!=6 && MenuPage!=9)
@@ -204,7 +268,7 @@ void AERPlayerController::ShowMenu(bool bShow)
     auto PlayerFooter=SNew(SVerticalBox);
     auto Go = [this](int32 Page) { return [this, Page]() { OpenMenuPage(Page); return FReply::Handled(); }; };
     auto* Online = GI->GetSubsystem<UEROnline>();
-    auto Back = [this, GI, Online]() { Online->Cancel(); GI->CancelLANSearch(); OpenMenuPage(MenuPage==10 ? ServerRulesParent : MenuPage == 5 || MenuPage == 6 || MenuPage == 7 ? SubmenuParent : MenuPage == 9 ? 6 : MenuPage == 8 ? 4 : 0); return FReply::Handled(); };
+    auto Back = [this, GI, Online]() { Online->Cancel(); GI->CancelLANSearch(); OpenMenuPage(MenuPage==10 ? ServerRulesParent : MenuPage == 5 || MenuPage == 6 || MenuPage == 7 ? SubmenuParent : MenuPage == 9 ? 6 : MenuPage == 8 || MenuPage == 11 ? 4 : 0); return FReply::Handled(); };
     auto SaveSupplies = [this, GI]() { GI->SaveProfile(); ServerSetSupplies(GI->SpareMagazines, GI->HECount, GI->SmokeCount, GI->StunCount); };
     TFunction<TSharedRef<SVerticalBox>()> Field=[Panel]() { return Panel; };
     auto IntChoice = [&Field](const FString& Label, TArray<FString> Labels, int32* Value)
@@ -233,11 +297,11 @@ void AERPlayerController::ShowMenu(bool bShow)
     }
     else
     {
-        const TCHAR* Titles[] = {TEXT("MULTIPLAYER LOBBY"), TEXT("PLAY OFFLINE"), TEXT("START SERVER"), TEXT("PLAY ONLINE"), TEXT("SETUP"), TEXT("PLAYER"), TEXT("PLAYER"), TEXT("CREDITS"), TEXT("PERFORMANCE"), TEXT("CHANGE TEAM"),TEXT("SERVER GAMEPLAY SETTINGS")};
+        const TCHAR* Titles[] = {TEXT("MULTIPLAYER LOBBY"), TEXT("PLAY OFFLINE"), TEXT("START SERVER"), TEXT("PLAY ONLINE"), TEXT("SETUP"), TEXT("PLAYER"), TEXT("PLAYER"), TEXT("CREDITS"), TEXT("PERFORMANCE"), TEXT("CHANGE TEAM"),TEXT("SERVER GAMEPLAY SETTINGS"), TEXT("CONTROLS")};
         Focus = Button(MenuPage == 0 ? TEXT("Leave Server") : TEXT("Back"), MenuPage == 0 ? TFunction<FReply()>([GI]() { GI->ReturnToMenu(); return FReply::Handled(); }) : TFunction<FReply()>(Back));
         if (MenuPage != 7)
         {
-            Add(Panel, Text(Titles[FMath::Clamp(MenuPage, 0, 10)], 36));
+            Add(Panel, Text(Titles[FMath::Clamp(MenuPage, 0, 11)], 36));
             if(MenuPage!=6 && MenuPage!=10)Add(Panel, Focus.ToSharedRef());
         }
         if (MenuPage == 0 && Lobby)
@@ -504,6 +568,7 @@ void AERPlayerController::ShowMenu(bool bShow)
         }
         else if (MenuPage == 4)
         {
+            Add(Panel, Button(TEXT("Controls"), Go(11)));
             Add(Panel, Button(TEXT("Performance"), Go(8)));
             Field=Columns(Panel);
             auto Display=Field();
@@ -524,8 +589,38 @@ void AERPlayerController::ShowMenu(bool bShow)
             Slider(TEXT("Music"), [GI]() { return GI->GetMusicVolume(); }, [GI](float V) { GI->SetMusicVolume(V); }, [GI]() { GI->SaveMusicVolume(); });
             Slider(TEXT("Mouse sensitivity"), [GI]() { return GI->GetMouseSensitivity(); }, [GI](float V) { GI->SetMouseSensitivity(V); }, [GI]() { GI->SaveMouseSensitivity(); });
             Slider(TEXT("Mouse acceleration"), [GI]() { return GI->GetMouseAcceleration(); }, [GI](float V) { GI->SetMouseAcceleration(V); }, [GI]() { GI->SaveMouseSensitivity(); });
-            Add(Panel, Text(TEXT("WASD Move · Shift Walk · double W / hold E Sprint\nSpace Jump / Climb · C / Ctrl Crouch · double C Prone\nR Reload · Tab Scores · Esc Menu"), 20));
             Add(Panel, Button(TEXT("Credits"), Go(7)));
+        }
+        else if (MenuPage == 11)
+        {
+            Add(Panel, Text(TEXT("Select a binding, then press a key or use the mouse over the button. Used keys swap. Changes save immediately."), 21));
+            Add(Panel, Text(TEXT("Double-tap forward to sprint. Double-tap crouch to go prone."), 21));
+            Add(Panel, Button(TEXT("Restore default controls"), [this, GI]()
+            {
+                GI->Controls.Reset();
+                ApplyControlBindings();
+                ControlBindingFeedback = FText::FromString(TEXT("Default controls restored."));
+                return FReply::Handled();
+            }));
+            auto Column = Columns(Panel);
+            for (const FERControlBinding& Item : FERControls::Bindings())
+            {
+                const FKey DefaultKey = Item.DefaultKey;
+                Add(Column(), SNew(SHorizontalBox)
+                    + SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center).Padding(0, 0, 8, 0)[Text(Item.Label, 22)]
+                    + SHorizontalBox::Slot().AutoWidth()
+                    [SNew(SControlKeyButton)
+                        .KeyText_Lambda([this, DefaultKey]() { return FText::FromString(FERControls::ShortLabel(ControlKey(DefaultKey))); })
+                        .OnSelected([this, GI, DefaultKey](const FKey& NewKey)
+                        {
+                            if (GI->Controls.Rebind(DefaultKey, NewKey))
+                            {
+                                ApplyControlBindings();
+                                ControlBindingFeedback = FText::GetEmpty();
+                            }
+                            else ControlBindingFeedback = FText::FromString(TEXT("Choose a keyboard key or mouse button. Wheel scrolling is reserved for cycling items."));
+                        })]);
+            }
         }
         else if (MenuPage == 8)
         {
@@ -778,7 +873,7 @@ void AERPlayerController::ShowMenu(bool bShow)
                 [SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush")).BorderBackgroundColor(FLinearColor(.025f,.03f,.04f,.94f)).ForegroundColor(FLinearColor::White).Padding(26)
                     [Content]]];
     }
-    if (MenuPage != 3) Overlay->AddSlot().VAlign(VAlign_Bottom).Padding(30,8,200,10)[SNew(STextBlock).Font(MenuFont(22)).ColorAndOpacity(FLinearColor(1,.65f,.3f)).ShadowOffset(FVector2D(2,2)).ShadowColorAndOpacity(FLinearColor::Black).AutoWrapText(true).Text_Lambda([GI]() { return FText::FromString(GI->LastError); })];
+    if (MenuPage != 3) Overlay->AddSlot().VAlign(VAlign_Bottom).Padding(30,8,200,10)[SNew(STextBlock).Font(MenuFont(22)).ColorAndOpacity(FLinearColor(1,.65f,.3f)).ShadowOffset(FVector2D(2,2)).ShadowColorAndOpacity(FLinearColor::Black).AutoWrapText(true).Text_Lambda([this, GI]() { return MenuPage == 11 ? ControlBindingFeedback : FText::FromString(GI->LastError); })];
     auto Version=Text(GI->BuildVersion,16);
     Version->SetAutoWrapText(false);
     Overlay->AddSlot()

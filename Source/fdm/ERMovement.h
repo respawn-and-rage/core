@@ -117,5 +117,5 @@ private:
     float FallFrameZ=0,FallFrameVelocityZ=0;
     double ServerTime() const;
     void UpdatePosture(float DeltaSeconds);
-    void UpdateSprint();
+    void UpdateSprint(bool bMovementLocked = false);
 };

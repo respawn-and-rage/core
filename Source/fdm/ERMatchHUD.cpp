@@ -31,15 +31,107 @@ namespace
 
 void AERHUD::DrawPreMatchCountdown(const AERGameState* GS)
 {
-    if (!GS || !GS->IsPreMatchCountdown() || !Canvas) return;
     const FERHUDLayout Layout(FVector2D(Canvas->SizeX,Canvas->SizeY));
+    const float S = Layout.Scale;
     const int32 Seconds = FMath::Max(0, FMath::CeilToInt32(GS->CountdownEndServerTime - GS->GetServerWorldTimeSeconds()));
-    const float CX = Canvas->SizeX * .5f;
-    DrawHUDTextAnchored(TEXT("MATCH STARTS IN"), FVector2D(CX, Layout.Position(0,210).Y), FLinearColor(.82f,.85f,.9f), 1.f, FVector2D(.5f,0));
-    DrawHUDTextAnchored(Seconds > 0 ? FString::FromInt(Seconds) : TEXT("GO"), FVector2D(CX, Layout.Position(0,236).Y),
-        Seconds <= 3 ? FLinearColor(1.f,.55f,.25f) : FLinearColor(1.f,.82f,.42f), 3.4f, FVector2D(.5f,0));
-    DrawHUDTextAnchored(TEXT("Movement and weapons unlock when the countdown ends"), FVector2D(CX, Layout.Position(0,330).Y),
-        FLinearColor(.72f,.76f,.82f), .7f, FVector2D(.5f,0));
+    const float CX = Layout.Position(640, 0).X;
+    const FLinearColor Caption(.82f,.85f,.9f);
+
+    // Stack from the bottom up using font measurements, leaving the reticle clear.
+    const FString Title = TEXT("MATCH STARTS IN");
+    const FString Count = Seconds > 0 ? FString::FromInt(Seconds) : TEXT("GO");
+    const FString Hint = TEXT("Movement and weapons unlock at match start");
+    constexpr float TitleScale = .75f, CountScale = 1.9f, HintScale = .68f;
+    const FVector2D TitleSize = MeasureHUDText(Title, TitleScale);
+    const FVector2D CountSize = MeasureHUDText(Count, CountScale);
+    const FVector2D HintSize = MeasureHUDText(Hint, HintScale);
+    const float HintY = Layout.Position(640, 292).Y - HintSize.Y;
+    const float CountY = HintY - CountSize.Y - 3.f * S;
+    const float TitleY = CountY - TitleSize.Y - 3.f * S;
+    DrawHUDText(Title, CX, TitleY, Caption, TitleScale, true);
+    DrawHUDText(Count, CX, CountY, Seconds <= 3 ? FLinearColor(1.f,.55f,.25f) : FLinearColor(1.f,.82f,.42f), CountScale, true);
+    DrawHUDText(Hint, CX, HintY, Caption, HintScale, true);
+
+    const auto* PC = Cast<AERPlayerController>(PlayerOwner);
+    const auto Bound = [PC](const FKey& DefaultKey) { return PC ? PC->ControlKey(DefaultKey) : DefaultKey; };
+    const auto Label = [&](const FKey& DefaultKey) { return FERControls::ShortLabel(Bound(DefaultKey)); };
+    const FString Forward = Label(EKeys::W), Backward = Label(EKeys::S);
+    const FString Crouch = Label(EKeys::C) + TEXT(" / ") + Label(EKeys::LeftControl);
+    const FString Jump = Label(EKeys::SpaceBar), Fire = Label(EKeys::LeftMouseButton);
+    const FString Walk = Bound(EKeys::LeftShift) == EKeys::LeftShift && Bound(EKeys::RightShift) == EKeys::RightShift
+        ? TEXT("SHIFT") : Label(EKeys::LeftShift) + TEXT(" / ") + Label(EKeys::RightShift);
+    const FString Cycle = Bound(EKeys::MouseScrollUp) == EKeys::MouseScrollUp && Bound(EKeys::MouseScrollDown) == EKeys::MouseScrollDown
+        ? TEXT("WHEEL") : Label(EKeys::MouseScrollUp) + TEXT(" / ") + Label(EKeys::MouseScrollDown);
+    TArray<FString> SlotLabels;
+    bool bDefaultNumberKeys = true;
+    for (int32 Index = 0; Index < 8; ++Index)
+        bDefaultNumberKeys &= Bound(FERControls::SlotKey(Index)) == FERControls::SlotKey(Index);
+    if (bDefaultNumberKeys) SlotLabels.Add(TEXT("1-8"));
+    for (int32 Index = bDefaultNumberKeys ? 8 : 0; Index < 11; ++Index)
+        SlotLabels.Add(Label(FERControls::SlotKey(Index)));
+    struct FControl { FString Keys; const TCHAR* Action = nullptr; };
+    const FControl Rows[][5] = {
+        {{Forward + TEXT(" ") + Label(EKeys::A) + TEXT(" ") + Backward + TEXT(" ") + Label(EKeys::D), TEXT("MOVE")},
+         {TEXT("MOUSE"), TEXT("LOOK")}, {Walk, TEXT("WALK")},
+         {Label(EKeys::E) + TEXT(" + ") + Forward + TEXT(" / ") + Forward + TEXT(" x2"), TEXT("SPRINT")}},
+        {{Jump, TEXT("JUMP / CLIMB")}, {Forward + TEXT(" / ") + Backward, TEXT("USE LADDER")},
+         {Crouch, TEXT("CROUCH")}, {Crouch, TEXT("DOUBLE-TAP TO GO PRONE")}},
+        {{Fire, TEXT("FIRE / USE ITEM")}, {Label(EKeys::RightMouseButton), TEXT("AIM / ZOOM")},
+         {Label(EKeys::R), TEXT("RELOAD")}, {Fire + TEXT(" / ") + Jump, TEXT("RESPAWN")}},
+        {{FString::Join(SlotLabels, TEXT(" / ")), TEXT("SELECT ITEM (IF CARRIED)")}, {Cycle, TEXT("CYCLE ITEMS")}},
+        {{Label(EKeys::Tab), TEXT("SCOREBOARD")}, {Label(EKeys::Escape), TEXT("MENU")}, {Label(EKeys::P), TEXT("SCREENSHOTS")}},
+    };
+    constexpr float KeyScale = .78f, ActionScale = .78f;
+    const float KeyPad = 6.f * S, LabelGap = 7.f * S, GroupGap = 18.f * S;
+    // The Teko line box includes generous leading. Fit the keycap around the
+    // visible uppercase glyphs so all five rows clear the corner vitals.
+    const float KeyHeight = .67f * MeasureHUDText(TEXT("M"), KeyScale).Y + 3.f * S;
+    const float RowStep = KeyHeight + 4.f * S;
+    const float FirstRowY = Layout.Position(640, 438).Y + 7.f * S;
+    const FLinearColor RowBackdrop(0.f, 0.f, 0.f, .24f);
+    const float BackdropPadX = 5.f * S, BackdropPadY = 1.5f * S;
+    const FLinearColor KeyOutline(.78f,.8f,.83f,.85f);
+    for (int32 Row = 0; Row < UE_ARRAY_COUNT(Rows); ++Row)
+    {
+        float KeyWidths[UE_ARRAY_COUNT(Rows[0])] = {};
+        float ActionWidths[UE_ARRAY_COUNT(Rows[0])] = {};
+        float RowWidth = 0.f;
+        const auto MeasureRow = [&](float Fit)
+        {
+            RowWidth = 0.f;
+            for (int32 I = 0; I < UE_ARRAY_COUNT(Rows[Row]) && Rows[Row][I].Action; ++I)
+            {
+                KeyWidths[I] = MeasureHUDText(Rows[Row][I].Keys, KeyScale * Fit).X + 2.f * KeyPad;
+                ActionWidths[I] = MeasureHUDText(Rows[Row][I].Action, ActionScale * Fit).X;
+                RowWidth += (I == 0 ? 0.f : GroupGap) + KeyWidths[I] + LabelGap + ActionWidths[I];
+            }
+        };
+        float Fit = 1.f;
+        MeasureRow(Fit);
+        const float MaxRowWidth = Layout.Position(960, 0).X - 2.f * BackdropPadX;
+        while (RowWidth > MaxRowWidth && Fit > .2f)
+        {
+            Fit *= .9f;
+            MeasureRow(Fit);
+        }
+        float X = CX - RowWidth * .5f;
+        const float Y = FirstRowY + Row * RowStep;
+        DrawRect(RowBackdrop, X - BackdropPadX, Y - BackdropPadY,
+            RowWidth + 2.f * BackdropPadX, KeyHeight + 2.f * BackdropPadY);
+        for (int32 I = 0; I < UE_ARRAY_COUNT(Rows[Row]) && Rows[Row][I].Action; ++I)
+        {
+            const float KeyWidth = KeyWidths[I];
+            DrawRect(KeyOutline, X, Y, KeyWidth, S);
+            DrawRect(KeyOutline, X, Y + KeyHeight - S, KeyWidth, S);
+            DrawRect(KeyOutline, X, Y + S, S, KeyHeight - 2.f * S);
+            DrawRect(KeyOutline, X + KeyWidth - S, Y + S, S, KeyHeight - 2.f * S);
+            const float Mid = Y + KeyHeight * .5f;
+            DrawHUDTextAnchored(Rows[Row][I].Keys, FVector2D(X + KeyWidth * .5f, Mid), FLinearColor::White, KeyScale * Fit, FVector2D(.5f,.447f));
+            X += KeyWidth + LabelGap;
+            DrawHUDTextAnchored(Rows[Row][I].Action, FVector2D(X, Mid), Caption, ActionScale * Fit, FVector2D(0,.447f));
+            X += ActionWidths[I] + GroupGap;
+        }
+    }
 }
 
 void AERHUD::DrawKillBadge(bool bHeadshot, FVector2D Position, float Height, float Opacity)

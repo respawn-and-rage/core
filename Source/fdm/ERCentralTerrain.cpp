@@ -83,7 +83,13 @@ constexpr int32 Sectors=256;
 float Smooth(float T){T=FMath::Clamp(T,0.f,1.f);return T*T*(3-2*T);}
 float Field(const FERProceduralLayout& L,FVector2D P)
 {
-    for(const auto& Water:L.PoolWater)
+    if(!L.PoolWater.IsEmpty() && L.FeatureNames.Contains(TEXT("VillaWaterfront")))
+    {
+        const double Distance=P.X-L.PoolWater[0].Max.X;
+        if(Distance<0) return -90.f+70.f*Smooth(float((Distance+230)/130));
+        if(Distance<100) return -20.f+20.f*Smooth(float(Distance/100));
+    }
+    else for(const auto& Water:L.PoolWater)
     {
         if(Water.Max.Z>600)continue; // Rooftop basins must not carve the ground below.
         const FVector Center=Water.GetCenter();
@@ -151,6 +157,42 @@ float CentralGroundHeight(const FERProceduralLayout& L,FVector2D P)
     }
     if(FVector2D::CrossProduct(E-D,P-D)<=0)return TriangleHeight(L,P,C,E,D);
     return TriangleHeight(L,P,D,E,F);
+}
+void BuildWaterfrontSurface(UDynamicMeshComponent* Component,const FERProceduralLayout& L)
+{
+    UE::Geometry::FDynamicMesh3 Mesh;
+    const auto& Bounds=L.PoolWater[0];
+    const FVector2D Radii(L.ArenaSize.X*.5-20,L.ArenaSize.Y*.5-20);
+    TArray<FVector2D> Perimeter;
+    // Match the fence chords, clipping the polygon against the straight shoreline.
+    constexpr int32 Sides=128;
+    for(int32 I=0;I<Sides;++I)
+    {
+        const double A=2*PI*I/Sides,B=2*PI*(I+1)/Sides;
+        const FVector2D Start(FMath::Cos(A)*Radii.X,FMath::Sin(A)*Radii.Y);
+        const FVector2D End(FMath::Cos(B)*Radii.X,FMath::Sin(B)*Radii.Y);
+        const bool Inside=Start.X<=Bounds.Max.X;
+        if(Inside)Perimeter.Add(Start);
+        if(Inside!=(End.X<=Bounds.Max.X))
+            Perimeter.Add(FMath::Lerp(Start,End,(Bounds.Max.X-Start.X)/(End.X-Start.X)));
+    }
+    Mesh.EnableAttributes();
+    auto* Normals=Mesh.Attributes()->PrimaryNormals();
+    auto* UVs=Mesh.Attributes()->PrimaryUV();
+    for(const auto& P:Perimeter)
+    {
+        Mesh.AppendVertex(FVector(P,Bounds.Max.Z));
+        Normals->AppendElement(FVector3f::UpVector);
+        UVs->AppendElement(FVector2f(P/100));
+    }
+    for(int32 I=1;I+1<Perimeter.Num();++I)
+    {
+        const UE::Geometry::FIndex3i Face(0,I+1,I);
+        const int32 Id=Mesh.AppendTriangle(Face);
+        Normals->SetTriangle(Id,Face);
+        UVs->SetTriangle(Id,Face);
+    }
+    Component->SetMesh(MoveTemp(Mesh));
 }
 void BuildCentralTerrain(UDynamicMeshComponent* Component,const FERProceduralLayout& L)
 {

@@ -1,4 +1,5 @@
 #include "ERProceduralMap.h"
+#include "ERLadder.h"
 #include "Misc/AutomationTest.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -15,6 +16,7 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
     int32 PhysicalRoofSeed=INDEX_NONE,PhysicalSingleSeed=INDEX_NONE,PhysicalPairSeed=INDEX_NONE,PhysicalWaterfrontSeed=INDEX_NONE;
     int32 PhysicalAlphaStairSeed=INDEX_NONE,PhysicalOmegaStairSeed=INDEX_NONE;
     int32 SmallCoverSites=0,LargeCoverSites=0;
+    bool TimberAnnex=false;
     for(int32 TeamSize:{1,2,3,4,8,16})for(int32 Seed=0;Seed<516;++Seed)
     {
         C.ExpectedTeamSize=TeamSize;C.Seed=Seed;FERProceduralLayout L;
@@ -22,6 +24,11 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
         if(L.CentralBuildingSize.X>1500 || L.CentralBuildingSize.Y>2200 ||
             L.BuildingFloors!=(TeamSize==1 ? 2 : TeamSize>=4 ? 4 : 3))
         {AddError(TEXT("villa exceeds its footprint or storey budget"));return false;}
+        const bool RailingAnnex=L.FeatureNames.Contains(TEXT("RailingCrossingAnnex"));
+        if(!TestEqual(TEXT("every secondary roof has a ladder"),L.Ladders.Num(),
+            L.SecondaryStructures.Num()+(RailingAnnex ? 1:0)))return false;
+        TimberAnnex|=L.SecondaryStructures.ContainsByPredicate([](const auto& Structure)
+            {return Structure.Material==EERBlockMaterial::Wood;});
         if(!L.FeatureNames.Contains(FName(TEXT("VillaTerraces"))))
         {AddError(TEXT("upper storey is missing its terraces"));return false;}
         if(!L.FeatureNames.Contains(FName(TEXT("VillaSingleStair"))) ||
@@ -41,9 +48,10 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
                FMath::IsNearlyEqual(Panel.Size.Z,73,.01))
                 ++WoodTableLegs;
         }
-        if(StairGlassPanes!=InteriorFlights*32 || WoodTableLegs<L.BuildingFloors*8)
+        const int32 ExpectedGlass=InteriorFlights*32+(InteriorFlights==L.BuildingFloors ? 10:0);
+        if(StairGlassPanes!=ExpectedGlass || WoodTableLegs<L.BuildingFloors*8)
         {AddError(FString::Printf(TEXT("stair glass and wood table legs must use destructible cells: glass=%d/%d wood=%d/%d"),
-            StairGlassPanes,InteriorFlights*32,WoodTableLegs,L.BuildingFloors*8));return false;}
+            StairGlassPanes,ExpectedGlass,WoodTableLegs,L.BuildingFloors*8));return false;}
         const bool AlphaStair=L.StairRoutes[0][0].Y<0;
         if(TeamSize==2)
         {
@@ -65,7 +73,7 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
                 if(TeamSize==1)++SmallRoofPoolLayouts;
                 if(TeamSize==2 && PhysicalRoofSeed==INDEX_NONE)PhysicalRoofSeed=Seed;
                 const auto& RoofWater=L.PoolWater.Last();
-                const float RoofZ=L.CentralBuildingCenter.Z+L.BuildingFloors*320.f;
+                const float RoofZ=L.CentralBuildingCenter.Z+L.BuildingFloors*320.f+100.f;
                 const bool InteriorRoofAccess=L.StairRoutes.ContainsByPredicate([&](const TArray<FVector>& Stair)
                 {return !Stair.IsEmpty() && FMath::IsNearlyEqual(Stair.Last().Z,RoofZ+100.f,1.f) &&
                     FMath::Abs(Stair.Last().X-L.CentralBuildingCenter.X)<L.CentralBuildingSize.X*.5f;});
@@ -80,13 +88,13 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
             {
                 ++WaterfrontLayouts;
                 if(TeamSize==2 && PhysicalWaterfrontSeed==INDEX_NONE)PhysicalWaterfrontSeed=Seed;
-                if(GroundPoolCount!=9 || RoofPool || (TeamSize>1 && L.CoverSites.Num()<2) ||
+                if(GroundPoolCount!=1 || RoofPool ||
                    L.PoolWater[0].Min.X>=-L.ArenaSize.X*.475f ||
-                   L.PoolWater[0].Max.X>=L.CentralBuildingCenter.X-L.CentralBuildingSize.X*.5f)
+                   L.PoolWater[0].Max.X<=L.CentralBuildingCenter.X-L.CentralBuildingSize.X*.5f)
                 {AddError(FString::Printf(TEXT("waterfront must span the villa shore to the perimeter: team=%d seed=%d pools=%d roof_pool=%d cover_sites=%d min_x=%.2f perimeter=%.2f max_x=%.2f villa_edge=%.2f"),
                     TeamSize,Seed,GroundPoolCount,RoofPool,L.CoverSites.Num(),L.PoolWater[0].Min.X,-L.ArenaSize.X*.475f,L.PoolWater[0].Max.X,L.CentralBuildingCenter.X-L.CentralBuildingSize.X*.5f));return false;}
             }
-            const bool Single=GroundPoolCount==1 && L.PoolWater[0].Max.Z<600 &&
+            const bool Single=!Waterfront && GroundPoolCount==1 && L.PoolWater[0].Max.Z<600 &&
                 FMath::IsNearlyZero(L.PoolWater[0].GetCenter().Y,.001);
             const bool Pair= GroundPoolCount==2 && L.PoolWater[0].Max.Z<600 &&
                 L.PoolWater[0].GetCenter().Equals(L.PoolWater[1].GetCenter()*FVector(1,-1,1),.001) &&
@@ -130,6 +138,7 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
             if(FMath::Abs(P.Z-ERProcedural::CentralGroundHeight(L,FVector2D(P))-
                 (L.FeatureNames.Contains(FName(TEXT("VillaWaterfront"))) ? 120.f:100.f))>.001)return false;
     }
+    TestTrue(TEXT("seeded secondary buildings include timber"),TimberAnnex);
     TestTrue(TEXT("some layouts have courtyard pools"),PoolLayouts>0);
     TestTrue(TEXT("some layouts have one central pool"),SinglePoolLayouts>0);
     TestTrue(TEXT("some layouts retain mirrored courtyard pools"),PairedPoolLayouts>0);
@@ -175,6 +184,22 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
                 Hit,FloorPoint+FVector(0,0,100),FloorPoint-FVector(0,0,20),ECC_WorldStatic,Q));
             TestTrue(TEXT("villa floor is above terrain at the threshold"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,FloorPoint.Z,.1));
         }
+        int32 PhysicalLadders=0;
+        for(TActorIterator<AERLadder> It(World);It;++It)
+        {
+            if(It->GetOwner()!=Map)continue;
+            ++PhysicalLadders;
+            TestTrue(TEXT("ladder has usable rungs and top rails"),It->HasRung(0) && It->HasRung(It->DeckHeight));
+            const FVector Top=It->ClimbPosition(It->Height,92.5f);
+            FVector Landing=It->Landing(92.5f);
+            Landing.Z=Top.Z;
+            TestFalse(TEXT("ladder has clear roof dismount"),
+                World->SweepSingleByChannel(Hit,Top,Landing,FQuat::Identity,ECC_Pawn,Capsule,Q));
+            TestTrue(TEXT("ladder dismount has a supporting roof"),
+                World->LineTraceSingleByChannel(Hit,Landing,Landing-FVector(0,0,105),ECC_WorldStatic,Q) &&
+                FMath::IsNearlyEqual(Hit.ImpactPoint.Z,It->GetActorLocation().Z+It->DeckHeight,.1));
+        }
+        TestEqual(TEXT("all ladder descriptors spawn actors"),PhysicalLadders,L.Ladders.Num());
         const auto& Panels=Map->GetCellWorld().GetPanels();
         const auto* Pane=Panels.FindByPredicate([](const auto& Panel)
         {
@@ -232,6 +257,9 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
                 TestTrue(TEXT("recessed roof basin has a solid floor"),World->LineTraceSingleByChannel(
                     Hit,Surface+FVector(0,0,40),Surface-FVector(0,0,130),ECC_WorldStatic,Q));
                 TestTrue(TEXT("roof basin floor is 100cm below flush water"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-100,.1));
+                TestTrue(TEXT("top storey has a solid ceiling under the basin"),World->LineTraceSingleByChannel(
+                    Hit,Surface-FVector(0,0,180),Surface-FVector(0,0,90),ECC_WorldStatic,Q));
+                TestTrue(TEXT("pool roof leaves the full 300cm room height"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-120,.1));
                 TestEqual(TEXT("roof pool reaches full wading depth"),Map->WaterDepthAt(Surface-FVector(0,0,100)),100.f);
                 const FVector Corner=Surface+FVector(-Bounds.GetExtent().X+15,-Bounds.GetExtent().Y+30,0);
                 TestTrue(TEXT("square corner step supports entry"),World->LineTraceSingleByChannel(
@@ -248,7 +276,7 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
                 TestTrue(TEXT("waterfront has a solid deep floor"),World->LineTraceSingleByChannel(
                     Hit,Surface+FVector(0,0,50),Surface-FVector(0,0,120),ECC_WorldStatic,Q));
                 TestTrue(TEXT("waterfront floor is 90cm below water"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-90,.1));
-                const FVector Shallow(Bounds.Max.X-50,Surface.Y,Surface.Z);
+                const FVector Shallow(Bounds.Max.X-50,L.CentralBuildingSize.Y*.5+120,Surface.Z);
                 TestTrue(TEXT("waterfront has a shallow entry"),World->LineTraceSingleByChannel(
                     Hit,Shallow+FVector(0,0,50),Shallow-FVector(0,0,120),ECC_WorldStatic,Q));
                 TestTrue(TEXT("waterfront entry is 20cm below water"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-20,.1));

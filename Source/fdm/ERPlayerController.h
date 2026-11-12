@@ -5,6 +5,7 @@
 #include "ERLoadout.h"
 #include "ERGameplayMessages.h"
 #include "ERNetworkQuality.h"
+#include "ERControls.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/HUD.h"
@@ -65,6 +66,7 @@ public:
     float GetMouseLookMultiplier() const;
     void SetMouseSensitivity(float Value);
     void SaveMouseSensitivity();
+    FERControls Controls;
     float GetSoundVolume() const { return SoundVolume; }
     void SetSoundVolume(float Value);
     float GetMusicVolume() const { return MusicVolume; }
@@ -104,6 +106,7 @@ class FDM_API AERPlayerController : public APlayerController
     GENERATED_BODY()
 public:
     AERPlayerController();
+    FKey ControlKey(const FKey& DefaultKey) const;
     struct FDamageNotice { float Health=0, Armor=0; double Time=0; };
     TArray<FDamageNotice> DamageNotices;
     UFUNCTION(Client, Reliable) void ClientInflictedDamage(float HealthDamage, float ArmorDamage);
@@ -163,6 +166,7 @@ public:
     int32 ScreenshotIndex = 0, SavedScreenshotCount = 0;
     uint64 ScreenshotReadFrame = 0;
     virtual void SetupInputComponent() override;
+    virtual void PostProcessInput(float DeltaTime, bool bGamePaused) override;
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     UFUNCTION(Server, Reliable) void ServerRequestRespawn();
@@ -196,6 +200,10 @@ public:
     // HE structural profile (400/25/200/^2) 10cm before the aimed surface.
     UFUNCTION(Exec) void ERBlockGrenade();
 private:
+    UPROPERTY(Transient) TObjectPtr<UInputMappingContext> LocalGameplayMapping;
+    TMap<int32, FKey> RawControlKeys;
+    void ApplyControlBindings();
+    FText ControlBindingFeedback;
     friend class UERGameInstance;
     friend class AERLobbyProbe;
     friend class AERServerSettingsProbe;

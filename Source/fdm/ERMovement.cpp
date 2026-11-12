@@ -267,8 +267,8 @@ void UERMovement::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
     {
         // Pre-match countdown: posture may change in place, but no travel,
         // sprint, ladder entry or mantle starts until the match begins.
-        bSprintHeld=false;Velocity.X=Velocity.Y=0;Acceleration=FVector::ZeroVector;
-        UpdateSprint();
+        Velocity.X=Velocity.Y=0;Acceleration=FVector::ZeroVector;
+        UpdateSprint(true);
         UpdatePosture(DeltaSeconds);return;
     }
     if(Acceleration.IsNearlyZero())bLadderNeedsRelease=false;
@@ -339,37 +339,39 @@ bool UERMovement::IsChangingPosture() const
     return !FMath::IsNearlyEqual(Locomotion.HalfHeight, Target, .1f) ||
         !FMath::IsNearlyEqual(Locomotion.ProneBlend, bProneWanted ? 1.f : 0.f, .01f);
 }
-void UERMovement::UpdateSprint()
+void UERMovement::UpdateSprint(bool bMovementLocked)
 {
     const double Now = ServerTime();
+    // Ignore the held input while locked so it can start a fresh sprint at unlock.
+    const bool bSprintRequested = bSprintHeld && !bMovementLocked;
     const auto* C = Cast<AERCharacter>(CharacterOwner);
     const bool Allowed = C && !C->Health->bDead && IsMovingOnGround() && !IsTraversing() &&
         !bWalkHeld && !bWantsToCrouch && !bProneWanted && Locomotion.HalfHeight >= 92.f &&
         FVector::DotProduct(Acceleration.GetSafeNormal2D(), C->GetActorForwardVector()) > .5f;
 #if !UE_BUILD_SHIPPING
-    if (bSprintHeld && !bPreviousSprintHeld && FParse::Param(FCommandLine::Get(), TEXT("ERMovementProbe")))
+    if (C && bSprintRequested && !bPreviousSprintHeld && FParse::Param(FCommandLine::Get(), TEXT("ERMovementProbe")))
         UE_LOG(LogTemp,Display,TEXT("ER_SPRINT_REQUEST role=%d allowed=%d ground=%d walk=%d crouch=%d prone=%d half=%.1f acceleration=%s forward=%s recovery=%.1f"),
             int32(C->GetLocalRole()), Allowed, IsMovingOnGround(), bWalkHeld, bWantsToCrouch, bProneWanted, Locomotion.HalfHeight,
             *Acceleration.ToString(), *C->GetActorForwardVector().ToString(), GetRecoveryRemaining());
 #endif
     // Only a fresh gesture can start a sprint, including with partially restored stamina.
-    if (bSprintHeld && !bPreviousSprintHeld && GetStaminaFraction() > .001f) SprintRequestUntil = Now + .25;
-    if (!bSprintHeld) SprintRequestUntil = 0;
+    if (bSprintRequested && !bPreviousSprintHeld && GetStaminaFraction() > .001f) SprintRequestUntil = Now + .25;
+    if (!bSprintRequested) SprintRequestUntil = 0;
     // The gesture can arrive one saved move before its forward acceleration.
-    if (bSprintHeld && SprintRequestUntil > Now && Allowed && GetStaminaFraction() > .001f)
+    if (bSprintRequested && SprintRequestUntil > Now && Allowed && GetStaminaFraction() > .001f)
     {
         Locomotion.SprintUntil = Now + SprintDuration() * GetStaminaFraction();
         Locomotion.RecoverUntil = Locomotion.SprintUntil + RecoveryDuration();
         SprintRequestUntil = 0;
     }
-    if (IsSprinting() && (!bSprintHeld || !Allowed))
+    if (IsSprinting() && (!bSprintRequested || !Allowed))
     {
         // Include stamina already spent before this gesture; interruptions never refill it.
         const double Spent = SprintDuration() - GetSprintRemaining();
         Locomotion.SprintUntil = Now;
         Locomotion.RecoverUntil = Now + RecoveryDuration() / SprintDuration() * Spent;
     }
-    bPreviousSprintHeld = bSprintHeld;
+    bPreviousSprintHeld = bSprintRequested;
 }
 void UERMovement::UpdatePosture(float DeltaSeconds)
 {

@@ -260,6 +260,9 @@ def main():
     def finish(name):
         return by_name[name]
 
+    enable_two_sided = runpy.run_path(str(root/'scripts/setup_village_two_sided_wood.py'))['enable_two_sided']
+    enable_two_sided(finish('RoughPlanks'))
+    save(finish('RoughPlanks'))
     tune_metal = runpy.run_path(str(root/'scripts/setup_neutral_metal_finishes.py'))['tune']
     tune_metal(finish('AluPanels150x150'), finish('GalvanisedSteel01'), save)
     tune_cargo = runpy.run_path(str(root/'scripts/setup_fire_training_cargo.py'))['tune_cargo']

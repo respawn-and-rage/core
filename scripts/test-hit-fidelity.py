@@ -17,7 +17,9 @@ parser.add_argument('--jitter',type=int,default=0,help='Packet lag variance in m
 parser.add_argument('--loss',type=int,default=0,help='Outgoing packet loss percent on both peers')
 parser.add_argument('--client-fps',type=int,default=60,help='Remote client frame cap for slow-client checks')
 parser.add_argument('--fire-input',action='store_true',help='Verify predicted feedback, automatic release and same-frame taps over saved moves')
+parser.add_argument('--tracer-strafe',action='store_true',help='Render and audit the remote shooter firing a burst while strafing')
 args=parser.parse_args()
+if args.tracer_strafe:args.fire_input=True
 if args.jitter<0 or not 0<=args.loss<=100 or args.client_fps<1:parser.error('jitter >= 0, loss 0..100 and client-fps >= 1 are required')
 if args.fire_input and args.lag is None:args.lag=[0]
 project=Path(__file__).resolve().parents[1]
@@ -61,6 +63,7 @@ def geometry():
 def lag(ms):
     suffix=f'-j{args.jitter}-l{args.loss}-fps{args.client_fps}' if args.jitter or args.loss or args.client_fps!=60 else ''
     if args.fire_input:suffix+='-fire'
+    if args.tracer_strafe:suffix+='-tracer'
     hostlog=logs/f'hit-lag-{ms}{suffix}-host.log';clientlog=logs/f'hit-lag-{ms}{suffix}-client.log'
     emulation=[f'-PktLag={ms}',f'-PktLagVariance={args.jitter}',f'-PktLoss={args.loss}']
     if args.fire_input:emulation+=['-ERFireInputProbe']
@@ -74,6 +77,10 @@ def lag(ms):
             time.sleep(.2)
         handles.append(clientlog.open('w'))
         clientbase=[arg for arg in base if not arg.startswith('-ExecCmds=')]+[f'-ExecCmds=t.MaxFPS {args.client_fps}']
+        if args.tracer_strafe:
+            clientbase.remove('-nullrhi')
+            clientbase+=['-windowed','-ResX=1280','-ResY=720','-ERTracerStrafe','-ERTracerAudit']
+            (logs/'Tracer-Strafe.png').unlink(missing_ok=True)
         client=subprocess.Popen(clientbase+['127.0.0.1:17971?Name=Shooter','-ERHitLagProbe']+emulation,stdout=handles[-1],stderr=subprocess.STDOUT)
         processes.append(client)
         host.wait(timeout=120)
@@ -91,6 +98,17 @@ def lag(ms):
             if 'ER_FIRE_INPUT_' in line:print(line)
         if host.returncode!=0 or 'ER_FIRE_INPUT_COMPLETE result=PASS' not in report or 'ER_FIRE_INPUT_FAIL' in report:
             raise RuntimeError(f'Fire input transport failed; inspect {hostlog} and {clientlog}')
+        if args.tracer_strafe:
+            predicted=[fields(line) for line in report.splitlines() if 'ER_TRACER_PREDICT ' in line]
+            confirmations=[fields(line) for line in report.splitlines() if 'ER_TRACER_CONFIRM ' in line]
+            confirmed={row['key']:row for row in confirmations}
+            moving=[row for row in predicted if row['flash']=='1' and float(row['speed'])>=100]
+            paired=[row for row in moving if row['key'] in confirmed and
+                    int(confirmed[row['key']]['frame'])>int(row['frame']) and
+                    float(confirmed[row['key']]['muzzle_shift'])>5]
+            print(f'ER_TRACER_STRAFE moving_predictions={len(moving)} confirmed_after_movement={len(paired)}')
+            if len(paired)<2 or not (logs/'Tracer-Strafe.png').is_file():
+                raise RuntimeError(f'Tracer strafe audit failed; inspect {clientlog}')
         return
     def read(path,tag):
         rows={}

@@ -92,10 +92,10 @@ CS2 seeds or spray paths: never claim CS2 parity.
 - Knife: server anatomical trace with cover, 160cm reach, 0.5s cooldown. Base 40; head/neck
   80, torso 40, limbs 25; +20 on head/neck/torso from the rear 120° ground sector.
   Unknown bones keep 40 with no rear bonus.
-- Tracers: every authorized bullet shot, from the rendered muzzle to server endpoints.
-  Each segment stays fixed in world space. In motion, the gap along the shot grows
-  with speed up to normal running speed, uses the viewmodel scale in first person,
-  and is shortened for close impacts.
+- Tracers: every authorized bullet shot uses server endpoints. The first-person streak
+  travels along a fixed world-space path, starting from the muzzle sampled at prediction
+  when available. Third-person segments stay fixed with a speed-dependent gap, shortened
+  for close impacts.
   The shot multicast carries up to 16 pellet endpoints. Audio, recoil and the brief muzzle
   flash stay one event per cartridge. Rockets and thrown utility stay physical.
 - Decals: 128 marks, 20s, on surfaces only. Player wounds are replicated bone-local state
@@ -156,12 +156,18 @@ Move combining preserves input edges, important moves are retransmitted, and acc
 ignore duplicates and stale sequences. Bots and development callers retain authority RPC entry points.
 
 The owning client immediately predicts bullet sound, muzzle flash and firing animation, bounded by
-known ammo and cooldown. It does not predict ammo changes, tracers, smoke cuts, hits, damage or
+known ammo and cooldown. With a visible flash and a tracer on every shot, it also draws a short
+cosmetic streak along the rendered barrel. The confirmed streak reuses that muzzle position and
+continues toward the server endpoint. Prediction does not change ammo, smoke cuts, hits, damage or
 worksheet recoil. A press/shot identity deduplicates the accepted multicast and an owner-only
 replicated acknowledgement; this acknowledgement can recover the last presentation when a multicast
 is lost. Automatic acknowledgements may coalesce. Rejection, release, reload, weapon switching,
 death or pending map readiness stops ongoing prediction. A rejected prediction can already have
 played a cosmetic event; authority remains the source of actual shots.
+
+Bullet flashes combine an elongated core and two uneven jets. Length, jet rotation, duration
+and warm light color vary per shot using a cosmetic random stream. One short-range point light
+per shooter lights the weapon and nearby surfaces and fades with the flash.
 
 The rig lives in `Characters/FirstPerson`; skin forearms come from `Teams/{Alpha,Omega}/
 FirstPerson`. Component transform `(-11.2263,1.4908,-159.9167)`, yaw -90, scale 1. Grip data lives
@@ -171,11 +177,18 @@ Hand clips must hand over to the idle pose without a jump. The support arm bends
 elbow in every fire and reload frame (`retarget_weapon_hands.py`), and `setup_fps_support_elbow.py`
 re-solves saved `A_<Key>_Hands_Fire/Reload` clips that way, fading out any start or end residual
 of either hand. It saves only those clips, after a backup in `Saved/FPSSupportElbowBackup`.
+The pistol reload has a dedicated left elbow pass, `setup_pistol_reload_arm.py`.
+It tucks the elbow back toward the body while the left hand handles the magazine,
+preserving the wrist motion and blending back to idle. Run it after the support elbow pass
+when rebuilding the pistol hand clips.
 
 The knife uses a user-set manual pose (`ERKnifeManualGripApproved` metadata,
 `apply_manual_knife_grip.py`), FPS scale .65, and takes precedence over all automatic fitting.
 
 ## Rebuild
+
+`setup_muzzle_flash.py` updates the owned additive flash material used by the character
+Blueprint, with a backup in `Saved/Testing/MuzzleFlashBackup`.
 
 The SMG bake excludes the loose `Pmag_2` reload prop and helper cube, retaining
 the inserted `Pmag`. After baking only SMG, `setup_smg_mesh.py` updates its V4
@@ -198,5 +211,9 @@ Native: `EclipseRecoil.Weapons.ReferenceBallistics`, `EclipseRecoil.Weapons.Shot
 Transport: `EclipseRecoil.Network.FireInput`, `EclipseRecoil.Weapons.ShotContext`,
 `test-hit-fidelity.py --fire-input --lag 0 50 100`, and
 `test-hit-fidelity.py --fire-input --lag 50 --jitter 20 --loss 5 --client-fps 20`.
+Use `test-hit-fidelity.py --tracer-strafe --lag 50` for a rendered remote burst during lateral
+movement and matching muzzle and confirmation events.
+Use `-ERMuzzleGallery` on standalone `L_Rooms?ERFullArsenalTest?ERAlphaBots=0?EROmegaBots=0`
+with rendering enabled for before, two shot frames and after captures in `Saved/Testing`.
 Use `test-world-poses.py --prone --wall` for elbow and full weapon bounds against
 a collision floor and thin cover on both peers; `EclipseRecoil.Movement.BodyClearance` covers thin walls.

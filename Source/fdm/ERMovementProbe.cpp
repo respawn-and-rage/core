@@ -12,7 +12,7 @@
 #include "EngineUtils.h"
 #include "InputKeyEventArgs.h"
 #include "UnrealClient.h"
-#include "GameFramework/PlayerController.h"
+#include "ERPlayerController.h"
 AERMovementProbe::AERMovementProbe()
 {
     bReplicates=true;bAlwaysRelevant=true;PrimaryActorTick.bCanEverTick=true;
@@ -46,6 +46,7 @@ void AERMovementProbe::Tick(float DeltaTime)
     if (!HasAuthority())
     {
         auto* C = Cast<AERCharacter>(UGameplayStatics::GetPlayerPawn(GetWorld(),0));
+        auto* PC = C ? Cast<AERPlayerController>(C->Controller) : nullptr;
         if (C && Phase >= 25 && Phase <= 29)
         {
             auto* M = Cast<UERMovement>(C->GetCharacterMovement());
@@ -57,7 +58,7 @@ void AERMovementProbe::Tick(float DeltaTime)
             const float TargetX = Phase == 27 ? 650.f : (Phase == 28 ? 1300.f : 1950.f);
             if (Phase < 27 || (Elapsed > (Phase==29 ? .6f:.25f) && C->GetActorLocation().X < TargetX-30)) C->AddMovementInput(FVector(1,0,0));
         }
-        if (C && Phase >= 33 && Phase <= 39)
+        if (PC && Phase >= 33 && Phase <= 39)
         {
             auto* M = Cast<UERMovement>(C->GetCharacterMovement());
             if (LocalPhase != Phase)
@@ -85,11 +86,12 @@ void AERMovementProbe::Tick(float DeltaTime)
             {
                 if(Previous>=At || Elapsed<At)return;
                 FInputKeyEventArgs Args;Args.Key=Key;Args.Event=Event;Args.AmountDepressed=Event==IE_Released?0.f:1.f;
-                Args.EventTimestamp=FPlatformTime::Cycles64();Cast<APlayerController>(C->Controller)->InputKey(Args);
+                Args.EventTimestamp=FPlatformTime::Cycles64();PC->InputKey(Args);
             };
+            const FKey Forward = PC->ControlKey(EKeys::W);
             if(Phase==33 || Phase==36)
-            {Send(.05f,EKeys::W,IE_Pressed);Send(.12f,EKeys::W,IE_Released);Send(.22f,EKeys::W,IE_Pressed);}
-            if(Phase==35 || Phase==37)Send(.05f,EKeys::W,IE_Released);
+            {Send(.05f,Forward,IE_Pressed);Send(.12f,Forward,IE_Released);Send(.22f,Forward,IE_Pressed);}
+            if(Phase==35 || Phase==37)Send(.05f,Forward,IE_Released);
             if(Phase==33 && Elapsed>1.2f && Peak==0 && M->Velocity.Size2D()>490 && C->Weapon)
             {
                 const FVector SprintVelocity=M->Velocity;
@@ -120,11 +122,18 @@ void AERMovementProbe::Tick(float DeltaTime)
             }
 
         }
-        if (C && Phase >= 40 && Phase <= 43)
+        if (PC && Phase >= 40 && Phase <= 43)
         {
-            auto* PC = Cast<APlayerController>(C->Controller);
-            if (!PC) return;
-            if (LocalPhase != Phase) { LocalPhase=Phase; Elapsed=0; Peak=0; PC->SetControlRotation(FRotator::ZeroRotator); }
+            if (LocalPhase != Phase)
+            {
+                LocalPhase=Phase; Elapsed=0; Peak=0; PC->SetControlRotation(FRotator::ZeroRotator);
+                if (Phase == 40 && FParse::Param(FCommandLine::Get(), TEXT("ERRemappedControls")))
+                {
+                    const bool bLoaded = PC->ControlKey(EKeys::W) == EKeys::J && PC->ControlKey(EKeys::C) == EKeys::K
+                        && PC->ControlKey(EKeys::LeftControl) == EKeys::I && PC->ControlKey(EKeys::E) == EKeys::Y;
+                    UE_LOG(LogTemp, Display, TEXT("ER_MOVEMENT_CLIENT_%s remapped_controls_loaded"), bLoaded ? TEXT("PASS") : TEXT("FAIL"));
+                }
+            }
             const float Previous = Elapsed; Elapsed += DeltaTime;
             auto Send = [PC,Previous,this](float At, FKey Key, EInputEvent Event)
             {
@@ -136,19 +145,18 @@ void AERMovementProbe::Tick(float DeltaTime)
                     PC->InputKey(Args);
                 }
             };
-            const FKey Key = Phase==40 ? EKeys::W : (Phase==43 ? EKeys::LeftControl : EKeys::C);
+            const FKey Key = PC->ControlKey(Phase==40 ? EKeys::W : (Phase==43 ? EKeys::LeftControl : EKeys::C));
             Send(.05f,Key,IE_Pressed); Send(.12f,Key,IE_Released);
             if (Phase != 42) { Send(.22f,Key,IE_Pressed); Send(Phase==40 ? 1.f : .3f,Key,IE_Released); }
         }
-        if (C && Phase >= 48 && Phase <= 53)
+        if (PC && Phase >= 48 && Phase <= 54)
         {
-            auto* PC=Cast<APlayerController>(C->Controller);
             if (LocalPhase!=Phase) { LocalPhase=Phase; Elapsed=0; Peak=0; PC->SetControlRotation(FRotator::ZeroRotator); }
             const float Previous=Elapsed; Elapsed+=DeltaTime;
             auto Send=[&](float At,FKey Key,EInputEvent Event)
             {
                 if (Previous>=At || Elapsed<At) return;
-                FInputKeyEventArgs Args; Args.Key=Key; Args.Event=Event;
+                FInputKeyEventArgs Args; Args.Key=PC->ControlKey(Key); Args.Event=Event;
                 Args.AmountDepressed=Event==IE_Released?0.f:1.f;
                 Args.EventTimestamp=FPlatformTime::Cycles64(); PC->InputKey(Args);
             };
@@ -174,6 +182,13 @@ void AERMovementProbe::Tick(float DeltaTime)
                 Send(.8f,EKeys::E,IE_Released);
             }
             if (Phase==53) { Send(.05f,EKeys::W,IE_Released); Send(.05f,EKeys::E,IE_Released); }
+            if (Phase==54)
+            {
+                Send(.05f,EKeys::W,IE_Pressed);
+                Send(.4f,EKeys::E,IE_Pressed);
+                Send(.7f,EKeys::E,IE_Released);
+                Send(1.f,EKeys::E,IE_Pressed);
+            }
             if ((Phase==48 || Phase==50 || Phase==52) && Peak==0 && Elapsed>(Phase==48?2.7f:1.2f))
             {
                 UE_LOG(LogTemp,Display,TEXT("ER_MOVEMENT_CLIENT_%s sprint_E_phase_%d"),
@@ -495,18 +510,23 @@ void AERMovementProbe::Tick(float DeltaTime)
         }
         return;
     }
-    if (Phase>=48 && Phase<=53)
+    if (Phase>=48 && Phase<=54)
     {
         auto* Remote=Cast<UERMovement>(Client->GetCharacterMovement());
         if (LocalPhase!=Phase)
         {
             LocalPhase=Phase;
-            if (Phase==48 || Phase==50 || Phase==51 || Phase==52)
+            if (Phase==48 || Phase==50 || Phase==51 || Phase==52 || Phase==54)
                 Client->TeleportTo(FVector(-900,1900,Remote->Locomotion.HalfHeight+2.1f),FRotator::ZeroRotator);
         }
         if (Phase==51 && Peak==0 && Elapsed>.5f)
         {
             Check(!Remote->IsSprinting(),TEXT("held E without forward movement does not sprint")); Peak=1;
+        }
+        if (Phase==54 && Peak==0 && Elapsed>.9f)
+        {
+            Check(!Remote->IsSprinting(), TEXT("releasing Sprint ends the sprint before the next press"));
+            Peak=1;
         }
         if (Elapsed>(Phase==48?3.f:(Phase==49 || Phase==53?.6f:1.5f)))
         {
@@ -517,6 +537,7 @@ void AERMovementProbe::Tick(float DeltaTime)
                 Phase==50?TEXT("InputKey E held before W starts sprint after gesture window"):
                 Phase==51?TEXT("InputKey forward resumes sprint while E remains held"):
                 Phase==52?TEXT("InputKey releasing E preserves simultaneous double-W sprint"):
+                Phase==54?TEXT("pressing Sprint again restarts sprint without releasing Forward"):
                 TEXT("InputKey releasing both sprint controls clears intent"));
             Advance();
         }

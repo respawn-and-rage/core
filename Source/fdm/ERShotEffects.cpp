@@ -23,6 +23,9 @@
 
 namespace
 {
+constexpr double MuzzleStreakLength = 55.;
+constexpr double TracerInitialTravel = 155.;
+
 void RemoveAfter(UWorld* World, UNiagaraComponent* Component, float Seconds)
 {
     FTimerHandle Handle;
@@ -297,24 +300,33 @@ AERAttachedTracer::AERAttachedTracer()
     Beam->SetTickBehavior(ENiagaraTickBehavior::UsePrereqs);
 }
 AERAttachedTracer* AERAttachedTracer::Spawn(AERCharacter* Character, UNiagaraSystem* System,
-    const FVector& End, bool bInFirstPerson, float Duration)
+    const FVector& End, bool bInFirstPerson, float Duration, const FVector* PredictedMuzzle)
 {
     if (!Character || !System || !FApp::CanEverRender() || Character->GetNetMode() == NM_DedicatedServer || !Character->Weapon) return nullptr;
-    const FVector Tip = Character->GetRenderedMuzzle(bInFirstPerson);
+    const FVector Tip = PredictedMuzzle ? *PredictedMuzzle : Character->GetRenderedMuzzle(bInFirstPerson);
     const FVector ToEnd = End - Tip;
     const double Distance = ToEnd.Size();
     if (Distance < 1.) return nullptr;
-    // Sample movement once. The gap opens along the shot, even during a strafe.
     const double Speed = Character->GetVelocity().Size();
     const double RunSpeed = FMath::Max(1., double(Character->GetCharacterMovement()->MaxWalkSpeed));
-    // The rendered first-person muzzle is already compressed toward the camera.
-    const double ViewScale = bInFirstPerson && Character->Camera->bEnableFirstPersonScale ?
-        Character->Camera->FirstPersonScale : 1.;
-    const double Gap = Speed < 1. ? .75 : ViewScale * FMath::Lerp(50., 100., FMath::Clamp(Speed / RunSpeed, 0., 1.));
+    const double Gap = bInFirstPerson ? (PredictedMuzzle ? MuzzleStreakLength : 0.) :
+        (Speed < 1. ? .75 : FMath::Lerp(50., 100., FMath::Clamp(Speed / RunSpeed, 0., 1.)));
     // Keep a visible segment ending at the impact, even at point-blank range.
     const double MaxGap = Distance - FMath::Min(5., Distance * .25);
     const FVector Start = Tip + (ToEnd / Distance) * FMath::Min(Gap, MaxGap);
+    return SpawnSegment(Character, System, Start, End, bInFirstPerson, Duration, bInFirstPerson);
+}
 
+void AERAttachedTracer::SpawnMuzzleStreak(AERCharacter* Character, UNiagaraSystem* System, uint32 ShotKey)
+{
+    if (!System || !FApp::CanEverRender()) return;
+    SpawnSegment(Character, System, FVector::ZeroVector, FVector::ZeroVector, true, .028f, false, ShotKey);
+}
+
+AERAttachedTracer* AERAttachedTracer::SpawnSegment(AERCharacter* Character, UNiagaraSystem* System,
+    const FVector& Start, const FVector& End, bool bInFirstPerson, float Duration, bool bInTravel,
+    TOptional<uint32> PredictedShot)
+{
     auto* Tracer = Character->GetWorld()->SpawnActorDeferred<AERAttachedTracer>(StaticClass(), FTransform::Identity,
         Character, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
     if (!Tracer) return nullptr;
@@ -323,6 +335,8 @@ AERAttachedTracer* AERAttachedTracer::Spawn(AERCharacter* Character, UNiagaraSys
     Tracer->LastStart = Start;
     Tracer->LastEnd = End;
     Tracer->bFirstPerson = bInFirstPerson;
+    Tracer->bTravel = bInTravel;
+    Tracer->PredictedShotKey = PredictedShot;
     Tracer->DurationSeconds = Duration;
     Tracer->Beam->SetAsset(System);
     UGameplayStatics::FinishSpawningActor(Tracer, FTransform::Identity);
@@ -332,14 +346,34 @@ void AERAttachedTracer::BeginPlay()
 {
     Super::BeginPlay();
     Beam->AddTickPrerequisiteActor(this);
+    Beam->PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
+    if (PredictedShotKey.IsSet()) return;
+    // Start with a visible segment on the very first frame.
     const FVector Segment = LastEnd - LastStart;
-    Beam->SetWorldLocation((LastStart + LastEnd) * .5);
+    SetVisibleSegment(LastStart, bTravel ? LastStart + Segment.GetClampedToMaxSize(TracerInitialTravel) : LastEnd);
+    Beam->Activate(true);
+}
+void AERAttachedTracer::BeginMuzzleStreak(AERCharacter& Character)
+{
+    // Camera and movement have finished updating for this shot's render frame.
+    const FVector BarrelAxis = Character.Weapon->Data->Mesh ? FVector::ForwardVector : FVector::RightVector;
+    FVector Ahead = Character.GetVisualMuzzle(true) + Character.FirstPersonRifle->GetComponentQuat().RotateVector(BarrelAxis);
+    if (const auto* PC = Cast<APlayerController>(Character.GetController()); PC && PC->PlayerCameraManager)
+        Ahead = PC->PlayerCameraManager->GetCameraCacheView().TransformWorldToFirstPerson(Ahead, false);
+    LastStart = Character.GetRenderedMuzzle(true);
+    LastEnd = LastStart + (Ahead - LastStart).GetSafeNormal() * MuzzleStreakLength;
+    SetVisibleSegment(LastStart, LastEnd);
+    Beam->Activate(true);
+    Character.RecordPredictedTracer(PredictedShotKey.GetValue(), LastStart);
+}
+void AERAttachedTracer::SetVisibleSegment(const FVector& Start, const FVector& End)
+{
+    const FVector Segment = End - Start;
+    Beam->SetWorldLocation((Start + End) * .5);
     const FVector Extent = Segment.GetAbs() * .5 + FVector(4);
     Beam->SetSystemFixedBounds(FBox(-Extent, Extent));
     Beam->SetVariableVec3(TEXT("User.Alignment"), Segment.GetSafeNormal());
-    Beam->SetVariableVec2(TEXT("User.Size"), FVector2D(.12, Segment.Size()));
-    Beam->Activate(true);
-    Beam->PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
+    Beam->SetVariableVec2(TEXT("User.Size"), FVector2D(bFirstPerson ? .55 : .12, Segment.Size()));
 }
 void AERAttachedTracer::Tick(float DeltaSeconds)
 {
@@ -347,8 +381,26 @@ void AERAttachedTracer::Tick(float DeltaSeconds)
     if (!Source.IsValid() || Source->Health->bDead || !Source->Weapon || Source->Weapon->Data != ShotData.Get())
     { Destroy(); return; }
     const double Now = GetWorld()->GetTimeSeconds();
-    if (VisibleSince < 0) VisibleSince = Now;
-    else if (Now - VisibleSince >= DurationSeconds) { Destroy(); return; }
+    if (VisibleSince < 0)
+    {
+        VisibleSince = Now;
+        if (PredictedShotKey.IsSet()) BeginMuzzleStreak(*Source.Get());
+    }
+    const double Age = Now - VisibleSince;
+    if (bTravel)
+    {
+        constexpr double Speed = 26000.; // cm/s, visual travel only
+        constexpr double StreakLength = 500.;
+        const FVector Segment = LastEnd - LastStart;
+        const double Distance = Segment.Size();
+        const double Travel = TracerInitialTravel + Age * Speed;
+        if (Age >= FMath::Max(double(DurationSeconds), Distance / Speed) && Travel - StreakLength >= Distance)
+        { Destroy(); return; }
+        const FVector Direction = Segment / Distance;
+        SetVisibleSegment(LastStart + Direction * FMath::Clamp(Travel - StreakLength, 0., FMath::Max(0., Distance - 25.)),
+            LastStart + Direction * FMath::Min(Travel, Distance));
+    }
+    else if (Age >= DurationSeconds) { Destroy(); return; }
     ++UpdatedFrames;
 #if !UE_BUILD_SHIPPING
     if (FParse::Param(FCommandLine::Get(), TEXT("ERTracerAudit")))

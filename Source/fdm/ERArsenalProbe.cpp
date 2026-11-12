@@ -12,6 +12,7 @@
 #include "Camera/CameraComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/PointLightComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "EngineUtils.h"
@@ -32,10 +33,82 @@ void AERArsenalProbe::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 void AERArsenalProbe::Check(bool Value, const TCHAR* Label)
 { Failed |= !Value; UE_LOG(LogTemp, Display, TEXT("ER_ARSENAL_%s %s"), Value ? TEXT("PASS") : TEXT("FAIL"), Label); }
 void AERArsenalProbe::Advance(int32 Next, float Delay) { Phase=Next; Deadline=GetWorld()->GetTimeSeconds()+Delay; ForceNetUpdate(); }
+void AERArsenalProbe::TickMuzzleGallery()
+{
+#if !UE_BUILD_SHIPPING
+    auto* PC = GetWorld()->GetFirstPlayerController();
+    auto* Character = PC ? Cast<AERCharacter>(PC->GetPawn()) : nullptr;
+    if (!Character || !Character->Weapon || !Character->bNetworkReady ||
+        GetWorld()->GetTimeSeconds() < FMath::Max(8., Deadline)) return;
+    if (GShaderCompilingManager && GShaderCompilingManager->IsCompiling()) return;
+    const auto Capture = [](const TCHAR* Name)
+    {
+        FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir()/TEXT("Testing")/Name, false, false);
+    };
+    if (Phase == 0)
+    {
+        // Face a real room surface, close enough to receive the flash.
+        const FVector Eye = Character->Camera->GetComponentLocation();
+        const FCollisionQueryParams Query(SCENE_QUERY_STAT(ERMuzzleGallery), false, Character);
+        double Nearest = 800.;
+        FRotator View = FRotator::ZeroRotator;
+        for (int32 Yaw = 0; Yaw < 360; Yaw += 15)
+        {
+            const FRotator Candidate(0, Yaw, 0);
+            FHitResult Hit;
+            if (GetWorld()->LineTraceSingleByChannel(Hit, Eye, Eye + Candidate.Vector() * 800., ECC_Visibility, Query) &&
+                Hit.Distance > 100.f && Hit.Distance < Nearest)
+            {
+                Nearest = Hit.Distance;
+                View = Candidate;
+            }
+        }
+        Check(Nearest < 800., TEXT("muzzle_gallery_found_room_surface"));
+        if (Nearest < 800. && Nearest > 145.)
+            Character->AddActorWorldOffset(View.Vector() * (Nearest - 145.), true);
+        PC->SetControlRotation(View);
+        PC->SetIgnoreLookInput(true);
+        PC->SetIgnoreMoveInput(true);
+        Advance(1, 1.f);
+    }
+    else if (Phase == 1)
+    {
+        Capture(TEXT("Rooms-Muzzle-Before.png"));
+        Advance(2, 1.f);
+    }
+    else if (Phase == 2 || Phase == 3)
+    {
+        const int32 Ammo = Character->Weapon->MagazineAmmo;
+        Character->SetFireInputHeld(true);
+        Character->SetFireInputHeld(false);
+        Check(Character->Weapon->MagazineAmmo == Ammo - 1 && Character->FirstPersonMuzzleFlash->IsVisible() &&
+            Character->MuzzleLight->IsVisible() && Character->MuzzleLight->Intensity > 0,
+            TEXT("muzzle_gallery_real_shot_starts_flash_and_light"));
+        const FVector Scale = Character->FirstPersonMuzzleFlash->GetComponentScale();
+        if (Phase == 2) FirstFlashScale = Scale;
+        else Check(!Scale.Equals(FirstFlashScale, .0001), TEXT("muzzle_gallery_varies_between_shots"));
+        Capture(Phase == 2 ? TEXT("Rooms-Muzzle-Shot-A.png") : TEXT("Rooms-Muzzle-Shot-B.png"));
+        Advance(Phase + 1, 1.f);
+    }
+    else if (Phase == 4)
+    {
+        Check(!Character->FirstPersonMuzzleFlash->IsVisible() && !Character->MuzzleLight->IsVisible(),
+            TEXT("muzzle_gallery_flash_and_light_expire"));
+        Capture(TEXT("Rooms-Muzzle-After.png"));
+        Advance(5, .5f);
+    }
+    else FPlatformMisc::RequestExitWithStatus(false, Failed ? 1 : 0);
+#endif
+}
 void AERArsenalProbe::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 #if !UE_BUILD_SHIPPING
+    if (FParse::Param(FCommandLine::Get(), TEXT("ERMuzzleGallery")))
+    {
+        TickMuzzleGallery();
+        return;
+    }
     if (FParse::Param(FCommandLine::Get(), TEXT("ERHitscanGallery")))
     {
         auto* PC = Cast<AERPlayerController>(GetWorld()->GetFirstPlayerController());

@@ -6,6 +6,7 @@
 #include "ERLoadout.h"
 #include "ERFootsteps.h"
 #include "ERPostureMesh.h"
+#include "EROutdoorBackdrop.h"
 #include "ERCorpse.h"
 #include "Engine/DamageEvents.h"
 #include "ERMatch.h"
@@ -16,6 +17,7 @@
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -30,6 +32,7 @@
 #include "EngineUtils.h"
 #include "Animation/AnimSingleNodeInstance.h"
 #include "Kismet/GameplayStatics.h"
+#include "Misc/App.h"
 #include "Sound/SoundBase.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/SkeletalMeshSocket.h"
@@ -372,6 +375,32 @@ AERCharacter::AERCharacter(const FObjectInitializer& ObjectInitializer)
         Flash->SetCastShadow(false);
         Flash->SetVisibility(false);
     }
+    for (const TCHAR* Name : {TEXT("FirstPersonFlashJetA"), TEXT("FirstPersonFlashJetB"),
+        TEXT("WorldFlashJetA"), TEXT("WorldFlashJetB")})
+    {
+        const bool bFirstPerson = MuzzleFlashJets.Num() < 2;
+        auto* Jet = CreateDefaultSubobject<UStaticMeshComponent>(FName(Name));
+        Jet->SetupAttachment(bFirstPerson ? FirstPersonMuzzleFlash.Get() : WorldMuzzleFlash.Get());
+        Jet->SetAbsolute(false, false, true);
+        Jet->SetOnlyOwnerSee(bFirstPerson);
+        Jet->SetOwnerNoSee(!bFirstPerson);
+        Jet->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        Jet->SetCastShadow(false);
+        Jet->SetReceivesDecals(false);
+        Jet->SetVisibility(false);
+        MuzzleFlashJets.Add(Jet);
+    }
+    MuzzleLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("MuzzleLight"));
+    MuzzleLight->SetupAttachment(GetCapsuleComponent());
+    MuzzleLight->SetMobility(EComponentMobility::Movable);
+    MuzzleLight->SetCastShadows(false);
+    MuzzleLight->SetIndirectLightingIntensity(0.f);
+    MuzzleLight->SetVolumetricScatteringIntensity(0.f);
+    MuzzleLight->SetUseInverseSquaredFalloff(false);
+    MuzzleLight->SetLightFalloffExponent(5.f);
+    MuzzleLight->SetAttenuationRadius(230.f);
+    MuzzleLight->SetIntensity(0.f);
+    MuzzleLight->SetVisibility(false);
     TeamMarker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("TeamMarker"));
     TeamMarker->SetupAttachment(GetCapsuleComponent());
     TeamMarker->SetRelativeLocation(FVector(0,0,110));
@@ -415,6 +444,9 @@ void AERCharacter::BeginPlay()
         static_cast<UPrimitiveComponent*>(FirstPersonRifle.Get()),
         static_cast<UPrimitiveComponent*>(FirstPersonMuzzleFlash.Get())})
         Component->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
+    if (FApp::CanEverRender() && GetNetMode() != NM_DedicatedServer && EROutdoorBackdrop::IsOutdoorMap(*GetWorld()))
+        for (auto* Component : {FirstPersonBody.Get(), FirstPersonRifle.Get(), FirstPersonSight.Get()})
+            Component->SetLightingChannels(true, true, false);
     // Existing Blueprint instances may still serialize the old camera attachment.
     // Align the rifle's GripPoint origin to the mannequin's matching grip socket.
     FirstPersonRifle->AttachToComponent(FirstPersonBody, FAttachmentTransformRules::SnapToTargetNotIncludingScale, TEXT("HandGrip_R"));
@@ -429,6 +461,13 @@ void AERCharacter::BeginPlay()
         Flash->SetStaticMesh(MuzzleFlashMesh);
         Flash->SetMaterial(0, MuzzleFlashMaterial);
         Flash->SetVisibility(false);
+    }
+    for (const auto& Jet : MuzzleFlashJets)
+    {
+        Jet->SetStaticMesh(MuzzleFlashMesh);
+        Jet->SetMaterial(0, MuzzleFlashMaterial);
+        if (Jet->GetAttachParent() == FirstPersonMuzzleFlash)
+            Jet->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
     }
     if (HasAuthority())
     {
@@ -590,9 +629,20 @@ void AERCharacter::Tick(float DeltaTime)
     WorldRifle->SetVisibility(Weapon && !bStowed && !Health->bDead && (bReadyToThrow || !(Weapon && Weapon->IsGrenadeHandHidden())));
     FirstPersonSight->SetVisibility(!bOptic && !Health->bDead && !(Movement->bHighClimb || bHideStowed) && AppliedWeaponData && AppliedWeaponData->SightMesh);
     WorldSight->SetVisibility(!Health->bDead && !bStowed && AppliedWeaponData && AppliedWeaponData->SightMesh);
-    const bool bFlash = GetWorld()->GetTimeSeconds() < MuzzleFlashUntil && !Health->bDead && !(Movement->bHighClimb || bStowed);
-    FirstPersonMuzzleFlash->SetVisibility(bFlash && !bOptic);
-    WorldMuzzleFlash->SetVisibility(bFlash);
+    const double FlashRemaining = MuzzleFlashUntil - GetWorld()->GetTimeSeconds();
+    const bool bFlash = FlashRemaining > 0 && !Health->bDead && bNetworkReady && !(Movement->bHighClimb || bStowed);
+    const bool bViewFlash = bFlash && !bOptic;
+    if (FirstPersonMuzzleFlash->GetVisibleFlag() != bViewFlash)
+        FirstPersonMuzzleFlash->SetVisibility(bViewFlash, true);
+    if (WorldMuzzleFlash->GetVisibleFlag() != bFlash)
+        WorldMuzzleFlash->SetVisibility(bFlash, true);
+    if (MuzzleLight->IsVisible())
+    {
+        if (bFlash)
+            MuzzleLight->SetIntensity(MuzzleLightPeak * FMath::Square(FMath::Clamp(float(FlashRemaining) / MuzzleFlashDuration, 0.f, 1.f)));
+        else
+            MuzzleLight->SetVisibility(false);
+    }
     CameraKick = Health->bDead || (Movement->bHighClimb || bStowed) ? 0.f : FMath::FInterpTo(CameraKick, 0.f, DeltaTime, Weapon && Weapon->GetScopeRecoilMultiplier()<1.f ? 44.f : 22.f);
     const bool bHideLeft = Movement->bHighClimb || bHideStowed || (AppliedWeaponData && AppliedWeaponData->bOneHanded && !(Weapon && Weapon->bReloading));
     if (bLeftArmHidden != bHideLeft)
@@ -1102,7 +1152,8 @@ void AERCharacter::ApplyDeathVisuals()
     FirstPersonBody->SetVisibility(false); FirstPersonRifle->SetVisibility(false); WorldRifle->SetVisibility(false); TeamMarker->SetVisibility(false);
     FirstPersonSight->SetVisibility(false); WorldSight->SetVisibility(false);
     GetMesh()->SetVisibility(false, true);
-    FirstPersonMuzzleFlash->SetVisibility(false); WorldMuzzleFlash->SetVisibility(false);
+    FirstPersonMuzzleFlash->SetVisibility(false, true); WorldMuzzleFlash->SetVisibility(false, true);
+    MuzzleLight->SetVisibility(false);
     CameraKick = 0; MuzzleFlashUntil = 0;
 }
 void AERCharacter::OnRep_NetworkReady()
@@ -1176,10 +1227,25 @@ void AERCharacter::UpdatePredictedFire()
     ++PredictedFireOrdinal;
     if(ShotPresentation.Mark(PredictedFireSequence,PredictedFireOrdinal))
     {
-        ++PredictedShotFeedbackCount;PlayShotPresentation(Weapon->Data);
+        ++PredictedShotFeedbackCount;
+        PlayShotPresentation(Weapon->Data);
+        if (Data->TracerEveryNShots == 1 && FirstPersonMuzzleFlash->IsVisible())
+            AERAttachedTracer::SpawnMuzzleStreak(this, TracerSystem,
+                FERShotPresentationWindow::Key(PredictedFireSequence, PredictedFireOrdinal));
     }
     NextPredictedFireTime=Now+FMath::Max(.01f,Data->ShotInterval);
     if(!Data->bAutomatic)bPredictingFire=false;
+}
+void AERCharacter::RecordPredictedTracer(uint32 ShotKey, const FVector& Muzzle)
+{
+    if (PredictedTracers.Num() == FERShotPresentationWindow::Capacity) PredictedTracers.RemoveAt(0);
+    PredictedTracers.Add({ShotKey, Muzzle});
+#if !UE_BUILD_SHIPPING
+    if (FParse::Param(FCommandLine::Get(), TEXT("ERTracerAudit")))
+        UE_LOG(LogTemp, Display, TEXT("ER_TRACER_PREDICT key=%u frame=%llu flash=%d speed=%.1f muzzle=%s"),
+            ShotKey, static_cast<unsigned long long>(GFrameCounter), FirstPersonMuzzleFlash->IsVisible(),
+            GetVelocity().Size2D(), *Muzzle.ToString());
+#endif
 }
 void AERCharacter::OnRep_FireAcknowledgement()
 {
@@ -1446,8 +1512,26 @@ void AERCharacter::MulticastConfirmedShot_Implementation(FVector_NetQuantize Sta
     const bool bFirstPerson=IsLocallyControlled() && Controller && Controller->IsPlayerController();
     if(bTracer && Data && Data->Payload==EERPayload::Bullet)
     {
-        if(PelletEnds.IsEmpty())AERAttachedTracer::Spawn(this,TracerSystem,End,bFirstPerson);
-        else for(int32 I=0;I<FMath::Min(PelletEnds.Num(),16);++I)AERAttachedTracer::Spawn(this,TracerSystem,PelletEnds[I],bFirstPerson);
+        const uint32 ShotKey = FERShotPresentationWindow::Key(Sequence, Ordinal);
+        const int32 PredictedIndex = bFirstPerson ? PredictedTracers.IndexOfByPredicate(
+            [ShotKey](const FPredictedTracer& Entry) { return Entry.ShotKey == ShotKey; }) : INDEX_NONE;
+        const FVector* Muzzle = PredictedIndex != INDEX_NONE ? &PredictedTracers[PredictedIndex].Muzzle : nullptr;
+        const auto SpawnTracer = [this, bFirstPerson, Muzzle](const FVector& Impact)
+        {
+            AERAttachedTracer::Spawn(this, TracerSystem, Impact, bFirstPerson, .016f, Muzzle);
+        };
+        if (PelletEnds.IsEmpty()) SpawnTracer(End);
+        else for (int32 I = 0; I < FMath::Min(PelletEnds.Num(), 16); ++I) SpawnTracer(PelletEnds[I]);
+        if (Muzzle)
+        {
+#if !UE_BUILD_SHIPPING
+            if (FParse::Param(FCommandLine::Get(), TEXT("ERTracerAudit")))
+                UE_LOG(LogTemp, Display, TEXT("ER_TRACER_CONFIRM key=%u frame=%llu muzzle_shift=%.1f muzzle=%s end=%s"),
+                    ShotKey, static_cast<unsigned long long>(GFrameCounter),
+                    FVector::Dist(*Muzzle, GetRenderedMuzzle(true)), *Muzzle->ToString(), *End.ToString());
+#endif
+            PredictedTracers.RemoveAt(PredictedIndex);
+        }
     }
     if(ShotPresentation.Mark(Sequence,Ordinal))PlayShotPresentation(FiredData);
 }
@@ -1515,22 +1599,48 @@ void AERCharacter::PlayShotPresentation(UERWeaponData* FiredData)
         UE_LOG(LogTemp,Display,TEXT("ER_SHOT_AUDIO pawn=%s local=%d palette=%s variant=%d event=%u pellets=%d"),
             *GetName(),bFirstPerson,*GetNameSafe(Palette),AudioVariant,ShotFeedbackCount,AudioData?AudioData->Pellets:1);
 #endif
-    // Align the glow along the rifle's model-space barrel (+Y), without rotating the rifle.
+    // Keep the flash variation independent of gameplay and spread RNG.
     const bool bBulletFlash = Data && Data->Payload == EERPayload::Bullet;
     const bool bShowFlash = !(Data && Data->bOneHanded && !bBulletFlash);
     const bool bOptic = Weapon && Weapon->HasOpticalScope() && Weapon->ScopeLevel;
-    const FVector FlashScale = bBulletFlash ? FVector(.016, .030, .016) : FVector(.012, .025, .012);
+    FRandomStream FlashRandom(int32(ShotFeedbackCount & MAX_int32));
+    const float Roll = FlashRandom.FRandRange(-PI, PI);
+    const float Length = FlashRandom.FRandRange(.75f, 1.22f);
+    const FVector FlashScale = bBulletFlash ? FVector(.035, .092 * Length, .030) : FVector(.012, .025, .012);
     for (auto* Flash : {FirstPersonMuzzleFlash.Get(), WorldMuzzleFlash.Get()})
     {
         Flash->SetWorldRotation(Flash->GetAttachParent()->GetComponentQuat() *
             (Data && Data->Mesh ? FRotator(0,-90,0).Quaternion() : FQuat::Identity));
-        Flash->SetWorldLocation(GetVisualMuzzle(Flash == FirstPersonMuzzleFlash) +
-            (Data && Data->Mesh ? Flash->GetAttachParent()->GetComponentTransform().TransformVectorNoScale(FVector(4, 0, 0)) :
-            Flash->GetAttachParent()->GetComponentTransform().TransformVectorNoScale(FVector(0, 4, 0))));
+        const bool bViewFlash = Flash == FirstPersonMuzzleFlash;
+        const FVector Tip = GetVisualMuzzle(bViewFlash);
+        const FQuat BarrelRotation = Flash->GetComponentQuat();
+        Flash->SetWorldLocation(Tip + BarrelRotation.GetAxisY() * (bBulletFlash ? 5. * Length : 4.));
         Flash->SetWorldScale3D(FlashScale);
-        Flash->SetVisibility(bShowFlash && (Flash != FirstPersonMuzzleFlash || !bOptic));
+        Flash->SetVisibility(bShowFlash && (!bViewFlash || !bOptic), true);
+        for (int32 Index = 0; Index < 2; ++Index)
+        {
+            auto* Jet = MuzzleFlashJets[(bViewFlash ? 0 : 2) + Index].Get();
+            Jet->SetHiddenInGame(!bBulletFlash);
+            if (!bBulletFlash) continue;
+            const FQuat JetRotation = BarrelRotation * FQuat(FVector::YAxisVector, Roll + Index * PI) *
+                FQuat(FVector::ZAxisVector, Index == 0 ? .43 : .70);
+            const double JetLength = (Index == 0 ? 8. : 5.) * Length;
+            Jet->SetWorldLocationAndRotation(Tip + JetRotation.GetAxisY() * JetLength * .48, JetRotation);
+            Jet->SetWorldScale3D(FVector(.014, JetLength * .01, .012));
+        }
     }
-    MuzzleFlashUntil = GetWorld()->GetTimeSeconds() + (bShowFlash ? (bBulletFlash ? .028 : .018) : 0.);
+    MuzzleFlashDuration = bShowFlash ? (bBulletFlash ? FlashRandom.FRandRange(.039f, .051f) : .018f) : 0.f;
+    MuzzleFlashUntil = GetWorld()->GetTimeSeconds() + MuzzleFlashDuration;
+    if (bBulletFlash && FApp::CanEverRender())
+    {
+        const bool bViewLight = bFirstPerson && !bOptic;
+        MuzzleLightPeak = FlashRandom.FRandRange(3.6f, 4.6f) * (Data->bOneHanded ? .72f : 1.f);
+        MuzzleLight->SetWorldLocation(GetVisualMuzzle(bViewLight));
+        MuzzleLight->SetLightColor(FLinearColor(1.f, FlashRandom.FRandRange(.46f, .60f), .24f));
+        MuzzleLight->SetIntensity(MuzzleLightPeak);
+        MuzzleLight->SetVisibility(true);
+    }
+    else MuzzleLight->SetVisibility(false);
 #if !UE_BUILD_SHIPPING
     if (FParse::Param(FCommandLine::Get(), TEXT("ERShotAudit")))
     {

@@ -82,14 +82,14 @@ void AERGameState::BeginPlay()
     Super::BeginPlay();
     if(HasAuthority() && UGameplayStatics::GetCurrentLevelName(this)==TEXT("L_Depot"))
     {
-        DepotSkySeed=FPlatformTime::Cycles()|1u;
+        DepotSkySeed=EROutdoorBackdrop::RollLightingSeed();
         OnRep_DepotSkySeed();
     }
 }
 
 void AERGameState::OnRep_DepotSkySeed()
 {
-    if(DepotSkySeed!=0)EROutdoorBackdrop::Apply(*this,DepotSkySeed,FLinearColor(.20f,.19f,.16f));
+    if(DepotSkySeed!=0)EROutdoorBackdrop::Apply(*this,DepotSkySeed,FLinearColor(.20f,.19f,.16f),nullptr,DepotSkySeed);
 }
 
 void AERGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -154,8 +154,10 @@ void AERGameMode::InitGame(const FString& MapName, const FString& Options, FStri
     if (GameSession) GameSession->MaxPlayers = MaxHumanPlayers;
     // -EROnlineServer: advertise this dedicated server through EOS (idempotent across travel).
     if (GetNetMode() == NM_DedicatedServer) GetGameInstance()->GetSubsystem<UEROnline>()->StartDedicated(MaxHumanPlayers, MapName);
+    const uint32 LightingSeed = EROutdoorBackdrop::IsOutdoorMap(*GetWorld()) ? EROutdoorBackdrop::RollLightingSeed() : 0;
     for (TActorIterator<AERProceduralMap> It(GetWorld()); It; ++It)
         {
+            It->LayoutConfig.OutdoorLightingSeed=LightingSeed;
             It->LayoutConfig.ExpectedTeamSize=FMath::RoundToInt(Rules.Get("Map.ExpectedTeamSize"));
             It->LayoutConfig.Seed = UGameplayStatics::GetIntOption(Options, TEXT("MapSeed"), Rules.Get("Map.FixedSeed")>0?int32(Rules.Get("Map.Seed")):It->LayoutConfig.Seed);
             FParse::Value(FCommandLine::Get(), TEXT("ERMapSeed="), It->LayoutConfig.Seed);
@@ -313,7 +315,7 @@ void AERGameMode::BeginPlay()
     if (FParse::Param(FCommandLine::Get(), TEXT("ERRecoilProbe"))) GetWorld()->SpawnActor<AERRecoilProbe>();
     if (FParse::Param(FCommandLine::Get(), TEXT("ERReferenceWeaponProbe"))) GetWorld()->SpawnActor<AERReferenceWeaponProbe>();
     if (FParse::Param(FCommandLine::Get(), TEXT("ERGrenadeProbe")) || FParse::Param(FCommandLine::Get(), TEXT("ERGrenadeCombatProbe"))) GetWorld()->SpawnActor<AERGrenadeProbe>();
-    if (FParse::Param(FCommandLine::Get(), TEXT("ERArsenalProbe")) || FParse::Param(FCommandLine::Get(), TEXT("ERFPSPoseGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERArsenalGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERHitscanGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERGrenadeGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERSmokeGallery")))
+    if (FParse::Param(FCommandLine::Get(), TEXT("ERArsenalProbe")) || FParse::Param(FCommandLine::Get(), TEXT("ERFPSPoseGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERArsenalGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERHitscanGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERGrenadeGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERSmokeGallery")) || FParse::Param(FCommandLine::Get(), TEXT("ERMuzzleGallery")))
         GetWorld()->SpawnActor<AERArsenalProbe>();
 #endif
 }

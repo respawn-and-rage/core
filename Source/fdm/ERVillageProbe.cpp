@@ -4,6 +4,7 @@
 #include "ERPlayerController.h"
 #include "ERMovement.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Camera/CameraActor.h"
@@ -42,6 +43,40 @@ void AERVillageProbe::Tick(float Delta)
     }
     auto* PC=Cast<AERPlayerController>(UGameplayStatics::GetPlayerController(GetWorld(),0));auto* Pawn=PC ? Cast<AERCharacter>(PC->GetPawn()):nullptr;
     if(!Pawn || L.StairRoutes.IsEmpty()){if(Elapsed>60)FPlatformMisc::RequestExitWithStatus(false,1);return;}
+    if (GetNetMode() == NM_Standalone && FParse::Param(FCommandLine::Get(), TEXT("ERVillageLightingGallery")))
+    {
+        if (!Pawn->bNetworkReady || !Pawn->Weapon || Elapsed < FMath::Max(8.f, Stage + 2.f)) return;
+        if (Phase == 0 || Phase == 2)
+        {
+            const auto& Deck = L.ElevatedDecks[0];
+            const auto& Passage = L.VillagePassages[0];
+            const FVector Stand = Phase == 0 ?
+                FVector(Deck.Min.X + 220., Deck.Min.Y + 65., Deck.Max.Z + Pawn->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 4.) :
+                Passage[1];
+            const FVector Look = Phase == 0 ? FVector(Deck.Max.X, Deck.Min.Y - 700., Stand.Z - 25.) : Passage[2];
+            const FRotator View = (Look - Stand).Rotation();
+            Check(Pawn->TeleportTo(Stand, View, false, true), TEXT("lighting_gallery_position"));
+            Pawn->GetCharacterMovement()->StopMovementImmediately();
+            PC->SetControlRotation(View);
+            PC->SetIgnoreMoveInput(true);
+            PC->SetIgnoreLookInput(true);
+        }
+        else if (Phase == 1 || Phase == 3)
+        {
+            Check(Pawn->FirstPersonRifle->IsVisible() && Pawn->FirstPersonRifle->GetSkeletalMeshAsset() != nullptr,
+                TEXT("lighting_gallery_weapon_visible"));
+            const TCHAR* Capture = Phase == 1 ? TEXT("Village-Lighting-Deck.png") : TEXT("Village-Lighting-Cover.png");
+            FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir()/TEXT("Testing")/Capture, false, false);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Display, TEXT("ER_VILLAGE_LIGHTING_GALLERY result=%s"), Failed ? TEXT("FAIL") : TEXT("PASS"));
+            FPlatformMisc::RequestExitWithStatus(false, Failed ? 1 : 0);
+        }
+        ++Phase;
+        Stage = Elapsed;
+        return;
+    }
     if(Phase==0 && Elapsed>6)
     {
         Check(Map->ValidateCells(),TEXT("initial_cells"));

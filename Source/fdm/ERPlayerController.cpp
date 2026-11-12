@@ -122,6 +122,7 @@ void UERGameInstance::Init()
     MouseSensitivity = FMath::IsFinite(MouseSensitivity) ? FMath::Clamp(MouseSensitivity, 0.f, 1.f) : .5f;
     GConfig->GetFloat(TEXT("EclipseRecoil.Input"), TEXT("MouseAcceleration"), MouseAcceleration, GGameUserSettingsIni);
     MouseAcceleration = FMath::IsFinite(MouseAcceleration) ? FMath::Clamp(MouseAcceleration, 0.f, 1.f) : 0.f;
+    if (!IsRunningDedicatedServer()) Controls.Load();
     GConfig->GetFloat(TEXT("EclipseRecoil.Audio"), TEXT("SoundVolume"), SoundVolume, GGameUserSettingsIni);
     SetSoundVolume(SoundVolume);
     GConfig->GetFloat(TEXT("EclipseRecoil.Audio"), TEXT("MusicVolume"), MusicVolume, GGameUserSettingsIni);
@@ -375,7 +376,7 @@ void AERPlayerController::BeginPlay()
             }
         }
     }
-    if (ULocalPlayer* LP = GetLocalPlayer()) if (auto* Subsystem = LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>()) if (GameplayMapping) Subsystem->AddMappingContext(GameplayMapping, 0);
+    ApplyControlBindings();
     ERPerformance::Get().Load();
     ERPerformance::Get().Apply();
     ShowMenu(IsMenuLevel());
@@ -450,7 +451,7 @@ void AERPlayerController::PlayerTick(float DeltaTime)
         PlayerCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight(),PlayerCharacter->Camera->GetComponentLocation().Z,
         GetControlRotation().Pitch,GetControlRotation().Yaw,Weapon->MagazineAmmo,Weapon->ReserveAmmo,Weapon->bReloading,
         PlayerCharacter->Health->bDead,PlayerCharacter->Health->IsProtected(),bMenuOpen,bShowScoreboard,State ? State->Kills : 0,State ? State->Deaths : 0,
-        IsInputKeyDown(EKeys::LeftControl),PlayerCharacter->CanCrouch());
+        IsInputKeyDown(ControlKey(EKeys::LeftControl)) || IsInputKeyDown(ControlKey(EKeys::C)),PlayerCharacter->CanCrouch());
 #endif
 }
 void AERPlayerController::EndPlay(const EEndPlayReason::Type Reason)
@@ -470,7 +471,9 @@ void AERPlayerController::EndPlay(const EEndPlayReason::Type Reason)
     FrameRateWidget.Reset(); DisplaySizeSelector.Reset();
     if (MenuPreview) { MenuPreview->Destroy(); MenuPreview = nullptr; }
     PreviewBrush.Reset();
-    if (IsLocalController() && GetLocalPlayer()) if (auto* Subsystem = GetLocalPlayer()->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>()) if (GameplayMapping) Subsystem->RemoveMappingContext(GameplayMapping);
+    if (ULocalPlayer* LP = GetLocalPlayer())
+        if (auto* Subsystem = LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(); Subsystem && LocalGameplayMapping)
+            Subsystem->RemoveMappingContext(LocalGameplayMapping);
     MenuWidget.Reset(); Super::EndPlay(Reason);
 }
 void AERPlayerController::CapturePlayerScreenshots()
@@ -599,13 +602,44 @@ void AERPlayerController::FinishPlayerScreenshots()
     // Screenshot tracing can finish writing screen.png after the processed delegate.
     const int32 ScreenSaved = IFileManager::Get().FileSize(*FPaths::Combine(ScreenshotDirectory, TEXT("screen.png"))) > 0 ? 1 : 0;
     ScreenshotStatus = FString::Printf(TEXT("Screenshots saved: %d/6"), SavedScreenshotCount + ScreenSaved);
-    ScreenshotNoticeUntil = FPlatformTime::Seconds() + 15.0;
+    ScreenshotNoticeUntil = FPlatformTime::Seconds() + 3.0;
     UE_LOG(LogTemp, Display, TEXT("%s\n%s"), *ScreenshotStatus, *ScreenshotDirectory);
+}
+
+FKey AERPlayerController::ControlKey(const FKey& DefaultKey) const
+{
+    const auto* GI = GetGameInstance<UERGameInstance>();
+    return GI ? GI->Controls.Key(DefaultKey) : DefaultKey;
+}
+
+void AERPlayerController::ApplyControlBindings()
+{
+    ULocalPlayer* LP = GetLocalPlayer();
+    if (!LP) return;
+
+    FlushPressedKeys();
+    ResetSprintInput();
+    LastCrouchTap = -1;
+    if (InputComponent)
+        for (const auto& Binding : RawControlKeys)
+            if (InputComponent->KeyBindings.IsValidIndex(Binding.Key))
+                InputComponent->KeyBindings[Binding.Key].Chord.Key = ControlKey(Binding.Value);
+
+    auto* Subsystem = LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>();
+    if (!Subsystem || !GameplayMapping) return;
+    const bool bNewMapping = !LocalGameplayMapping;
+    if (bNewMapping) LocalGameplayMapping = DuplicateObject<UInputMappingContext>(GameplayMapping, this);
+    const auto& Defaults = GameplayMapping->GetMappings();
+    for (int32 Index = 0; Index < Defaults.Num(); ++Index)
+        LocalGameplayMapping->GetMapping(Index).Key = ControlKey(Defaults[Index].Key);
+    if (bNewMapping) Subsystem->AddMappingContext(LocalGameplayMapping, 0);
+    else Subsystem->RequestRebuildControlMappings();
 }
 
 void AERPlayerController::SetupInputComponent()
 {
     Super::SetupInputComponent();
+    const int32 FirstRawBinding = InputComponent->KeyBindings.Num();
     InputComponent->BindKey(EKeys::P, IE_Pressed, this, &AERPlayerController::CapturePlayerScreenshots);
     InputComponent->BindKey(EKeys::E, IE_Pressed, this, &AERPlayerController::SprintPressed);
     InputComponent->BindKey(EKeys::E, IE_Released, this, &AERPlayerController::SprintReleased);
@@ -626,6 +660,13 @@ void AERPlayerController::SetupInputComponent()
     InputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &AERPlayerController::PreviousWeapon);
     InputComponent->BindKey(EKeys::RightMouseButton, IE_Pressed, this, &AERPlayerController::ZoomPressed);
     InputComponent->BindKey(EKeys::RightMouseButton, IE_Released, this, &AERPlayerController::ZoomReleased);
+    RawControlKeys.Reset();
+    for (int32 Index = FirstRawBinding; Index < InputComponent->KeyBindings.Num(); ++Index)
+    {
+        auto& Chord = InputComponent->KeyBindings[Index].Chord;
+        RawControlKeys.Add(Index, Chord.Key);
+        Chord.Key = ControlKey(Chord.Key);
+    }
     if (auto* Input = Cast<UEnhancedInputComponent>(InputComponent))
     {
         if (WalkAction)
@@ -652,6 +693,26 @@ void AERPlayerController::SetupInputComponent()
         Input->BindAction(MenuAction, ETriggerEvent::Started, this, &AERPlayerController::MenuPressed);
     }
 }
+void AERPlayerController::PostProcessInput(float DeltaTime, bool bGamePaused)
+{
+    Super::PostProcessInput(DeltaTime, bGamePaused);
+    auto* Character = Cast<AERCharacter>(GetPawn());
+    if (bGamePaused || bMenuOpen || !Character || Character->Health->bDead) return;
+
+    auto* Movement = CastChecked<UERMovement>(Character->GetCharacterMovement());
+    // A held key may have started on the previous pawn. Restore its hold
+    // without calling CrouchPressed, which would count it as a tap for prone.
+    if (IsInputKeyDown(ControlKey(EKeys::LeftShift)) || IsInputKeyDown(ControlKey(EKeys::RightShift)))
+        Movement->bWalkHeld = true;
+    if (!Movement->bWantsToCrouch && !Movement->bProneWanted && !Movement->IsTraversing() && Movement->IsMovingOnGround()
+        && (IsInputKeyDown(ControlKey(EKeys::C)) || IsInputKeyDown(ControlKey(EKeys::LeftControl))))
+    {
+        Character->Crouch();
+        bForwardSprintHeld = false;
+        UpdateSprintInput();
+    }
+}
+
 void AERPlayerController::ResetSprintInput()
 {
     bSprintKeyHeld = bForwardSprintHeld = bForwardHeld = false;
@@ -708,6 +769,11 @@ void AERPlayerController::WalkReleased() { if (auto* C = Cast<AERCharacter>(GetP
 void AERPlayerController::Move(const FInputActionValue& Value)
 {
     auto* PlayerCharacter = Cast<AERCharacter>(GetPawn()); if (!PlayerCharacter || PlayerCharacter->Health->bDead || bMenuOpen) return;
+    PrepareGesturePawn(PlayerCharacter);
+    // A new pawn can receive movement while the keys are already down.
+    bSprintKeyHeld = IsInputKeyDown(ControlKey(EKeys::E));
+    bForwardHeld = IsInputKeyDown(ControlKey(EKeys::W));
+    UpdateSprintInput();
     const FVector2D Axis = Value.Get<FVector2D>(); const FRotator Rotation(0, GetControlRotation().Yaw, 0);
     if(auto* M=Cast<UERMovement>(PlayerCharacter->GetCharacterMovement());M->IsOnLadder())
     {
@@ -1189,6 +1255,7 @@ void AERHUD::DrawHUD()
         Flash.BlendMode = SE_BLEND_Translucent; Canvas->DrawItem(Flash);
     }
     auto* GS = GetWorld()->GetGameState<AERGameState>(); if (!GS) return;
+    const bool bCountdown = GS->IsPreMatchCountdown();
     const float W = Canvas->SizeX, H = Canvas->SizeY;
     const FERHUDLayout Layout(FVector2D(W,H));
     const float HUDScale = Layout.Scale;
@@ -1251,7 +1318,7 @@ void AERHUD::DrawHUD()
     }
 
     DrawDamageFeedback(Character);
-    DrawInflictedDamage();
+    if (!bCountdown) DrawInflictedDamage();
     const FLinearColor AlphaColor=ERRecon::TeamColor(EERTeam::Alpha), OmegaColor=ERRecon::TeamColor(EERTeam::Omega);
     DrawHUDText(FString::Printf(TEXT("%02d"),GS->AlphaScore),Layout.Position(555,20).X,Layout.Position(555,20).Y,AlphaColor,1.45f,true);
     DrawHUDText(FString::FromInt(int32(ERServer::Get(GetWorld(),"Match.ScoreLimit"))),W/2,Layout.Position(640,27).Y,FLinearColor(.8f,.82f,.85f),1.f,true);
@@ -1264,7 +1331,7 @@ void AERHUD::DrawHUD()
     }
     else if (GS->GetMatchState() == MatchState::WaitingPostMatch)
         Status = GS->Winner == EERTeam::None ? TEXT("DRAW") : TEXT("ROUND OVER");
-    else if (GS->IsPreMatchCountdown())
+    else if (bCountdown)
     {
         // The countdown is outside the match: the clock waits at its full duration.
         const int32 Seconds = FMath::Max(0, FMath::CeilToInt32(ERServer::Get(GetWorld(),"Match.Duration")));
@@ -1356,8 +1423,11 @@ void AERHUD::DrawHUD()
 #endif
         }
         DrawWeaponInventory(Character);
-        if(Character->Weapon && Character->Weapon->bPlacingClaymore)DrawHUDText(TEXT("PLACING CLAYMORE..."),W/2,Layout.Position(640,570).Y,FLinearColor(.4f,.8f,1),1.f,true);
-        if (Character->Health->IsProtected()) DrawHUDText(TEXT("SPAWN PROTECTION"), W/2,Layout.Position(640,601).Y,FLinearColor(.4f,.8f,1),1.3f,true);
+        if (!bCountdown)
+        {
+            if(Character->Weapon && Character->Weapon->bPlacingClaymore)DrawHUDText(TEXT("PLACING CLAYMORE..."),W/2,Layout.Position(640,570).Y,FLinearColor(.4f,.8f,1),1.f,true);
+            if (Character->Health->IsProtected()) DrawHUDText(TEXT("SPAWN PROTECTION"), W/2,Layout.Position(640,601).Y,FLinearColor(.4f,.8f,1),1.3f,true);
+        }
     }
     if (Character && Character->IsDeathCameraActive()) DrawKillerHealth(Character);
     if (PC->bAwaitingRespawn)
@@ -1367,7 +1437,7 @@ void AERHUD::DrawHUD()
         DrawHUDText(Seconds > 0 ? FString::Printf(TEXT("Respawn available in %d"),Seconds) : TEXT("Press fire or jump to respawn"),
             W/2,KillerView ? Layout.Position(640,620).Y : Layout.Position(640,420).Y,FLinearColor(1,.6f,.3f),KillerView ? 1.2f : 1.6f,true);
     }
-    DrawPreMatchCountdown(GS);
+    if (bCountdown && !PC->bShowScoreboard && !PC->bAwaitingRespawn) DrawPreMatchCountdown(GS);
     if (PC->bShowScoreboard || GS->GetMatchState() == MatchState::WaitingPostMatch) DrawScoreboard(GS);
     const double Now = GetWorld()->GetTimeSeconds();
     if (GS->GetMatchState() == MatchState::WaitingPostMatch && PC->GameplayToast.Expires > Now)
@@ -1375,7 +1445,7 @@ void AERHUD::DrawHUD()
         DrawHUDText(PC->GameplayToast.Title,W/2,Layout.Position(640,80).Y,FLinearColor(1.f,.76f,.38f),.82f,true);
         DrawHUDText(PC->GameplayToast.Body,W/2,Layout.Position(640,105).Y,FLinearColor(.82f,.85f,.9f),.72f,true);
     }
-    if (!PC->bShowScoreboard)
+    if (!PC->bShowScoreboard && !bCountdown)
     {
         const bool Results = GS->GetMatchState() == MatchState::WaitingPostMatch;
         const float X = EdgeMargin.X;
@@ -1417,12 +1487,14 @@ void AERHUD::DrawHUD()
     }
     if (PC->ScreenshotNoticeUntil > FPlatformTime::Seconds())
     {
-        DrawHUDText(PC->ScreenshotStatus, EdgeMargin.X, Layout.Position(0,270).Y, FLinearColor(1.f,.76f,.38f), .8f);
-        // Wrap the absolute path instead of truncating the directory players need.
-        const int32 CharactersPerLine = FMath::Max(20, FMath::FloorToInt32((W - 2.f * EdgeMargin.X) / (12.f * HUDScale)));
+        const float NoticeY = bCountdown ? 96.f : 270.f;
+        DrawHUDText(PC->ScreenshotStatus, EdgeMargin.X, Layout.Position(0,NoticeY).Y, FLinearColor(1.f,.76f,.38f), .8f);
+        // Keep screenshot paths in the left column during the countdown.
+        const float NoticeRight = bCountdown ? Layout.Position(280,0).X : W - EdgeMargin.X;
+        const int32 CharactersPerLine = FMath::Max(1, FMath::FloorToInt32((NoticeRight - EdgeMargin.X) / (12.f * HUDScale)));
         for (int32 Offset = 0; Offset < PC->ScreenshotDirectory.Len(); Offset += CharactersPerLine)
             DrawHUDText(PC->ScreenshotDirectory.Mid(Offset, CharactersPerLine), EdgeMargin.X,
-                Layout.Position(0,296).Y + (Offset / CharactersPerLine) * 22.f * HUDScale, FLinearColor::White, .65f);
+                Layout.Position(0,NoticeY + 26.f).Y + (Offset / CharactersPerLine) * 22.f * HUDScale, FLinearColor::White, .65f);
     }
     TickHUDLayoutGallery();
 }

@@ -63,6 +63,8 @@ for key in keys:
         if not clip:continue
         expected=f'A_{key}_Hands_'+('Fire' if prop=='fire_animation' else 'Reload')
         if clip.get_name()!=expected:raise RuntimeError('Unexpected clip '+clip.get_path_name())
+        if key=='Pistol' and prop=='reload_animation' and assets.get_metadata_tag(clip,'ERPistolReloadArmRevision')=='1':
+            continue
         file=file_of(clip);old=backup/file.name
         if not old.exists():
             shutil.copy2(file,old)

@@ -2,7 +2,7 @@
 
 Shared rules are in [MAPS.md](../MAPS.md).
 
-**Code:** `ERVillage.cpp`, `ERVillageTerrain.cpp`.
+**Code:** `ERVillage.cpp`, `ERVillageTerrain.cpp`, `EROutdoorBackdrop.cpp`.
 
 Inspired by the owner's Shoots references; no Shoots geometry imported. Recipe in `Village` struct:
 1–5 central blocks, paired or one self-symmetric origin block, 1–3 platform storeys from
@@ -26,11 +26,16 @@ have flat sheet-metal roofs.
   in front of its door.
 - Nothing may stand unsupported on a fresh map: decks drop plank and beam stubs beside ladder
   wells, and imported storage shells hold their lowest 30cm through `AnchorHeight`.
+  Imported timber shells use two-sided RoughPlanks so their walls are visible from both sides.
 - 3v3+ uses at least two blocks; paired 4.8×2.4m L shelters meet a ground-cover quota that upper
   floors cannot satisfy.
 - Perimeter: tapered 3.8–4.4m logs with real shot gaps, plus a hidden locomotion-only wall.
-- Backdrop: J&E Gray Park panorama (Greg Zaal, CC0), skipped on dedicated. No exterior trees.
+- The horizon uses the shared grass finish. No exterior trees. Village uses the shared
+  outdoor lighting draw.
 
 ## Verify
 
 `test-village.py` (`--offscreen`, `--network`). Native: `EclipseRecoil.Destruction.Village*`.
+Run standalone with `-ERVillageProbe -ERVillageLightingGallery` for first-person Metal captures
+on the deck and under cover in `Saved/Testing`. In development, use
+`-EROutdoorLightingSeed=1` for sunset and `-EROutdoorLightingSeed=2` for standard lighting.

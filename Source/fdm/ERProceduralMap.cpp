@@ -559,7 +559,7 @@ void AERProceduralMap::ConfigureFloors()
         Metal->Rename(*MakeUniqueObjectName(this,UDynamicMeshComponent::StaticClass(),TEXT("DeadFenceMetal")).ToString(),nullptr,REN_DontCreateRedirectors|REN_NonTransactional);
     }
     FenceMetal.Empty();
-    for(UStaticMeshComponent* PoolSurface:PoolSurfaces)
+    for(UMeshComponent* PoolSurface:PoolSurfaces)
     {
         RemoveInstanceComponent(PoolSurface);PoolSurface->DestroyComponent();
     }
@@ -653,7 +653,7 @@ void AERProceduralMap::ConfigureTemplateFloors()
             HorizonSurface=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/EclipseRecoil/Art/OutdoorBackdrop/M_OutdoorGrass.M_OutdoorGrass"));
         }
         else if(Template->Archetype==EERMapArchetype::MiddleEasternAlleys)Tint=FLinearColor(.39f,.29f,.17f);
-        OutdoorSky=EROutdoorBackdrop::Apply(*this,uint32(LayoutConfig.Seed),Tint,HorizonSurface);
+        OutdoorSky=EROutdoorBackdrop::Apply(*this,uint32(LayoutConfig.Seed),Tint,HorizonSurface,LayoutConfig.OutdoorLightingSeed);
         break;
     }
     default: break;
@@ -773,7 +773,18 @@ void AERProceduralMap::ConfigureTemplateFloors()
     FlushMetal();
     if(!Layout.PoolWater.IsEmpty() && PoolWaterSurface && GetNetMode()!=NM_DedicatedServer)
     {
-        for(const auto& Bounds:Layout.PoolWater)
+        if(Layout.FeatureNames.Contains(TEXT("VillaWaterfront")))
+        {
+            auto* Water=NewObject<UDynamicMeshComponent>(this);
+            AddInstanceComponent(Water);Water->SetupAttachment(RootComponent);
+            Water->SetCollisionProfileName(TEXT("NoCollision"));
+            Water->SetCanEverAffectNavigation(false);Water->SetCastShadow(false);
+            Water->SetMaterial(0,PoolWaterSurface);
+            Water->ComponentTags.Add(TEXT("ERTemplateVisual"));
+            ERProcedural::BuildWaterfrontSurface(Water,Layout);
+            Water->RegisterComponent();PoolSurfaces.Add(Water);
+        }
+        else for(const auto& Bounds:Layout.PoolWater)
         {
             auto* Water=NewObject<UStaticMeshComponent>(this);
             AddInstanceComponent(Water);Water->SetupAttachment(RootComponent);
@@ -943,7 +954,16 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
         for(const auto& Ladder:Layout.Ladders){MixVector(Ladder.Frame.GetLocation());MixVector(Ladder.Frame.GetRotation().GetForwardVector());MixVector(FVector(Ladder.Height,Ladder.DeckHeight,0));}
         for(const auto* Paths:{&Layout.RoomAccessRoutes,&Layout.StairRoutes,&Layout.CrossingRoutes})for(const auto& Route:*Paths)for(const auto& P:Route)MixVector(P);
     }
-    if(Layout.CircularArena)for(const auto& Pad:Layout.TerrainPads){MixVector(Pad.Min);MixVector(Pad.Max);}
+    if(Layout.CircularArena)
+    {
+        for(const auto& Pad:Layout.TerrainPads){MixVector(Pad.Min);MixVector(Pad.Max);}
+        for(const auto& Ladder:Layout.Ladders)
+        {
+            MixVector(Ladder.Frame.GetLocation());
+            MixVector(Ladder.Frame.GetRotation().GetForwardVector());
+            MixVector(FVector(Ladder.Height,Ladder.DeckHeight,0));
+        }
+    }
     for(const auto& Water:Layout.PoolWater){MixVector(Water.Min);MixVector(Water.Max);}
     for(const auto& Knot:Layout.VillageTerrainProfile)MixVector({Knot.X,Knot.Y,0});
     if(LayoutConfig.TemplateAsset->Town.Enabled)
@@ -981,6 +1001,9 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
 float AERProceduralMap::WaterDepthAt(const FVector& WorldFeet) const
 {
     const FVector P=GetActorTransform().InverseTransformPosition(WorldFeet);
+    if(Layout.FeatureNames.Contains(TEXT("VillaWaterfront")) &&
+        FMath::Square(P.X/(Layout.ArenaSize.X*.5-20))+FMath::Square(P.Y/(Layout.ArenaSize.Y*.5-20))>1)
+        return 0.f;
     for(const FBox& Water:Layout.PoolWater)
         if(P.X>=Water.Min.X && P.X<=Water.Max.X && P.Y>=Water.Min.Y && P.Y<=Water.Max.Y)
         {
@@ -1003,6 +1026,9 @@ bool AERProceduralMap::PlayWaterImpactAt(const FVector& WorldPosition) const
 bool AERProceduralMap::WaterSurfaceAt(const FVector& WorldPosition,FVector& OutSurface) const
 {
     const FVector P=GetActorTransform().InverseTransformPosition(WorldPosition);
+    if(Layout.FeatureNames.Contains(TEXT("VillaWaterfront")) &&
+        FMath::Square(P.X/(Layout.ArenaSize.X*.5-20))+FMath::Square(P.Y/(Layout.ArenaSize.Y*.5-20))>1)
+        return false;
     for(const FBox& Water:Layout.PoolWater)
         if(P.X>=Water.Min.X && P.X<=Water.Max.X && P.Y>=Water.Min.Y && P.Y<=Water.Max.Y &&
            P.Z<=Water.Max.Z-1 && P.Z>=Water.Max.Z-105)

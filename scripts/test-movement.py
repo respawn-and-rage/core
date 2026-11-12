@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 import argparse
+import tempfile
 from client_shutdown import settle_clients
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -17,7 +18,12 @@ modes = parser.add_mutually_exclusive_group()
 modes.add_argument("--base-only", action="store_true", help="Run run/jump/vault/climb/crouch checks only")
 modes.add_argument("--posture-only", action="store_true", help="Run sprint/posture phases only")
 parser.add_argument("--render", action="store_true", help="Capture the stamina HUD with Metal on the host")
+parser.add_argument("--remapped-controls", action="store_true", help="Run posture phases with an isolated remapped client profile")
 args = parser.parse_args()
+if args.remapped_controls:
+    if args.base_only:
+        parser.error("--remapped-controls requires the posture phases")
+    args.posture_only = True
 
 project = Path(__file__).resolve().parents[1]
 engine = Path(os.environ.get("UE_ROOT", "/Users/Shared/Epic Games/UE_5.8"))
@@ -29,6 +35,7 @@ if args.posture_only: common.append("-ERPostureProbe")
 if args.base_only: common.append("-ERMovementBaseProbe")
 processes = []
 handles = []
+profile = tempfile.TemporaryDirectory() if args.remapped_controls else None
 try:
     capture_started = time.time()
     host_log = (logs / "movement-host.log").open("w")
@@ -49,7 +56,13 @@ try:
         raise RuntimeError("Host did not listen within 45 seconds")
     client_log = (logs / "movement-client.log").open("w")
     handles.append(client_log)
-    client = subprocess.Popen(common + ["127.0.0.1:17781?Name=Client"], stdout=client_log, stderr=subprocess.STDOUT)
+    client_options = []
+    if profile:
+        ini = Path(profile.name) / "GameUserSettings.ini"
+        ini.write_text("[/Script/Engine.GameUserSettings]\nVersion=5\n"
+                       "[EclipseRecoil.Controls]\nW=J\nC=K\nLeftControl=I\nE=Y\n")
+        client_options = [f"-GameUserSettingsINI={ini}", "-ERRemappedControls"]
+    client = subprocess.Popen(common + client_options + ["127.0.0.1:17781?Name=Client"], stdout=client_log, stderr=subprocess.STDOUT)
     processes.append(client)
     deadline = time.monotonic()+220
     while time.monotonic()<deadline and host.poll() is None:
@@ -75,6 +88,8 @@ try:
                        for phase in range(44, 48))
         print("ER_MOVEMENT_STAMINA_CAPTURES", "PASS" if captures else "FAIL")
         success = success and captures
+    if args.remapped_controls:
+        success &= "ER_MOVEMENT_CLIENT_PASS remapped_controls_loaded" in client_output
     print("Logs:", logs)
     sys.exit(0 if success else 1)
 finally:
@@ -90,3 +105,5 @@ finally:
             process.wait()
     for handle in handles:
         handle.close()
+    if profile:
+        profile.cleanup()

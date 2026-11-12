@@ -182,6 +182,7 @@ namespace ERProcedural
     double PlayableAreaM2(const FERProceduralLayout& Layout);
     bool BuildCircularCentralBuilding(const UERMapTemplate& Template,int32 Seed,TArray<FERMapTemplatePiece>& Pieces,FERProceduralLayout& Layout,TArray<FVector>& Patrol,int32 CrossingOverride=0);
     float CentralGroundHeight(const FERProceduralLayout& Layout,FVector2D Position);
+    void BuildWaterfrontSurface(class UDynamicMeshComponent* Component,const FERProceduralLayout& Layout);
     void BuildCentralTerrain(class UDynamicMeshComponent* Component,const FERProceduralLayout& Layout);
     bool ApplyMapTheme(const FERProceduralConfig& Config,FERProceduralLayout& Layout);
     bool Build(const FERProceduralConfig& Config, const FERBlockRoomConfig& Blocks, FERProceduralLayout& Out, const FERCellSettings& Cells = FERCellSettings());
@@ -262,7 +263,7 @@ private:
     UPROPERTY() TObjectPtr<class UInstancedStaticMeshComponent> Stairs;
     UPROPERTY() TArray<TObjectPtr<class UInstancedStaticMeshComponent>> FixedMeshes;
     UPROPERTY() TObjectPtr<class UMaterialInterface> PoolWaterSurface;
-    UPROPERTY(Transient) TArray<TObjectPtr<class UStaticMeshComponent>> PoolSurfaces;
+    UPROPERTY(Transient) TArray<TObjectPtr<class UMeshComponent>> PoolSurfaces;
     UPROPERTY(Transient) TArray<TObjectPtr<class AERLadder>> LadderActors;
     UPROPERTY() TObjectPtr<class UInstancedStaticMeshComponent> FixedCollision;
     UPROPERTY() TObjectPtr<class UInstancedStaticMeshComponent> FenceCollision;

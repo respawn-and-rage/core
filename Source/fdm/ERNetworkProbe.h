@@ -17,6 +17,9 @@ private:
     int32 ClientPhase = -1;
     double ClientDeathSeenAt = -1;
     bool bClientLethalBeatChecked = false;
+    bool bClientReleasedRespawnSprint = false;
+    double ClientRespawnSprintAt = -1;
+    bool bSawRespawnSprint = false;
     double Deadline = 0;
     double EmptyClipTimeout = 0;
     UPROPERTY() TObjectPtr<class AERPlayerController> Host;

@@ -58,5 +58,11 @@ void AERHUD::DrawVitals(const AERCharacter* Character)
     const float Fractions[]={Character->Health->Health/ERServer::Get(GetWorld(),"Health.Max"),Character->Health->Armor/FMath::Max(1.f,ERServer::Get(GetWorld(),"Health.Armor")),Movement->GetStaminaFraction()};
     for(int32 Icon=0;Icon<3;++Icon) DrawVitalIcon(Icon,FVector2D(Edge.X+Icon*Step,Top),Diameter,Fractions[Icon]);
     if(Movement->bProneWanted || Movement->IsProne())
-        DrawHUDTextAnchored(TEXT("PRONE  |  C / Ctrl to stand up"),FVector2D(Edge.X,Top-6.f*Scale),FLinearColor::White,.85f,FVector2D(0,1));
+    {
+        const auto* PC = Cast<AERPlayerController>(PlayerOwner);
+        const FString Crouch = FERControls::ShortLabel(PC ? PC->ControlKey(EKeys::C) : EKeys::C);
+        const FString Alternate = FERControls::ShortLabel(PC ? PC->ControlKey(EKeys::LeftControl) : EKeys::LeftControl);
+        DrawHUDTextAnchored(TEXT("PRONE  |  ") + Crouch + TEXT(" / ") + Alternate + TEXT(" to stand up"),
+            FVector2D(Edge.X,Top-6.f*Scale),FLinearColor::White,.85f,FVector2D(0,1));
+    }
 }

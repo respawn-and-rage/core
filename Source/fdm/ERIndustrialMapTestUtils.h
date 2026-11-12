@@ -55,7 +55,7 @@ inline bool FactoryPaletteMatches(AERProceduralMap& Map)
     for(const auto* Mesh:Components)
     {
         FString Key,Chunk;
-        if(Mesh->GetName().Split(TEXT("_C"),&Key,&Chunk))
+        if(Mesh->GetName().Split(TEXT("_G"),&Key,&Chunk))
             if(auto* Surface=Expected.Find(Key)){if(Mesh->GetMaterial(0)!=*Surface)return Fail(__LINE__);++Matched;}
         if(Mesh->GetName().StartsWith(TEXT("IndustrialFenceMetal_")) && Mesh->GetMaterial(0)!=Steel)return Fail(__LINE__);
     }

@@ -126,6 +126,8 @@ def retarget(idle,destination,motion,fps,one_handed=False,right_socket='HandGrip
     finally:controller.close_bracket(False)
     asset.set_editor_property('enable_root_motion',False)
     if max_contact_error>.05:raise RuntimeError('Retargeted palm misses contact: '+str(max_contact_error)+' cm '+destination)
+    if asset.get_name()=='A_Pistol_Hands_Reload':
+        ue.EditorAssetLibrary.remove_metadata_tag(asset,'ERPistolReloadArmRevision')
     if not ue.EditorAssetLibrary.save_loaded_asset(asset,only_if_is_dirty=False):raise RuntimeError('Cannot save '+destination)
     ue.log('ER_REFERENCE_HANDS '+destination+' frames='+str(len(motion))+' shoulder_reach_adjustments='+str(clamps)+' max_contact_error_cm='+str(max_contact_error))
     return asset

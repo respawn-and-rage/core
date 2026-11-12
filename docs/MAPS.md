@@ -59,13 +59,17 @@ Recipes live in `Art/MapTemplates`. Reproduce a layout with
 
 ## Outdoor backdrop
 
-Central Building, Alleys, Village and Town pick one of the 15 Atmospheric Skybox
-panoramas from the replicated map seed using a separate cosmetic random stream.
-Depot rolls a cosmetic seed at level start. The authored directional and ambient
-lights retain their settings. Each panorama rotates toward the strongest directional light using an approximate sun azimuth; overcast images use their brightest opening. The backdrop uses
+Central Building, Alleys, Village, Town and Depot roll a cosmetic lighting seed
+on the authority at the start of each match. The seed gives standard lighting and
+sunset equal chances. It is replicated to peers and persists through arena
+regeneration. Standard lighting uses the authored lights and the full Atmospheric
+Skybox palette. Sunset picks a low-sun panorama with warm direct light, cool
+skylight and a dedicated fill for the first-person rig.
+Each panorama rotates toward the strongest directional light using an approximate sun azimuth.
+Overcast images use their brightest opening. The backdrop uses
 one unlit 2048px texture and a flat ground plane below the playable terrain.
-Village and variants with a grass ground use a dedicated horizon finish with the shared grass texture. The sky is visible in real-time Skylight captures; the horizon is excluded. The existing ambient
-lighting stays in use. Fire Training and Rooms are lit by three shadowless directional lights
+Village and variants with a grass ground use a dedicated horizon finish with the shared grass texture.
+The sky is visible in real-time Skylight captures. Fire Training and Rooms are lit by three shadowless directional lights
 (key, fill and an upward bounce for ceilings: `er.InteriorKeyLux`, `er.InteriorFillLux`,
 `er.InteriorBounceLux`) instead of point-light grids; `er.InteriorLights 0` restores the grids for
 comparison. The level sun of a closed hall casts no shadows, since its shell would hide them all.
