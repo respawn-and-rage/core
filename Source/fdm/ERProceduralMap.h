@@ -92,6 +92,8 @@ struct FERProceduralLayout
     TArray<FERLayoutInterior> Interiors;
     // Furniture is appended last: everything from these indices on belongs to the interior kit.
     int32 InteriorPieces=0,InteriorPanelStart=INDEX_NONE,InteriorFixedStart=INDEX_NONE;
+    // Structures the open-ground pass built, in pairs, between its start indices and the furniture.
+    int32 GroundFeatures=0,GroundPanelStart=INDEX_NONE,GroundFixedStart=INDEX_NONE,GroundLadderStart=INDEX_NONE;
     TArray<FERLayoutRect> Rooms, Corridors;
     TArray<FERLayoutWall> Walls;
     TArray<FERLayoutOpening> Openings;
@@ -203,10 +205,15 @@ namespace ERProcedural
     bool SpawnZonesClearInWorld(class UWorld* World,const FTransform& Frame,const FERProceduralLayout& Layout);
     bool BuildSpawnZones(int32 Seed,FERProceduralLayout& Layout,const FERCellSettings& Cells);
     bool ConfigureTeamSize(class UERMapTemplate& Template,int32 ExpectedTeamSize,int32 Seed=42);
+    // Lookouts, compounds and cover groups on the widest uncovered floor of any unsealed layout.
+    void EnrichOpenGround(int32 Seed,FERProceduralLayout& Layout,const FERCellSettings& Cells);
     // Recognisable rooms from the shared furniture kit; never moves walls, routes or starts.
     void FurnishInteriors(int32 Seed,FERProceduralLayout& Layout,const FERCellSettings& Cells);
     // Adds the room and its mate: half-turn about the origin, or reflection across Y=0.
     void AddInteriorPair(FERProceduralLayout& Layout,FERLayoutInterior Interior,bool Mirror=false);
+    // Cells of one panel's box, and how many more the shared passes may still add to a layout.
+    int64 PanelCellCount(const FERCellPanelDesc& Panel);
+    int64 SharedCellRoom(const FERProceduralLayout& Layout);
     // Share of the open-ground budget of 1500m² per team-size unit. Streets and sealed rooms
     // bend every walk, so they shrink until bases sit a comparable walk apart, not a comparable area.
     inline float AreaDensity(EERMapArchetype Archetype)

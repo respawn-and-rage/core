@@ -11,13 +11,6 @@ constexpr float Lane=90;     // Half-width kept clear along every recorded route
 constexpr float DoorReach=130,StartReach=120,WallGap=3;
 // Furniture stops well inside the cell world's panel and storage limits.
 constexpr int32 PanelBudget=3400;
-constexpr int64 CellBudget=6500000;
-int64 CellCount(const FERCellPanelDesc& P)
-{
-    int64 N=1;
-    for(int32 Axis=0;Axis<3;++Axis)N*=FMath::Max(1,FMath::RoundToInt32(P.Cell[Axis]>0 ? P.Size[Axis]/P.Cell[Axis]:1.));
-    return N;
-}
 
 enum class EItem : uint8
 {
@@ -154,6 +147,21 @@ void AddInteriorPair(FERProceduralLayout& L,FERLayoutInterior Interior,bool Mirr
     L.Interiors.Add(MoveTemp(Interior));
 }
 
+int64 PanelCellCount(const FERCellPanelDesc& P)
+{
+    int64 N=1;
+    for(int32 Axis=0;Axis<3;++Axis)N*=FMath::Max(1,FMath::RoundToInt32(P.Cell[Axis]>0 ? P.Size[Axis]/P.Cell[Axis]:1.));
+    return N;
+}
+
+int64 SharedCellRoom(const FERProceduralLayout& L)
+{
+    int64 Used=0;bool Skins=false;
+    for(const auto& P:L.Panels){Used+=PanelCellCount(P);Skins|=!P.Skin.IsEmpty();}
+    // Skinned templates store their shells sparsely under a far larger limit; plain ones share 8M cells.
+    return Skins ? 3000000:FMath::Max<int64>(0,6500000-Used);
+}
+
 void FurnishInteriors(int32 Seed,FERProceduralLayout& L,const FERCellSettings& Cells)
 {
     L.InteriorPanelStart=L.Panels.Num();L.InteriorFixedStart=L.FixedPieces.Num();
@@ -174,7 +182,7 @@ void FurnishInteriors(int32 Seed,FERProceduralLayout& L,const FERCellSettings& C
     }
     for(const auto& Site:L.CoverSites)Segments.Emplace(Site.Entry,Site.Hide);
     int32 NextId=0;for(const auto& P:L.Panels)NextId=FMath::Max(NextId,P.Id/8+1);
-    int64 CellsUsed=0;for(const auto& P:L.Panels)CellsUsed+=CellCount(P);
+    const int64 CellRoom=SharedCellRoom(L);int64 CellsUsed=0;
     const int32 Count=L.Interiors.Num();bool Open=true;int32 Mates=0;
     for(int32 Index=0;Index<Count;++Index)
     {
@@ -182,7 +190,7 @@ void FurnishInteriors(int32 Seed,FERProceduralLayout& L,const FERCellSettings& C
         // Mates are consecutive. Budgets close on a pair boundary, so they are furnished together.
         const bool Second=I.Paired && (Mates%2)!=0;const int32 Key=I.Paired ? Mates/2:0x4000+Index;
         if(I.Paired)++Mates;
-        if(!Second)Open=L.Panels.Num()<PanelBudget && CellsUsed<CellBudget;
+        if(!Second)Open=L.Panels.Num()<PanelBudget && CellsUsed<CellRoom;
         if(!Open)continue;
         if(I.Half.X<120 || I.Half.Y<120 || !I.Frame.GetScale3D().Equals(FVector::OneVector,1.e-4))continue;
         // Mates share a room type and a budget. The arrangement is the same in half of the pairs;
@@ -291,7 +299,7 @@ void FurnishInteriors(int32 Seed,FERProceduralLayout& L,const FERCellSettings& C
                 }
                 else AddPieceCells(NextId,Parts[J].Material,B,false,Cells,L.Panels);
                 ++NextId;
-                for(int32 P=First;P<L.Panels.Num();++P){L.Panels[P].Transform=L.Panels[P].Transform*I.Frame;CellsUsed+=CellCount(L.Panels[P]);}
+                for(int32 P=First;P<L.Panels.Num();++P){L.Panels[P].Transform=L.Panels[P].Transform*I.Frame;CellsUsed+=PanelCellCount(L.Panels[P]);}
             }
             return true;
         };

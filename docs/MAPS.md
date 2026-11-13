@@ -17,7 +17,7 @@ entries expose rotation toggles; a Town-only pool remains Town-only. All maps co
 Recipes live in `Art/MapTemplates`. Reproduce a layout with
 `/Game/EclipseRecoil/Maps/<Level>?MapSeed=42`, or `ERMapGenerate <seed>` on authority.
 
-**Code:** `ERSpawnZones.cpp`, `ERLayoutSolids.h`, `ERMapCatalog`, `ERMapTemplate.h`, `ERProceduralConfig.h`, `ERProceduralMap`, `ERMapSizing.cpp`, `ERMapTheme.h`, `ERInteriors.cpp`.
+**Code:** `ERSpawnZones.cpp`, `ERLayoutSolids.h`, `ERMapCatalog`, `ERMapTemplate.h`, `ERProceduralConfig.h`, `ERProceduralMap`, `ERMapSizing.cpp`, `ERMapTheme.h`, `ERInteriors.cpp`, `EROpenGround.cpp`.
 
 ## Design goals
 
@@ -33,7 +33,14 @@ fight from. Fill is not a goal.
 - **Comparable time to contact.** Size follows the walk between bases, not the floor area alone.
 - **Substantial, not perfect, symmetry.** Structure, routes and starts are paired. Furniture may
   differ between mates, within the same room type and budget.
+- **Earned vantage.** A strong position is reached by a way that has to be found: a ladder
+  inside a house, a hatch, a firing step behind a wall, an entrance that opens only when its
+  boards are broken. Never a tower in plain sight with its ladder facing the fight.
+- **No bare ground.** Wide flat floor with a few scattered obstacles is a defect. Open floor is
+  taken by structures that give rooms, enclosures and height, not by more obstacles.
 - **Variety between seeds.** A seed should change the plan, not only its dimensions.
+- **General rules first.** A rule that makes maps play better belongs in a shared pass that reads
+  only common layout data, so every template, present or future, inherits it.
 
 References: Central Building follows compact house maps (Lake, Safehouse, Bank), Town a dense
 shopping district (Chinatown), Village timber compounds (Shoots, St. Marc), Alleys three-lane
@@ -74,6 +81,32 @@ towns (Dust II, Mirage). No reference geometry is imported.
   Existing standing routes and cover entry paths remain clear of the new screens.
   Every opposing pair stays screened. Real standing, support and exit collision checks
   run before readiness. Zone count is independent of player slots and capacity.
+- **Open ground.** `ERProcedural::EnrichOpenGround` runs on every accepted, unsealed layout before
+  the interiors, and needs nothing from the builder. It rasters the arena at 1m, blocks the
+  boundary, exclusions, water, base courts, declared house footprints and every solid, keeps
+  lanes along recorded routes (170cm), starts and pockets (7m), cover entries and ladders, and
+  measures how far each open cell is from the nearest solid. While a cell on the sampled half is at least 4m clear, it builds
+  there and at the mate position, facing the middle of the arena: a **lookout** (one-room house
+  whose parapeted roof is reached only by the ladder inside, through a roof hatch; at least 18m
+  from every start; the door is boarded with timber in half of them), a **compound** (2m walls
+  around a yard, one open gate, one boarded gap, three 20cm rises to a firing step that clears
+  the wall), or a **cover group**. At most two pairs of lookouts and two of compounds, and
+  2–10 pairs in all by arena area. On graded terrain a structure stands on its own plinth with
+  its doorway on the uphill side, a compound yard gets a level slab, and a ladder stands on that
+  finished floor; lookouts accept 90cm of fall, cover 30cm, compounds 20cm.
+  Houses and yards are declared to the interior kit. The same pass then cuts **boarded breaches**:
+  a 110cm gap through a builder's ground-level Brick or Concrete wall at least 4m long, closed by
+  timber boards, where both sides are standing floor within 3m of a recorded route, 15m from every
+  start and 12m from another breach; 1–4 pairs by area, each with its mate gap in the mate wall.
+  A gap is kept only if the open hole, without its boards, still leaves every opposing pair of
+  starts screened. Breaking the boards joins two ways the intact map keeps apart, which is how
+  dense templates get their hidden routes. Names land in `FeatureNames` as `Ground.*`, and each
+  run logs one `ER_OPEN_GROUND` line with what it built and why spots were rejected.
+  `ERProcedural::Build` rechecks spawn occlusion after the pass and keeps the plain plan if it
+  would be lost (`ER_OPEN_GROUND_REVERTED`), then logs the cost of both shared passes as
+  `ER_SHARED_PASSES`. The pass appends: `GroundPanelStart`,
+  `GroundFixedStart` and `GroundLadderStart` mark where the builder's own construction ends, so a
+  template's tests judge its materials, counts and exact pairing up to those indices.
 - **Interiors.** A builder declares its rooms, courts and street edges as `FERLayoutInterior`
   (`AddInteriorPair`). `ERProcedural::FurnishInteriors` runs once on the accepted layout, after
   spawn zones and before the palette, and fills each with a room program from the shared kit:
@@ -84,6 +117,8 @@ towns (Dust II, Mirage). No reference geometry is imported.
   instanced metal. Mates share a room type and budget; half of the pairs repeat the arrangement
   and one in four swaps the second room's type within its family. Furnishing stops on a pair
   boundary inside the panel and cell budgets, and `Interior.<Program>` lands in `FeatureNames`.
+  Both shared passes draw on `ERProcedural::SharedCellRoom`: what the builder left of the dense
+  cell limit, or a fixed allowance on skinned templates, whose shells are stored sparsely.
 - Rounds advance the seed before respawn. Menu sessions use fresh seeds.
 - Cosmetic rolls use a separate stream and never consume geometry RNG.
 
@@ -205,7 +240,10 @@ route back to the playable area, including the ground behind stairs and raised p
 
 1. Recipe `DA_<Name>` and level `L_<Name>` through a `setup_<name>.py` that validates 516 seeds.
 2. Register in `ERMapCatalog.cpp`, and add it to `MapsToCook` in `Config/DefaultGame.ini`.
-3. Native builder `ER<Name>.cpp`, reached from `ERProcedural::Build`; team sizing in `ERMapSizing.cpp`.
+3. Native builder `ER<Name>.cpp`, reached from `ERProcedural::Build`; team sizing in `ERMapSizing.cpp`
+   and an `AreaDensity`. Record every standing route, set `LayoutSymmetry` and the exclusion boxes:
+   the open-ground pass then works unasked. Declare enterable rooms with `AddInteriorPair` to
+   have them furnished. Add the template to `EclipseRecoil.Maps.Interiors`.
 4. Bind a `DA_Theme_<Name>` palette as `ThemeLibrary`, and add the map to the digest-affecting fields if it has new geometry data.
 5. Bump `AERBlockRoom::Protocol` for any change in generated geometry.
 6. Layout and physics automation, a `test-<name>.py`, and a page in `docs/maps/`.
@@ -243,6 +281,7 @@ scripts from downgrading. Do not recreate retired levels (Killhouse, Dust, labor
 ## Verify
 
 `preview-map-sizing.py --verify-seeds 512`, `test-lobby.py --industrial --map-sizing`,
-`test-map-playability.py`, `test-map-selection.py`. Native: `EclipseRecoil.Maps.*`, `EclipseRecoil.Destruction.SharedMapThemes`. Every template meets the same
+`test-map-playability.py`, `test-map-selection.py`. Native: `EclipseRecoil.Maps.*`, `EclipseRecoil.Destruction.SharedMapThemes`.
+`EclipseRecoil.Maps.Interiors` covers the shared open-ground and furniture passes on every template. Every template meets the same
 bar: 516 seeds natively, several physical seeds with real capsules, a real pawn on stairs and doors,
 damage, regeneration, and initial plus late client snapshots.

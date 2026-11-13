@@ -131,8 +131,10 @@ bool FERVillageLayoutTest::RunTest(const FString& Parameters)
         }
         TSet<FString> Panels;for(const auto& P:L.Panels)Panels.Add(Key(P,false));
         bool Solid=false;
-        for(const auto& P:L.Panels)
+        // Village's own timber construction; shared open-ground and furniture passes follow it.
+        for(int32 Own=0;Own<L.GroundPanelStart;++Own)
         {
+            const auto& P=L.Panels[Own];
             if(!Panels.Contains(Key(P,true))){AddError(TEXT("unpaired Village construction"));return false;}
             TestTrue(TEXT("only timber and sheet metal"),P.Material==EERBlockMaterial::Wood || P.Material==EERBlockMaterial::Metal);
             if(P.Material==EERBlockMaterial::Wood){Solid|=P.Size.Y>=8;TestTrue(TEXT("wood cells retain calibrated depth"),FMath::IsNearlyEqual(P.Cell.Y,2));}
@@ -271,7 +273,7 @@ bool FERVillagePhysicsTest::RunTest(const FString& Parameters)
             TestTrue(TEXT("every platform has a physical floor"),World->LineTraceSingleByChannel(Hit,{D.GetCenter().X,D.GetCenter().Y,D.Max.Z+20},{D.GetCenter().X,D.GetCenter().Y,D.Max.Z-30},ECC_Visibility,Q));
         TestTrue(TEXT("spawn galleries are actually raised"),L.AlphaSpawns[0].GetLocation().Z>=260);
         TestTrue(TEXT("central covers block direct spawn-to-spawn sightline"),World->LineTraceSingleByChannel(Hit,L.AlphaSpawns[2].GetLocation()+FVector(0,0,64),L.OmegaSpawns[2].GetLocation()+FVector(0,0,64),ECC_Visibility,Q));
-        TestEqual(TEXT("side shack and extra storey ladders"),L.Ladders.Num(),2+L.VillageUpperLadders.Num());
+        TestEqual(TEXT("side shack and extra storey ladders"),L.GroundLadderStart,2+L.VillageUpperLadders.Num());
         for(const auto& Ladder:L.Ladders)
         {
             for(float H=25;H<Ladder.DeckHeight;H+=25)TestTrue(TEXT("timber ladder rungs are physical"),World->LineTraceSingleByChannel(Hit,Ladder.Frame.TransformPosition({15,0,H}),Ladder.Frame.TransformPosition({-15,0,H}),ECC_Visibility,Q));

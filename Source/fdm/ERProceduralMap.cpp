@@ -203,6 +203,21 @@ bool ERProcedural::BuildGeometry(const FERProceduralConfig& C,const FERBlockRoom
 bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERProceduralLayout& Out,const FERCellSettings& Cells)
 {
     if(C.ExpectedTeamSize<0 || C.ExpectedTeamSize>16)return false;
+    // Shared passes over an accepted layout. A gameplay layout that would lose its spawn screening
+    // to the open-ground pass keeps the plain plan instead: the passes never cost a valid map.
+    auto Finish=[&](FERProceduralLayout& Layout)
+    {
+        const double Start=FPlatformTime::Seconds();
+        FERProceduralLayout Plain=Layout;
+        EnrichOpenGround(C.Seed,Layout,Cells);
+        if(C.ExpectedTeamSize>0 && !ERPlayability::InitialSpawnsOccluded(Layout))
+        {
+            UE_LOG(LogTemp,Warning,TEXT("ER_OPEN_GROUND_REVERTED seed=%d team=%d"),C.Seed,C.ExpectedTeamSize);
+            Layout=MoveTemp(Plain);Layout.GroundPanelStart=Layout.Panels.Num();Layout.GroundFixedStart=Layout.FixedPieces.Num();Layout.GroundLadderStart=Layout.Ladders.Num();
+        }
+        FurnishInteriors(C.Seed,Layout,Cells);
+        UE_LOG(LogTemp,Display,TEXT("ER_SHARED_PASSES seed=%d team=%d ms=%.1f"),C.Seed,C.ExpectedTeamSize,(FPlatformTime::Seconds()-Start)*1000);
+    };
     if(C.TemplateAsset && C.ExpectedTeamSize>0)
     {
         TStrongObjectPtr<UERMapTemplate> Recipe(DuplicateObject<UERMapTemplate>(C.TemplateAsset,GetTransientPackage()));
@@ -258,13 +273,13 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
                 continue;
             }
             if(BestSpawnZones>Zones)Next=MoveTemp(BestSpawnFit);
-            FurnishInteriors(C.Seed,Next,Cells);
+            Finish(Next);
             if(!ApplyMapTheme(C,Next))return false;
             Out=MoveTemp(Next);return true;
         }
         if(BestSpawnZones>0)
         {
-            FurnishInteriors(C.Seed,BestSpawnFit,Cells);
+            Finish(BestSpawnFit);
             if(!ApplyMapTheme(C,BestSpawnFit))return false;
             Out=MoveTemp(BestSpawnFit);return true;
         }
@@ -273,7 +288,7 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
     }
     FERProceduralLayout Next;
     if(!BuildGeometry(C,B,Next,Cells))return false;
-    FurnishInteriors(C.Seed,Next,Cells);
+    Finish(Next);
     if(!ApplyMapTheme(C,Next))return false;
     Out=MoveTemp(Next);return true;
 }

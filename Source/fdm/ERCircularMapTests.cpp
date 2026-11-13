@@ -25,7 +25,7 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
             L.BuildingFloors!=(TeamSize==1 ? 2 : TeamSize>=4 ? 4 : 3))
         {AddError(TEXT("villa exceeds its footprint or storey budget"));return false;}
         const bool RailingAnnex=L.FeatureNames.Contains(TEXT("RailingCrossingAnnex"));
-        if(!TestEqual(TEXT("every secondary roof has a ladder"),L.Ladders.Num(),
+        if(!TestEqual(TEXT("every secondary roof has a ladder"),L.GroundLadderStart,
             L.SecondaryStructures.Num()+(RailingAnnex ? 1:0)))return false;
         TimberAnnex|=L.SecondaryStructures.ContainsByPredicate([](const auto& Structure)
             {return Structure.Material==EERBlockMaterial::Wood;});

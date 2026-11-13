@@ -55,10 +55,11 @@ bool FERCentralBuildingLayoutTest::RunTest(const FString& Parameters)
         }
         TSet<FString> Solids;
         for(const auto& P:L.Panels){const auto Box=FBox(FVector::ZeroVector,P.Size).TransformBy(P.Transform);Solids.Add(Key(Box.GetCenter(),Box.GetSize(),uint8(P.Material)));}
-        for(const auto& P:L.Panels){const auto Box=FBox(FVector::ZeroVector,P.Size).TransformBy(P.Transform);auto V=Box.GetCenter();V.X=-V.X;V.Y=-V.Y;if(!Solids.Contains(Key(V,Box.GetSize(),uint8(P.Material))) && !Solids.Contains(Key(V+2*L.CentralBuildingCenter,Box.GetSize(),uint8(P.Material)))){AddError(TEXT("unpaired cell geometry"));return false;}}
+        // The building's own construction; shared open-ground and furniture passes follow it.
+        for(int32 Own=0;Own<L.GroundPanelStart;++Own){const auto& P=L.Panels[Own];const auto Box=FBox(FVector::ZeroVector,P.Size).TransformBy(P.Transform);auto V=Box.GetCenter();V.X=-V.X;V.Y=-V.Y;if(!Solids.Contains(Key(V,Box.GetSize(),uint8(P.Material))) && !Solids.Contains(Key(V+2*L.CentralBuildingCenter,Box.GetSize(),uint8(P.Material)))){AddError(TEXT("unpaired cell geometry"));return false;}}
         Solids.Reset();
         for(const auto& P:L.FixedPieces)Solids.Add(Key(P.Transform.GetLocation(),P.Transform.GetScale3D(),uint8(P.Material)));
-        for(const auto& P:L.FixedPieces){auto V=P.Transform.GetLocation();V.X=-V.X;V.Y=-V.Y;if(!Solids.Contains(Key(V,P.Transform.GetScale3D(),uint8(P.Material))) && !Solids.Contains(Key(V+2*L.CentralBuildingCenter,P.Transform.GetScale3D(),uint8(P.Material)))){AddError(TEXT("unpaired fixed collision"));return false;}}
+        for(int32 Own=0;Own<L.GroundFixedStart;++Own){const auto& P=L.FixedPieces[Own];auto V=P.Transform.GetLocation();V.X=-V.X;V.Y=-V.Y;if(!Solids.Contains(Key(V,P.Transform.GetScale3D(),uint8(P.Material))) && !Solids.Contains(Key(V+2*L.CentralBuildingCenter,P.Transform.GetScale3D(),uint8(P.Material)))){AddError(TEXT("unpaired fixed collision"));return false;}}
         for(const auto& P:L.FixedPieces)if(P.PawnBarrier)
         {
             const FVector Size=P.Transform.GetScale3D()*100;
@@ -78,8 +79,8 @@ bool FERCentralBuildingLayoutTest::RunTest(const FString& Parameters)
             TestTrue(TEXT("towers and compact buildings prefer ladders"),S.LadderAccess==(S.Tower || S.Size.X<800 || S.Size.Y<1150));SecondaryFloors.Add(S.Floors);Tower|=S.Tower;Building|=!S.Tower;Materials.Add(uint8(S.Material));}
         for(float A:L.CoverAngles)Angles.Add(FMath::RoundToInt(FMath::Fmod(A+180,180)));
         TestEqual(TEXT("main and large buildings retain stairs"),L.StairRoutes.Num(),Flights);
-        TestEqual(TEXT("every compact storey and paired exterior has a ladder"),L.Ladders.Num(),Ladders);
-        for(int32 I=0;I<L.Ladders.Num();I+=2)
+        TestEqual(TEXT("every compact storey and paired exterior has a ladder"),L.GroundLadderStart,Ladders);
+        for(int32 I=0;I+1<L.GroundLadderStart;I+=2)
             TestTrue(TEXT("ladder access is half-turn symmetric"),(L.Ladders[I].Frame*FTransform(FRotator(0,180,0))).Equals(L.Ladders[I+1].Frame) || (L.Ladders[I].Frame*FTransform(FRotator(0,180,0))).GetLocation().Equals(L.Ladders[I+1].Frame.GetLocation()-2*L.CentralBuildingCenter));
         if(L.CrossingRule==EERCrossingRule::OpenYard)MinOpenCover=FMath::Min(MinOpenCover,L.CoverSites.Num());
         else MinOtherCover=FMath::Min(MinOtherCover,L.CoverSites.Num());
@@ -141,7 +142,7 @@ bool FERCentralBuildingFinishesTest::RunTest(const FString& Parameters)
             TestTrue(TEXT("palette preserves collision, material type and strength"),A.Id==Old.Id && A.Transform.Equals(Old.Transform) && A.Size==Old.Size && A.Material==Old.Material && A.Strength==Old.Strength);
             TestEqual(TEXT("finish repeats on clients"),A.Surface,Repeat.Panels[I].Surface);
             const auto* Palette=A.Material==EERBlockMaterial::Concrete ? &V.ConcreteSurfaces:A.Material==EERBlockMaterial::Brick ? &V.BrickSurfaces:A.Material==EERBlockMaterial::Wood ? &V.WoodSurfaces:nullptr;
-            if(Palette)TestTrue(TEXT("construction uses its visual palette"),Palette->Contains(A.Surface));
+            if(Palette && I<After.GroundPanelStart)TestTrue(TEXT("construction uses its visual palette"),Palette->Contains(A.Surface));
         }
         for(int32 I=0;I<After.FixedPieces.Num();++I)TestTrue(TEXT("palette preserves fixed collision"),After.FixedPieces[I].Transform.Equals(Before.FixedPieces[I].Transform));
     }
@@ -173,7 +174,7 @@ bool FERCentralBuildingCollisionTest::RunTest(const FString& Parameters)
         const auto& L=Map->GetLayout();TestTrue(TEXT("valid cell chunks"),Map->ValidateCells());
         int32 ExpectedLadders=(L.TerracedBuilding ? L.BuildingFloors*2:2)+L.SecondaryStructures.Num();
         for(const auto& S:L.SecondaryStructures)if(S.LadderAccess)ExpectedLadders+=S.Floors;
-        TestEqual(TEXT("paired interior and exterior ladders"),L.Ladders.Num(),ExpectedLadders);
+        TestEqual(TEXT("paired interior and exterior ladders"),L.GroundLadderStart,ExpectedLadders);
         for(const auto& Desc:L.Ladders)
         {
             auto* Ladder=World->SpawnActor<AERLadder>(AERLadder::StaticClass(),Desc.Frame);

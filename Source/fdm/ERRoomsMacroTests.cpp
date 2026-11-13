@@ -63,7 +63,8 @@ bool FERRoomsMacroLayoutTest::RunTest(const FString&)
         if(L.RoomsMacroVariant==INDEX_NONE)
         {
             ++Fallback;
-            TestEqual(*(Case+TEXT(": a fallback is exactly legacy")),L.RoomLinks.Num(),Legacy.RoomLinks.Num());
+            // A sized fallback was fitted with the macro corridors counted, so only an unsized one is exactly legacy.
+            if(Team==0)TestEqual(*(Case+TEXT(": a fallback is exactly legacy")),L.RoomLinks.Num(),Legacy.RoomLinks.Num());
             continue;
         }
         ++Applied;Used.Add(L.RoomsMacroVariant);
