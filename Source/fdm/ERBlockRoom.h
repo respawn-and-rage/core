@@ -192,9 +192,11 @@ protected:
     bool BuildCellWorld(const TArray<FERCellPanelDesc>& Panels);
     UPROPERTY() TObjectPtr<class UMaterialInterface> MapLampSurface;
     TArray<FERMapLamp> MapLamps;
+    TArray<FERMapLightZone> MapLightZones;
     void ConfigureMapLamps();
 private:
     UPROPERTY(Transient) TArray<TObjectPtr<class USpotLightComponent>> MapLampEmitters;
+    UPROPERTY(Transient) TArray<TObjectPtr<class UPointLightComponent>> MapZoneEmitters;
     int64 LastLampRemovalCount = -1;
     void RefreshMapLamps();
     friend class FERCellNetTransactionTest;

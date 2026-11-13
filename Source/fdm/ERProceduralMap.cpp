@@ -13,7 +13,9 @@
 #include "Sound/SoundAttenuation.h"
 #include "Components/DynamicMeshComponent.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
 #include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
 #include "HAL/IConsoleManager.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "Engine/StaticMesh.h"
@@ -452,11 +454,14 @@ bool AERProceduralMap::GenerateLogicalWorld()
     ResolveMapCandidate();
     FERProceduralLayout Next;
     if (!ERProcedural::Build(LayoutConfig,Config,Next,CellSettings)) return false;
-    MapLamps.Reset();
+    TArray<FERMapLamp> NextLamps;
+    TArray<FERMapLightZone> NextLightZones;
     if (const auto* Recipe = LayoutConfig.TemplateAsset.Get())
         ERMapLighting::Build(Next, *Recipe, CellSettings.CellSize, MapLampSurface,
-            EROutdoorBackdrop::IsNight(*GetWorld()), MapLamps);
+            EROutdoorBackdrop::IsNight(*GetWorld()), NextLamps, NextLightZones);
     if (!BuildCellWorld(Next.Panels)) return false;
+    MapLamps = MoveTemp(NextLamps);
+    MapLightZones = MoveTemp(NextLightZones);
     PlayabilityDraft.Reset();
     if(HasAuthority() && ERPlayability::Mode()==EERPlayabilityMode::ReportOnly && LayoutConfig.TemplateAsset)
     {
@@ -500,15 +505,18 @@ void AERProceduralMap::OnGenerationFinished()
     PlayabilityDraft.Reset();
 }
 static TAutoConsoleVariable<int32> CVarERInteriorLights(TEXT("er.InteriorLights"),1,TEXT("Closed interiors: enable low ambient fill alongside destructible lamps."));
-static TAutoConsoleVariable<float> CVarERInteriorKeyLux(TEXT("er.InteriorKeyLux"),.75f,TEXT("Closed interiors: key directional light, lux."));
-static TAutoConsoleVariable<float> CVarERInteriorFillLux(TEXT("er.InteriorFillLux"),.3f,TEXT("Closed interiors: opposite fill directional light, lux."));
-static TAutoConsoleVariable<float> CVarERInteriorBounceLux(TEXT("er.InteriorBounceLux"),.25f,TEXT("Closed interiors: upward bounce light on ceilings and undersides, lux."));
+static TAutoConsoleVariable<float> CVarERInteriorKeyLux(TEXT("er.InteriorKeyLux"),.06f,TEXT("Closed interiors: key directional light, lux."));
+static TAutoConsoleVariable<float> CVarERInteriorFillLux(TEXT("er.InteriorFillLux"),.04f,TEXT("Closed interiors: opposite fill directional light, lux."));
+static TAutoConsoleVariable<float> CVarERInteriorBounceLux(TEXT("er.InteriorBounceLux"),.05f,TEXT("Closed interiors: upward bounce light on ceilings and undersides, lux."));
 void AERProceduralMap::ConfigureInteriorLighting()
 {
-    // Closed halls read as closed from their walls, ceiling and emissive panels. A
-    // shadowless key, fill and upward bounce replace dozens of overlapping point
-    // lights; the level sun, fully occluded by the shell, stops rendering shadow
-    // maps that show nothing.
+    // The shadowless fill keeps surfaces readable after the local lamps go out.
+    // Cap the authored skylight so that it does not compete with intact lamps.
+    for (TActorIterator<ASkyLight> It(GetWorld()); It; ++It)
+    {
+        auto* Ambient = It->GetLightComponent();
+        Ambient->SetIntensity(FMath::Min(Ambient->Intensity, .05f));
+    }
     UDirectionalLightComponent* Key=nullptr;
     for(TActorIterator<ADirectionalLight> It(GetWorld());It;++It)
         if(auto* Light=Cast<UDirectionalLightComponent>(It->GetLightComponent()))
@@ -520,7 +528,7 @@ void AERProceduralMap::ConfigureInteriorLighting()
     {
         Light->SetMobility(EComponentMobility::Movable);
         Light->SetCastShadows(false);Light->SetAffectTranslucentLighting(true);
-        Light->SetIntensity(Lux * .25f);Light->SetLightColor(FLinearColor::White);
+        Light->SetIntensity(Lux);Light->SetLightColor(FLinearColor::White);
         Light->SetAtmosphereSunLight(false);
         Light->SetWorldRotation(Rotation);Light->SetVisibility(true);
     };
@@ -530,6 +538,7 @@ void AERProceduralMap::ConfigureInteriorLighting()
         Key->SetupAttachment(RootComponent);Key->RegisterComponent();WarehouseLights.Add(Key);
     }
     Configure(Key,FRotator(-58,35,0),CVarERInteriorKeyLux.GetValueOnGameThread());
+    Key->SetForwardShadingPriority(1);
     auto Add=[&](const FRotator& Rotation,float Lux)
     {
         auto* Light=NewObject<UDirectionalLightComponent>(this);AddInstanceComponent(Light);

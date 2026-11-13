@@ -28,11 +28,10 @@ when the general ceiling display option is disabled.
   two independent accesses and checked standing headroom.
 - Roof groups are omitted from minimap capture. Bounded attempts end with a safe
   procedural reference composition. White emissive 60cm square ceiling panels share Rooms'
-  owned office finish on a 12m grid; shadowless key, fill and bounce directional lights light the hall
-  (see [MAPS.md](../MAPS.md#outdoor-backdrop)). Panels have
-  no collision and are hidden from the minimap. A neutral
-  specified ambient cubemap replaces the blue atmospheric capture; setup is scoped
-  to Fire Training through `setup_fire_training_lighting.py`.
+  owned office finish. Up to four breakable panels share a sector fill and contribute
+  equally to its brightness above the ambient minimum
+  (see [MAPS.md](../MAPS.md#outdoor-backdrop)). A neutral specified ambient cubemap
+  replaces the blue atmospheric capture through `setup_fire_training_lighting.py`.
 
 The warehouse kit, wet concrete and their import sources are retired. The hall uses the Rooms corridor palette for its walls, floor and ceiling. Shared steel derivatives live in the Industrial library.
 `setup_remove_warehouse.py` audits references and verifies an external rollback before removal. Geometry uses generated solids, cell constructions

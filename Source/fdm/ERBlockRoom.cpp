@@ -19,6 +19,7 @@
 #include "Misc/App.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SpotLightComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Engine/DamageEvents.h"
 #include "Engine/StaticMesh.h"
 #include "HAL/PlatformTime.h"
@@ -149,15 +150,28 @@ void AERBlockRoom::ConfigureMapLamps()
 {
     for (const auto& Emitter : MapLampEmitters)
     {
+        if (!Emitter) continue;
         RemoveInstanceComponent(Emitter.Get());
         Emitter->DestroyComponent();
     }
     MapLampEmitters.Reset();
+    for (const auto& Emitter : MapZoneEmitters)
+    {
+        RemoveInstanceComponent(Emitter.Get());
+        Emitter->DestroyComponent();
+    }
+    MapZoneEmitters.Reset();
     LastLampRemovalCount = -1;
     if (GetNetMode() == NM_DedicatedServer || !FApp::CanEverRender() || !GetWorld()->IsGameWorld()) return;
     int32 Banks = 0;
     for (const FERMapLamp& Lamp : MapLamps)
     {
+        Banks += Lamp.Pole != INDEX_NONE ? 1 : 0;
+        if (Lamp.Candelas <= 0.f)
+        {
+            MapLampEmitters.Add(nullptr);
+            continue;
+        }
         auto* Emitter = NewObject<USpotLightComponent>(this);
         AddInstanceComponent(Emitter);
         Emitter->SetupAttachment(GetRootComponent());
@@ -165,23 +179,41 @@ void AERBlockRoom::ConfigureMapLamps()
         Emitter->SetRelativeLocationAndRotation(Lamp.Position, Lamp.Direction);
         Emitter->SetIntensityUnits(ELightUnits::Candelas);
         Emitter->SetAttenuationRadius(Lamp.Radius);
-        Emitter->SetOuterConeAngle(Lamp.Floodlight ? 35.f : 49.f);
-        Emitter->SetInnerConeAngle(Lamp.Floodlight ? 21.f : 30.f);
-        Emitter->SetSourceRadius(Lamp.Floodlight ? 38.f : 24.f);
-        Emitter->SetLightColor(Lamp.Floodlight ? FLinearColor(.76f,.85f,1.f) : FLinearColor(.9f,.94f,1.f));
+        Emitter->SetOuterConeAngle(Lamp.OuterCone);
+        Emitter->SetInnerConeAngle(Lamp.InnerCone);
+        Emitter->SetSourceRadius(24.f);
+        Emitter->SetLightColor(FLinearColor(.9f,.94f,1.f));
         Emitter->SetCastShadows(false);
-        if (Lamp.Floodlight) Emitter->SetAffectTranslucentLighting(false);
         Emitter->SetAffectGlobalIllumination(false);
         Emitter->SetVolumetricScatteringIntensity(0.f);
         Emitter->SetSpecularScale(.35f);
         Emitter->RegisterComponent();
         MapLampEmitters.Add(Emitter);
-        Banks += Lamp.Floodlight ? 1 : 0;
     }
+    for (const auto& Zone : MapLightZones)
+        for (const FVector& Position : Zone.FillPositions)
+        {
+            auto* Fill = NewObject<UPointLightComponent>(this);
+            AddInstanceComponent(Fill);
+            Fill->SetupAttachment(GetRootComponent());
+            Fill->SetMobility(EComponentMobility::Movable);
+            Fill->SetRelativeLocation(Position);
+            Fill->SetUseInverseSquaredFalloff(false);
+            Fill->SetIntensityUnits(ELightUnits::Unitless);
+            Fill->SetAttenuationRadius(Zone.Radius);
+            Fill->SetLightFalloffExponent(1.5f);
+            Fill->SetLightColor(Zone.Color);
+            Fill->SetCastShadows(false);
+            Fill->SetAffectGlobalIllumination(false);
+            Fill->SetVolumetricScatteringIntensity(0.f);
+            Fill->SetSpecularScale(0.f);
+            Fill->RegisterComponent();
+            MapZoneEmitters.Add(Fill);
+        }
     RefreshMapLamps();
     if (!MapLamps.IsEmpty())
-        UE_LOG(LogTemp, Display, TEXT("ER_MAP_LIGHTS banks=%d indoor=%d shadow_maps=0"),
-            Banks, MapLamps.Num() - Banks);
+        UE_LOG(LogTemp, Display, TEXT("ER_MAP_LIGHTS banks=%d indoor=%d zones=%d fill_emitters=%d shadow_maps=0"),
+            Banks, MapLamps.Num() - Banks, MapLightZones.Num(), MapZoneEmitters.Num());
 }
 
 void AERBlockRoom::RefreshMapLamps()
@@ -192,10 +224,22 @@ void AERBlockRoom::RefreshMapLamps()
     {
         const FERMapLamp& Lamp = MapLamps[Index];
         auto* Emitter = MapLampEmitters[Index].Get();
+        if (!Emitter) continue;
         const int32 Working = Lamp.WorkingLenses(CellWorld);
         const float Intensity = Lamp.Candelas * float(Working) / float(Lamp.Lenses.Num());
         if (Emitter->Intensity != Intensity) Emitter->SetIntensity(Intensity);
         if (Emitter->IsVisible() != (Working > 0)) Emitter->SetVisibility(Working > 0);
+    }
+    int32 FillIndex = 0;
+    for (const auto& Zone : MapLightZones)
+    {
+        const float Intensity = Zone.Intensity * Zone.PoweredFraction(MapLamps, CellWorld);
+        for (int32 Index = 0; Index < Zone.FillPositions.Num(); ++Index)
+        {
+            auto* Fill = MapZoneEmitters[FillIndex++].Get();
+            if (Fill->Intensity != Intensity) Fill->SetIntensity(Intensity);
+            if (Fill->IsVisible() != (Intensity > 0.f)) Fill->SetVisibility(Intensity > 0.f);
+        }
     }
 }
 void AERBlockRoom::ConfigureFloors()

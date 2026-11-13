@@ -24,7 +24,7 @@ Sealed half-turn room graph with no arena floor outside it. 4, 6, 8 or 10 rooms.
   count as obstacles; junction chambers stay bare.
 - Area density is 0.6 of the open-ground budget.
 - White emissive 60cm square ceiling panels use the owned `M_OfficeCeilingWhite` finish;
-  fixtures are visual only and do not block movement or shots.
+  breaking a panel removes its share of the room or corridor fill above the ambient minimum.
 - Prototype, off by default: `bEnablePCGExMacroGraph` swaps the straight lower spine for a baked
   central structure. See [PROCEDURAL_MAP_PLAYABILITY.md](../PROCEDURAL_MAP_PLAYABILITY.md#rooms-macro-graph).
 

@@ -4,9 +4,13 @@
 bool AERDepotNight::GenerateLogicalWorld()
 {
     TArray<FERCellPanelDesc> Panels;
-    MapLamps.Reset();
-    ERMapLighting::BuildDepot(CellSettings.CellSize, MapLampSurface, Panels, MapLamps);
-    return BuildCellWorld(Panels);
+    TArray<FERMapLamp> NextLamps;
+    TArray<FERMapLightZone> NextZones;
+    ERMapLighting::BuildDepot(CellSettings.CellSize, MapLampSurface, Panels, NextLamps, NextZones);
+    if (!BuildCellWorld(Panels)) return false;
+    MapLamps = MoveTemp(NextLamps);
+    MapLightZones = MoveTemp(NextZones);
+    return true;
 }
 
 void AERDepotNight::ConfigureFloors()

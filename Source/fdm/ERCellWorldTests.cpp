@@ -4,6 +4,8 @@
 #include "ERCellMesher.h"
 #include "ERCellNetShard.h"
 #include "ERCellWorld.h"
+#include "ERProceduralMap.h"
+#include "Materials/Material.h"
 #include "Engine/World.h"
 #include "Components/DynamicMeshComponent.h"
 #include "DynamicMesh/DynamicMesh3.h"
@@ -434,9 +436,13 @@ bool FERMapLampCellsTest::RunTest(const FString&)
 {
     TArray<FERCellPanelDesc> Panels;
     TArray<FERMapLamp> Lamps;
+    TArray<FERMapLightZone> Zones;
     FERCellSettings Settings;
-    ERMapLighting::BuildDepot(Settings.CellSize, nullptr, Panels, Lamps);
-    if (!TestEqual(TEXT("six perimeter banks"), Lamps.Num(), 6)) return false;
+    ERMapLighting::BuildDepot(Settings.CellSize, nullptr, Panels, Lamps, Zones);
+    if (!TestEqual(TEXT("six perimeter banks"), Lamps.Num(), 6) ||
+        !TestEqual(TEXT("six diffuse sectors"), Zones.Num(), 6)) return false;
+    for (const auto& Lamp : Lamps)
+        TestEqual(TEXT("night banks have no direct beam"), Lamp.Candelas, 0.f);
     FERCellWorld Authority, Peer;
     auto* Materials = NewObject<UERBlockMaterialCatalog>();
     FString Error;
@@ -450,12 +456,14 @@ bool FERMapLampCellsTest::RunTest(const FString&)
     TestTrue(TEXT("intact lenses and plates are connected to their pole"), Unsupported.IsEmpty());
     const auto& Bank = Lamps[0];
     TestEqual(TEXT("four powered lenses"), Bank.WorkingLenses(Authority), 4);
+    TestEqual(TEXT("intact sector has full fill"), Zones[0].PoweredFraction(Lamps, Authority), 1.f);
     const FERCellId Lens{Bank.Lenses[0], 0, 0, 0};
     TMap<FERCellId, float> Damage;
     Damage.Add(Lens, 20.f);
     const auto Hit = Authority.ApplyDamage(Damage);
     TestEqual(TEXT("a shot removes a single lens"), Hit.Destroyed, 1);
     TestEqual(TEXT("one lens loss leaves three powered"), Bank.WorkingLenses(Authority), 3);
+    TestEqual(TEXT("one broken lens removes a quarter of sector fill"), Zones[0].PoweredFraction(Lamps, Authority), .75f);
     for (int32 Chunk : Hit.ChangedChunks)
     {
         TArray<uint8> Mask;
@@ -466,6 +474,7 @@ bool FERMapLampCellsTest::RunTest(const FString&)
         Peer.SetChunkAlive(Chunk, Alive, Dirty);
     }
     TestEqual(TEXT("peer sees the same broken lens"), Bank.WorkingLenses(Peer), 3);
+    TestEqual(TEXT("peer applies the same fill reduction"), Zones[0].PoweredFraction(Lamps, Peer), .75f);
 
     const auto& Pole = Authority.GetPanels()[Bank.Pole];
     Damage.Reset();
@@ -479,6 +488,75 @@ bool FERMapLampCellsTest::RunTest(const FString&)
     Authority.DetachCells(Fallen);
     TestEqual(TEXT("severing the steel pole disables the whole bank"), Bank.WorkingLenses(Authority), 0);
     TestEqual(TEXT("other floodlights stay on"), Lamps[1].WorkingLenses(Authority), 4);
+    TestEqual(TEXT("collapsed bank adds no fill"), Zones[0].PoweredFraction(Lamps, Authority), 0.f);
+    TestEqual(TEXT("other sector keeps its fill"), Zones[1].PoweredFraction(Lamps, Authority), 1.f);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERIndoorLightZonesTest, "EclipseRecoil.Destruction.Cells.IndoorLightZones",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FERIndoorLightZonesTest::RunTest(const FString&)
+{
+    for (const auto Archetype : {EERMapArchetype::Rooms, EERMapArchetype::FireTraining})
+    {
+        auto* Recipe = NewObject<UERMapTemplate>();
+        Recipe->Archetype = Archetype;
+        FERProceduralLayout Layout;
+        if (Archetype == EERMapArchetype::Rooms)
+        {
+            Recipe->Rooms.LampSurface = UMaterial::GetDefaultMaterial(MD_Surface);
+            for (double X : {-1800., 1800.})
+            {
+                auto& Room = Layout.RoomNodes.AddDefaulted_GetRef();
+                Room.Center = FVector(X, 0, 0);
+                Room.Size = FVector2D(1800, 1800);
+                Room.Height = 560;
+                for (double DX : {-400., 400.})
+                    for (double Y : {-400., 400.})
+                        Layout.FixedPieces.Add({FTransform(FVector(X + DX, Y, 555)), EERBlockMaterial::Concrete,
+                            nullptr, FRotator::ZeroRotator, false, true, Recipe->Rooms.LampSurface.Get()});
+            }
+            Layout.RoomLinks.Add({0, 1, FVector(-900, 0, 0), FVector(900, 0, 0), 360, 560, 40});
+            for (double X : {-600., 0., 600.})
+                Layout.FixedPieces.Add({FTransform(FVector(X, 0, 555)), EERBlockMaterial::Concrete,
+                    nullptr, FRotator::ZeroRotator, false, true, Recipe->Rooms.LampSurface.Get()});
+        }
+        else
+        {
+            Layout.WarehouseWidth = 4400;
+            Layout.WarehouseLength = 2200;
+            Layout.IndoorCeiling = 900;
+        }
+
+        TArray<FERMapLamp> Lamps;
+        TArray<FERMapLightZone> Zones;
+        FERCellSettings Settings;
+        ERMapLighting::Build(Layout, *Recipe, Settings.CellSize, nullptr, false, Lamps, Zones);
+        const bool IsRooms = Archetype == EERMapArchetype::Rooms;
+        if (!TestEqual(TEXT("each room, corridor or hall sector has its own fill"), Zones.Num(), IsRooms ? 3 : 2) ||
+            !TestEqual(TEXT("all breakable panels are retained"), Lamps.Num(), IsRooms ? 11 : 8)) return false;
+        if (IsRooms) TestEqual(TEXT("corridor panels share one circuit"), Zones[2].Lamps.Num(), 3);
+        for (const auto& Lamp : Lamps)
+            TestEqual(TEXT("panels have no individual beams"), Lamp.Candelas, 0.f);
+
+        FERCellWorld Cells;
+        FString Error;
+        if (!TestTrue(TEXT("build indoor lamp cells"), Cells.Build(Layout.Panels, Settings, NewObject<UERBlockMaterialCatalog>(), Error)) ||
+            !TestEqual(TEXT("four panels share the first zone"), Zones[0].Lamps.Num(), 4)) return false;
+        TestEqual(TEXT("intact zone is fully powered"), Zones[0].PoweredFraction(Lamps, Cells), 1.f);
+        int32 Broken = 0;
+        for (int32 Index : Zones[0].Lamps)
+        {
+            TMap<FERCellId, float> Damage;
+            Damage.Add({Lamps[Index].Lenses[0], 0, 0, 0}, 20.f);
+            TestEqual(TEXT("one panel breaks"), Cells.ApplyDamage(Damage).Destroyed, 1);
+            ++Broken;
+            TestEqual(TEXT("each panel removes exactly a quarter of the zone fill"),
+                Zones[0].PoweredFraction(Lamps, Cells), 1.f - .25f * Broken);
+            TestEqual(TEXT("neighbouring zone stays fully powered"), Zones[1].PoweredFraction(Lamps, Cells), 1.f);
+        }
+    }
     return true;
 }
 #endif

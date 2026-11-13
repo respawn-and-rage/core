@@ -272,6 +272,22 @@ bool EROutdoorBackdrop::Apply(AActor& Host, uint32 Seed, const FLinearColor& Gro
         }
         for (TActorIterator<ADirectionalLight> It(Host.GetWorld()); It; ++It)
             It->GetLightComponent()->SetVisibility(false);
+        // Keep a little light on the ground and walls even on presets without sky GI.
+        static const FName FillName(TEXT("EROutdoorNightFill"));
+        if (!FindObjectFast<UDirectionalLightComponent>(&Host, FillName))
+        {
+            auto* Fill = NewObject<UDirectionalLightComponent>(&Host, FillName);
+            Host.AddInstanceComponent(Fill);
+            Fill->SetupAttachment(Host.GetRootComponent());
+            Fill->SetMobility(EComponentMobility::Movable);
+            Fill->SetWorldRotation(FRotator(-55, 35, 0));
+            Fill->SetLightColor(FLinearColor(.66f, .75f, 1.f));
+            Fill->SetIntensity(.18f);
+            Fill->SetCastShadows(false);
+            Fill->SetAtmosphereSunLight(false);
+            Fill->SetAffectGlobalIllumination(false);
+            Fill->RegisterComponent();
+        }
         for (TActorIterator<ASkyLight> It(Host.GetWorld()); It; ++It)
         {
             auto* Ambient = It->GetLightComponent();

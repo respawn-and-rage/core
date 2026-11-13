@@ -106,17 +106,19 @@ one unlit texture (2048px for standard skies, 4096px for sunset and night) and a
 plane below the playable terrain.
 Village and variants with a grass ground use a dedicated horizon finish with the shared grass texture.
 The sky is visible in real-time Skylight captures. Night disables the level sun,
-reduces skylight and adds six perimeter steel poles aimed inward and down. Each square
-panel has four breakable lenses sharing one spotlight. The banks use narrow
-beams without dynamic shadows, with two opposing banks providing stronger light.
-Night uses reduced exposure.
-Each broken lens removes a quarter of the output. A severed pole collapses through
-the cell support graph and its bank goes dark.
+reduces skylight and adds six perimeter steel poles. Each square panel has four
+breakable lenses powering a broad, shadowless fill in its own sector. Each broken
+lens removes a quarter of that fill. Ceiling fixtures on outdoor maps also use
+local fill at night. A severed pole
+collapses through the cell support graph and its bank goes dark. Night uses reduced
+exposure and a dim fill that remains on presets without global illumination.
 
-Buildings use the same breakable square fixtures as Rooms, with short-range,
-shadowless spotlights. Fire Training and Rooms retain a low ambient fill
+Rooms groups breakable ceiling panels by room and corridor. Fire Training groups
+them in sectors of up to 2×2 panels. Each group uses broad, shadowless fill whose
+intensity follows the fraction of panels still working. The fill fades at sector
+edges. Fire Training and Rooms retain a low ambient minimum
 (`er.InteriorKeyLux`, `er.InteriorFillLux`, `er.InteriorBounceLux`).
-`er.InteriorLights 0` disables the fill. Only cell masks replicate damage to the
+`er.InteriorLights 0` disables the ambient minimum. Only cell masks replicate damage to the
 fixtures. Dedicated servers build the same collision without render emitters.
 
 `setup_outdoor_backdrops.py` creates the private art derivatives in Unreal and
