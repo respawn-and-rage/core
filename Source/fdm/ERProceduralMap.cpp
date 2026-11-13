@@ -225,7 +225,7 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
                 // corridor widths, heights, materials and cells unchanged.
                 for(int32 Fit=0;Fit<8;++Fit)
                 {
-                    const double Actual=PlayableAreaM2(Next),Target=TargetAreaM2(C.ExpectedTeamSize);
+                    const double Actual=PlayableAreaM2(Next),Target=TargetAreaM2(C.ExpectedTeamSize,C.TemplateAsset->Archetype);
                     if(Actual<=0 || FMath::Abs(Actual-Target)<=Target*.05)break;
                     Recipe->Rooms.NominalRoomSize=FMath::GridSnap(
                         Recipe->Rooms.NominalRoomSize*float(FMath::Sqrt(Target/Actual)),50.f);
@@ -238,7 +238,7 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
                 // recesses. Physical door, street and cell widths stay fixed.
                 for(int32 Fit=0;Fit<12;++Fit)
                 {
-                    const double Actual=PlayableAreaM2(Next),Target=TargetAreaM2(C.ExpectedTeamSize);
+                    const double Actual=PlayableAreaM2(Next),Target=TargetAreaM2(C.ExpectedTeamSize,C.TemplateAsset->Archetype);
                     if(Actual<=0 || FMath::Abs(Actual-Target)<=Target*.05)break;
                     const double Growth=FMath::Sqrt(Target/Actual);
                     Recipe->SizingArena.X=FMath::GridSnap(Recipe->SizingArena.X*Growth,50.);
@@ -246,7 +246,7 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
                     if(!BuildGeometry(Sized,B,Next,Cells)){Next={};break;}
                 }
             }
-            if(C.TemplateAsset->Archetype!=EERMapArchetype::LegacyAssembly && FMath::Abs(PlayableAreaM2(Next)-TargetAreaM2(C.ExpectedTeamSize))>TargetAreaM2(C.ExpectedTeamSize)*.1+.01)continue;
+            if(C.TemplateAsset->Archetype!=EERMapArchetype::LegacyAssembly && FMath::Abs(PlayableAreaM2(Next)-TargetAreaM2(C.ExpectedTeamSize,C.TemplateAsset->Archetype))>TargetAreaM2(C.ExpectedTeamSize,C.TemplateAsset->Archetype)*.1+.01)continue;
             if(!BuildSpawnZones(C.Seed,Next,Cells)){++SpawnRejected;continue;}
             if(!ERPlayability::InitialSpawnsOccluded(Next)){++SpawnRejected;continue;}
             const int32 Zones=Next.SpawnZones.Num()/2;
@@ -256,11 +256,13 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
                 continue;
             }
             if(BestSpawnZones>Zones)Next=MoveTemp(BestSpawnFit);
+            FurnishInteriors(C.Seed,Next,Cells);
             if(!ApplyMapTheme(C,Next))return false;
             Out=MoveTemp(Next);return true;
         }
         if(BestSpawnZones>0)
         {
+            FurnishInteriors(C.Seed,BestSpawnFit,Cells);
             if(!ApplyMapTheme(C,BestSpawnFit))return false;
             Out=MoveTemp(BestSpawnFit);return true;
         }
@@ -268,7 +270,9 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
         return false;
     }
     FERProceduralLayout Next;
-    if(!BuildGeometry(C,B,Next,Cells) || !ApplyMapTheme(C,Next))return false;
+    if(!BuildGeometry(C,B,Next,Cells))return false;
+    FurnishInteriors(C.Seed,Next,Cells);
+    if(!ApplyMapTheme(C,Next))return false;
     Out=MoveTemp(Next);return true;
 }
 
@@ -479,9 +483,11 @@ void AERProceduralMap::ResolveMapCandidate()
 }
 bool AERProceduralMap::ValidateGeneratedCollision() const
 {
-    return !LayoutConfig.TemplateAsset || LayoutConfig.ExpectedTeamSize==0 ||
-        (ERPlayability::InitialSpawnsOccludedInWorld(GetWorld(),GetActorTransform(),Layout) &&
-         ERProcedural::SpawnZonesClearInWorld(GetWorld(),GetActorTransform(),Layout));
+    if(!LayoutConfig.TemplateAsset || LayoutConfig.ExpectedTeamSize==0)return true;
+    const bool Occluded=ERPlayability::InitialSpawnsOccludedInWorld(GetWorld(),GetActorTransform(),Layout);
+    const bool Zones=ERProcedural::SpawnZonesClearInWorld(GetWorld(),GetActorTransform(),Layout);
+    if(!Occluded || !Zones)UE_LOG(LogTemp,Warning,TEXT("ER_MAP_COLLISION_REJECT seed=%d team=%d occluded=%d zones=%d"),LayoutConfig.Seed,LayoutConfig.ExpectedTeamSize,Occluded ? 1:0,Zones ? 1:0);
+    return Occluded && Zones;
 }
 void AERProceduralMap::OnGenerationFinished()
 {

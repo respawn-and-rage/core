@@ -26,7 +26,7 @@ bool FERUrbanTownLayoutTest::RunTest(const FString&)
         FERProceduralLayout L,Again;
         if(!TestTrue(TEXT("Town seed builds atomically"),ERProcedural::Build(C,B,L)))return false;
         TestTrue(TEXT("every opposing initial ray is screened"),ERPlayability::InitialSpawnsOccluded(L));
-        TestTrue(TEXT("urban footprint meets team area"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-3000)<=300);
+        TestTrue(TEXT("urban footprint meets team area"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-ERProcedural::TargetAreaM2(2,EERMapArchetype::UrbanTown))<=ERProcedural::TargetAreaM2(2,EERMapArchetype::UrbanTown)*.1);
         TestTrue(TEXT("closed lots are excluded from gross area"),!L.InaccessibleGround.IsEmpty() && ERProcedural::PlayableAreaM2(L)<L.ArenaSize.X*L.ArenaSize.Y/10000.);
         TestTrue(TEXT("oblique inaccessible corners"),L.InaccessibleGroundPolygons.Num()>=2);
         TestTrue(TEXT("central galleries join the room wings"),L.TownFootprints.Num()>L.TownBuildings.Num());
@@ -53,7 +53,7 @@ bool FERUrbanTownLayoutTest::RunTest(const FString&)
     {
         C.ExpectedTeamSize=Team;C.Seed=Seed;FERProceduralLayout L;
         if(!TestTrue(TEXT("Town supports every team size"),ERProcedural::Build(C,B,L)))return false;
-        TestTrue(TEXT("sized area"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-ERProcedural::TargetAreaM2(Team))<=ERProcedural::TargetAreaM2(Team)*.1);
+        TestTrue(TEXT("sized area"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-ERProcedural::TargetAreaM2(Team,EERMapArchetype::UrbanTown))<=ERProcedural::TargetAreaM2(Team,EERMapArchetype::UrbanTown)*.1);
         FERCellWorld World;FString Error;
         const bool Built=World.Build(L.Panels,FERCellSettings(),GetDefault<UERBlockMaterialCatalog>(),Error);
         if(!TestTrue(*FString::Printf(TEXT("Town %dv%d fits calibrated cell budget: %s"),Team,Team,*Error),Built))return false;

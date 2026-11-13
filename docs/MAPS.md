@@ -17,7 +17,27 @@ entries expose rotation toggles; a Town-only pool remains Town-only. All maps co
 Recipes live in `Art/MapTemplates`. Reproduce a layout with
 `/Game/EclipseRecoil/Maps/<Level>?MapSeed=42`, or `ERMapGenerate <seed>` on authority.
 
-**Code:** `ERSpawnZones.cpp`, `ERLayoutSolids.h`, `ERMapCatalog`, `ERMapTemplate.h`, `ERProceduralConfig.h`, `ERProceduralMap`, `ERMapSizing.cpp`, `ERMapTheme.h`.
+**Code:** `ERSpawnZones.cpp`, `ERLayoutSolids.h`, `ERMapCatalog`, `ERMapTemplate.h`, `ERProceduralConfig.h`, `ERProceduralMap`, `ERMapSizing.cpp`, `ERMapTheme.h`, `ERInteriors.cpp`.
+
+## Design goals
+
+A template earns its geometry: every piece should give a route, a sight line to break or cover to
+fight from. Fill is not a goal.
+
+- **Readable places.** A room reads as a shop, a kitchen or a depot, a street as a street. Places
+  give callouts, and their furniture is the cover.
+- **Several routes, a contested middle.** At least two independent ways between bases, a lateral
+  route, and a centre worth holding. See [PROCEDURAL_MAP_PLAYABILITY.md](PROCEDURAL_MAP_PLAYABILITY.md).
+- **Mixed fighting distances.** Long lines are broken by tall pieces; low pieces give cover to
+  crouch behind and shoot over. No route crosses open ground without a way to cover.
+- **Comparable time to contact.** Size follows the walk between bases, not the floor area alone.
+- **Substantial, not perfect, symmetry.** Structure, routes and starts are paired. Furniture may
+  differ between mates, within the same room type and budget.
+- **Variety between seeds.** A seed should change the plan, not only its dimensions.
+
+References: Central Building follows compact house maps (Lake, Safehouse, Bank), Town a dense
+shopping district (Chinatown), Village timber compounds (Shoots, St. Marc), Alleys three-lane
+towns (Dust II, Mirage). No reference geometry is imported.
 
 ## Shared rules
 
@@ -54,6 +74,16 @@ Recipes live in `Art/MapTemplates`. Reproduce a layout with
   Existing standing routes and cover entry paths remain clear of the new screens.
   Every opposing pair stays screened. Real standing, support and exit collision checks
   run before readiness. Zone count is independent of player slots and capacity.
+- **Interiors.** A builder declares its rooms, courts and street edges as `FERLayoutInterior`
+  (`AddInteriorPair`). `ERProcedural::FurnishInteriors` runs once on the accepted layout, after
+  spawn zones and before the palette, and fills each with a room program from the shared kit:
+  backed pieces along the usable walls, free-standing pieces on a row lattice or scattered.
+  It only adds solids. Every recorded route keeps a 90cm half-width, doors 130cm, starts 120cm,
+  and free-standing pieces a 110cm aisle on every side, so a furnished room stays connected.
+  Timber pieces are destructible cells; lockers, fridges, dumpsters and stall canopies are fixed
+  instanced metal. Mates share a room type and budget; half of the pairs repeat the arrangement
+  and one in four swaps the second room's type within its family. Furnishing stops on a pair
+  boundary inside the panel and cell budgets, and `Interior.<Program>` lands in `FeatureNames`.
 - Rounds advance the seed before respawn. Menu sessions use fresh seeds.
 - Cosmetic rolls use a separate stream and never consume geometry RNG.
 
@@ -97,8 +127,13 @@ with the Metal galleries for Central Building and Village, and compare the
 
 ## Team sizing
 
-`Map.ExpectedTeamSize` (1..16) budgets **750m² per expected player**:
-`target area = team size × 1500m²`, **±10% of area**, not per axis. Upper floors, roofs and
+`Map.ExpectedTeamSize` (1..16) budgets **750m² per expected player on open ground**:
+`target area = team size × 1500m² × AreaDensity`, never below 1500m², **±10% of area**, not per
+axis. `ERProcedural::AreaDensity` is 1 for Central Building, Village, Fire Training and Alleys, 0.7 for
+Town and 0.6 for Rooms: closed streets and sealed rooms bend every walk, so they shrink until
+bases sit a comparable walk apart. Alleys keeps the full budget until a smaller district passes
+real-collision spawn occlusion on every tested seed. `TargetAreaM2` is the only place that knows the budget.
+Upper floors, roofs and
 lower passages do not count; Rooms counts primary room polygons and corridor floors, excluding galleries and upper crossings. Central Building counts
 the circular footprint (`PlayableAreaM2`), rather than its bounding square. Town subtracts
 the exact union of inaccessible central wings and polygonal perimeter recesses from its envelope. No saturation at 8.

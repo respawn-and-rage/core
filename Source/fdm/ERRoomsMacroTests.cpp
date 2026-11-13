@@ -56,7 +56,7 @@ bool FERRoomsMacroLayoutTest::RunTest(const FString&)
         {
             // Team sizing fits room dimensions to the real floor, corridors included, so a
             // macro plan may settle on other rooms: it must still meet the same area budget.
-            const double Target=ERProcedural::TargetAreaM2(Team);
+            const double Target=ERProcedural::TargetAreaM2(Team,EERMapArchetype::Rooms);
             TestTrue(*(Case+TEXT(": macro plan keeps the team area budget")),FMath::Abs(ERProcedural::PlayableAreaM2(L)-Target)<=Target*.1+.01);
             TestTrue(*(Case+TEXT(": complete room graph")),L.Rooms.Num()>=4 && L.Rooms.Num()<=10 && L.Rooms.Num()%2==0);
         }

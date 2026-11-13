@@ -28,6 +28,10 @@ bays have low sills and multiple panes separated by concrete mullions.
 The villa has two storeys in 1v1, three in 2v2 and 3v3, and four from 4v4 onward. One central interior ramp per level connects every storey and reaches the roof when it has a pool. Destructible glass panes follow both sides of the treads, rising with each step under a continuous sloping metal cap; a separate destructible glass guard encloses the upper floor opening. The seed chooses which team's side has the low end of the ramp; every floor uses the same direction. The ramp is the sole deliberate exception to the arena's mirror geometry; spawns and exterior approaches remain mirrored. Rooms on every floor use 10cm destructible drywall partitions with wide openings, destructible timber tables with open space beneath their tops, and low counters without blocking the central passage. Where the approach has room, mirrored exterior flights lead to the recessed first-floor terraces and their doors. Stairs use
 20cm risers and 25cm tread depth, and main doors are 240cm wide.
 
+Every storey declares its lounge beside the entrance, the side room and the second room to the
+[interior kit](../MAPS.md#shared-rules) as living rooms, kitchens, bedrooms, dining rooms or
+studies; outbuildings become stores, kitchens or offices. The hall spine and stairwell stay clear.
+
 Some open central-hill layouts have one wide central pool; other central-hill layouts can have two mirrored recessed courtyard pools. Their solid concrete
 floors are 20cm below the water at both ends and 90cm below it in the centre.
 The clear water surface has no collision, so players walk on the basin floor.

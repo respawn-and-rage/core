@@ -65,11 +65,11 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     if(T->SizingTeamSize>1)
     {
         TArray<FVector> Envelopes;
-        const float Area=TargetAreaM2(T->SizingTeamSize);
+        const float Area=TargetAreaM2(T->SizingTeamSize,T->Archetype);
         for(float W=FMath::CeilToFloat(MinWidth/100)*100;W<=FMath::Min(R.ArenaMax.X,FMath::Sqrt(Area*10000)*1.25f);W+=100)
         {
             const float D=FMath::Max(FMath::CeilToFloat(MinLength/100)*100,FMath::GridSnap(Area*10000/W,100.f));
-            if(D<MinLength || D>R.ArenaMax.Y || D/W>3.5f || !ValidTeamArea({W,D,R.PerimeterHeight},T->SizingTeamSize))continue;
+            if(D<MinLength || D>R.ArenaMax.Y || D/W>3.5f || !ValidTeamArea({W,D,R.PerimeterHeight},T->SizingTeamSize,T->Archetype))continue;
             Envelopes.Add({W,D,R.PerimeterHeight});
         }
         if(Envelopes.IsEmpty())return false;

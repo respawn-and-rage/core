@@ -111,8 +111,11 @@ Say which platforms were really compiled. Windows and Linux are only verified by
 - **Aim:** `GetEffectiveAimRotation` / `GetViewRotation` combine input, worksheet
   recoil and aim punch once. `ControlRotation`, capsule and hitboxes stay untouched.
 - **Maps:** templates are deterministic from a seed, paired by half-turn or reflection, validated
-  atomically, 1500m² per team-size unit ±10% of area. Never scale meshes, doors,
+  atomically, and sized to `ERProcedural::TargetAreaM2` ±10%: 1500m² per team-size unit on open
+  ground, scaled by the template's `AreaDensity`. Never scale meshes, doors,
   stairs, materials or cells to fit. Sample one half, then transform it using the template symmetry.
+  Structure, routes and starts are always paired; only furniture from the interior kit may differ
+  between mates.
   Every gameplay layout must block visibility AND direct projectile lines between every opposing
   spawn pair on the intact map, regardless of seed or team size. Validate before readiness;
   no exposed fallback. Destruction may open these lines later.

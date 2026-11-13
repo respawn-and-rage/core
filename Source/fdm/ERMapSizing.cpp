@@ -1,14 +1,15 @@
 #include "ERProceduralMap.h"
 
-//750m² per expected player, both teams included. Dimensions are physical plan
-//dimensions; upper floors never add to the area and player admission is separate.
+//750m² per expected player on open ground, both teams included, scaled by AreaDensity for
+//streets and sealed rooms. Dimensions are physical plan dimensions; upper floors never add
+//to the area and player admission is separate.
 bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed)
 {
     if(TeamSize<1 || TeamSize>16)return false;
     T.SizingTeamSize=TeamSize;T.CompositionSeed=Seed;
     T.SizingRoomsGroundOnly=TeamSize==1;
     FRandomStream Composition(int32(HashCombine(uint32(Seed),0x56415259u)));
-    const float Area=TargetAreaM2(TeamSize);
+    const float Area=TargetAreaM2(TeamSize,T.Archetype);
     const float Growth=FMath::Clamp((TeamSize-2)/14.f,0.f,1.f);
     auto Grid=[&](float Small,float Large){return FMath::GridSnap(FMath::Lerp(Small,Large,Growth),100.f);};
     auto Envelope=[&](float Aspect,float MinWidth,float MinLength)
@@ -133,5 +134,5 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
     }
     default:break;
     }
-    return T.Archetype==EERMapArchetype::UrbanTown || T.Archetype==EERMapArchetype::Rooms || T.Archetype==EERMapArchetype::Village || T.Archetype==EERMapArchetype::FireTraining || T.Archetype==EERMapArchetype::LegacyAssembly || (T.Archetype==EERMapArchetype::CentralBuilding && T.CentralBuilding.CircularTerrain ? FMath::Abs(PI*FMath::Square(T.SizingArena.X*.5)/10000-Area)<=Area*.1:ValidTeamArea(FVector(T.SizingArena,0),TeamSize));
+    return T.Archetype==EERMapArchetype::UrbanTown || T.Archetype==EERMapArchetype::Rooms || T.Archetype==EERMapArchetype::Village || T.Archetype==EERMapArchetype::FireTraining || T.Archetype==EERMapArchetype::LegacyAssembly || (T.Archetype==EERMapArchetype::CentralBuilding && T.CentralBuilding.CircularTerrain ? FMath::Abs(PI*FMath::Square(T.SizingArena.X*.5)/10000-Area)<=Area*.1:ValidTeamArea(FVector(T.SizingArena,0),TeamSize,T.Archetype));
 }

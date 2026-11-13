@@ -180,6 +180,9 @@ bool FoldLayoutToMirror(FERProceduralLayout& L,const FERCellSettings& Cells)
     for(auto P:L.CoverSites)if(P.Frame.GetLocation().Y<0)
     {Covers.Add(P);P.Frame=ReflectFrame(P.Frame);for(auto* V:{&P.Hide,&P.Entry,&P.SightFrom,&P.SightTo})*V=Reflect(*V);Covers.Add(P);}
     L.CoverSites=MoveTemp(Covers);
+    // Rooms on the kept half are declared again with their reflected mates.
+    const auto Interiors=MoveTemp(L.Interiors);L.Interiors.Reset();
+    for(const auto& P:Interiors)if(P.Frame.GetLocation().Y<0 && !(P.Paired && P.Reflected))AddInteriorPair(L,P,true);
     // Remaining specialized metadata must be reflected with its owning geometry.
     TArray<FERLayoutHouse> Houses;
     for(auto P:L.Houses)if(P.Frame.GetLocation().Y<0)

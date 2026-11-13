@@ -78,6 +78,15 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
         const float Bottom=P.Z-Size.Z*.5f;Piece.Anchored=Bottom>=0 && FMath::IsNearlyZero(FMath::Fmod(Bottom,Stride),.01f);return Piece;
     };
     auto Mate=[](FVector P){return FVector(P.X,-P.Y,P.Z);};
+    // Villa-local rectangle on one storey, furnished with its mirrored mate.
+    auto Interior=[&](FVector2D Min,FVector2D Max,float FloorZ,EERInteriorKind Kind,uint8 Walls,TArray<FVector> Doors={})
+    {
+        if(Max.X-Min.X<260 || Max.Y-Min.Y<260)return;
+        FERLayoutInterior Space;Space.Frame=FTransform(L.CentralBuildingCenter+FVector((Min+Max)*.5,FloorZ));
+        Space.Half=(Max-Min)*.5;Space.Kind=Kind;Space.Walls=Walls;Space.Height=300;
+        for(const auto& Door:Doors)Space.Doors.Add(L.CentralBuildingCenter+Door);
+        AddInteriorPair(L,MoveTemp(Space),true);
+    };
     auto GroundPath=[&](FVector2D A,FVector2D B)
     {
         TArray<FVector> Path;const int32 Steps=FMath::Max(1,FMath::CeilToInt32(FVector2D::Distance(A,B)/60));
@@ -217,6 +226,7 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
                 BuildingBox({At,(Gap+110+Hi)*.5f,Z+150},{10,Hi-Gap-110,300},EERBlockMaterial::Drywall);
                 BuildingBox({At,Gap,Z+270},{10,220,60},EERBlockMaterial::Drywall);
                 TArray<FVector> Room{{BuildingX+At-120,Gap,Base+Z+100},{BuildingX+At+120,Gap,Base+Z+100}};L.RoomAccessRoutes.Add(Room);for(auto& P:Room)P=Mate(P);L.RoomAccessRoutes.Add(Room);
+                Interior({At+8,Lo},{OuterMax-24,Hi+12},Z,EERInteriorKind::Home,1|2|8,{{At,Gap,Z}});
             }
             if(Hi-Lo>250)
                 BuildingBox({OuterMax-90,Lo+95,Z+45},{100,70,90},EERBlockMaterial::Wood);
@@ -241,8 +251,12 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
             TArray<FVector> Room{{BuildingX+RoomAt-90,RoomDoor,Base+Z+100},
                                  {BuildingX+RoomAt+90,RoomDoor,Base+Z+100}};
             L.RoomAccessRoutes.Add(Room);for(auto& P:Room)P=Mate(P);L.RoomAccessRoutes.Add(Room);
+            Interior({RoomAt+8,RoomLo},{MaxI-24,RoomHi-20},Z,EERInteriorKind::Home,2|8,{{RoomAt,RoomDoor,Z}});
             L.FeatureNames.AddUnique(TEXT("VillaInteriorRooms"));
         }
+        // The entrance side of each storey is a lounge around the hall and the stairwell.
+        Interior({OuterMin+24,FrontY+24},{HallX-110,-Band-4},Z,EERInteriorKind::Home,1|8,{{OuterMin,DoorY,Z}});
+        Interior({MinI+24,-Band+4},{StairX-110,-40},Z,EERInteriorKind::Home,8);
         // Deck rectangles partition the union and subtract the actual stairwell.
         for(const auto& Rect:Footprints)
         {
@@ -428,6 +442,12 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
             RoofLadder({HouseX+HW*.5f+14,HouseY,H},RoofHeight,
                 HouseMaterial==EERBlockMaterial::Wood ? EERBlockMaterial::Wood:EERBlockMaterial::Metal);
             TArray<FVector> Entry{{HouseX-HW*.5f-100,HouseY,H+100},{HouseX,HouseY,H+100}};L.RoomAccessRoutes.Add(Entry);for(auto& P:Entry)P=Mate(P);L.RoomAccessRoutes.Add(Entry);
+            {
+                // Outbuildings read as stores, kitchens or offices around their single doorway.
+                FERLayoutInterior Space;Space.Frame=FTransform(FVector(Center,H));Space.Half={HW*.5f-24,HD*.5f-24};
+                Space.Kind=EERInteriorKind::BackRoom;Space.Height=300;Space.Doors.Add({HouseX-HW*.5f,HouseY,H});
+                AddInteriorPair(L,MoveTemp(Space),true);
+            }
             FlankX=FMath::Min(FlankX,(BuildingX+FMath::Max(MaxI,OuterMax)+HouseX-HW*.5f)*.5f);
         }
     }

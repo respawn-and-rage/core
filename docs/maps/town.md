@@ -14,6 +14,14 @@ spawn pockets sit at opposite ends of the ring. Each primary bank reserves two d
 its screen. The perimeter bypass is 2.4m wide, leaving space for opposing standing player traffic;
 the other bypass reaches the transverse street independently. Initial spawn occlusion remains mandatory.
 
+Compact layouts draw one of three plans from the seed: one broad block, two blocks split by an
+alley, or a block beside an open market square of stalls (`MarketSquare`). Street fronts are
+glazed beside their door or across a doorless recess, in panes of at most 180cm (`Storefront`).
+Each shop declares its sales floor, back rooms and court to the
+[interior kit](../MAPS.md#shared-rules): groceries with gondola rows, bars, boutiques, agencies
+and garages in front, storerooms, kitchens and offices behind. Kerb furniture backs onto the
+outer walls of the ring, clear of both spawn corners.
+
 All initial circulation stays on the ground, with 12cm pavement thresholds. One to
 three storeys give the blocks height and overhead shelter; upper facades and concrete
 closures are fixed, inaccessible architecture. Ground-floor brick/concrete walls and

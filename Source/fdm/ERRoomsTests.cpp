@@ -54,7 +54,7 @@ bool FERRoomsLayoutTest::RunTest(const FString& Parameters)
         TestEqual(TEXT("paired upper rooms with real ramp routes"),L.StairRoutes.Num(),L.RoomNodes.FilterByPredicate([](const auto& V){return V.Upper;}).Num());
         TestEqual(TEXT("eight starts per team"),L.AlphaSpawns.Num(),8);
         for(int32 I=0;I<8;++I){auto P=L.AlphaSpawns[I].GetLocation();P.X=-P.X;P.Y=-P.Y;TestTrue(TEXT("paired starts"),P.Equals(L.OmegaSpawns[I].GetLocation()));}
-        TestEqual(TEXT("flat panels replace every hollow crate"),L.Panels.Num(),L.RoomScreens.Num());
+        TestEqual(TEXT("the shell's own screens are flat panels; furniture follows them"),L.InteriorPanelStart,L.RoomScreens.Num());
         TestTrue(TEXT("larger rooms retain sparse cover"),L.RoomScreens.Num()>=8);
         for(int32 I=0;I<L.RoomLinks.Num();++I)
         {
@@ -79,7 +79,7 @@ bool FERRoomsLayoutTest::RunTest(const FString& Parameters)
             TestTrue(TEXT("screen geometry is half-turn paired"),L.RoomScreens.ContainsByPredicate([&](const auto& D){return D.Frame.Equals(Mirror,.01) && D.Size.Equals(S.Size,.01);}));
         }
         TestTrue(TEXT("cover is destructible wood"),!L.Panels.IsEmpty());
-        for(const auto& P:L.Panels)TestTrue(TEXT("selected wood theme only"),P.Material==EERBlockMaterial::Wood && P.Surface==T->Rooms.Themes[L.RoomsTheme].Wood);
+        for(int32 Own=0;Own<L.InteriorPanelStart;++Own){const auto& P=L.Panels[Own];TestTrue(TEXT("selected wood theme only"),P.Material==EERBlockMaterial::Wood && P.Surface==T->Rooms.Themes[L.RoomsTheme].Wood);}
         if(Seed==42)
         {
             TestTrue(TEXT("repeat builds"),ERProcedural::Build(C,B,Again));

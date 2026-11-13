@@ -89,7 +89,7 @@ TSharedPtr<FJsonValue> Points(const TArray<FVector>& Path)
 TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralConfig& C,const FString& Id,int32 TeamSize,int32 Seed)
 {
     auto O=MakeShared<FJsonObject>();O->SetStringField(TEXT("template"),Id);O->SetNumberField(TEXT("team_size"),TeamSize);O->SetNumberField(TEXT("seed"),Seed);
-    O->SetNumberField(TEXT("target_area_m2"),ERProcedural::TargetAreaM2(TeamSize));O->SetNumberField(TEXT("area_m2"),ERProcedural::PlayableAreaM2(L));O->SetNumberField(TEXT("area_tolerance_percent"),10);
+    O->SetNumberField(TEXT("target_area_m2"),ERProcedural::TargetAreaM2(TeamSize,C.TemplateAsset->Archetype));O->SetNumberField(TEXT("area_m2"),ERProcedural::PlayableAreaM2(L));O->SetNumberField(TEXT("area_tolerance_percent"),10);
     O->SetBoolField(TEXT("circular"),L.CircularArena);O->SetBoolField(TEXT("central_hill"),L.CentralHill);
     O->SetField(TEXT("hill_center"),Vector(L.HillCenter));O->SetNumberField(TEXT("hill_height_m"),L.HillHeight/100);
     O->SetField(TEXT("building_center"),Vector(L.CentralBuildingCenter));
@@ -229,7 +229,7 @@ bool FERMapSizingTest::RunTest(const FString&)
             C.Seed=Seed;
             if(!TestTrue(*FString::Printf(TEXT("%s %dv%d seed%d builds valid geometry"),*Id,TeamSize,TeamSize,Seed),ERProcedural::Build(C,B,L)))return false;
             TestTrue(TEXT("actual arena dimensions in metres are positive and finite"),!L.ArenaSize.ContainsNaN() && L.ArenaSize.GetMin()>0);
-            TestTrue(TEXT("750 square metres per expected player, within ten percent"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-ERProcedural::TargetAreaM2(TeamSize))<=ERProcedural::TargetAreaM2(TeamSize)*.1+.01);
+            TestTrue(TEXT("template area budget for the expected team, within ten percent"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-ERProcedural::TargetAreaM2(TeamSize,C.TemplateAsset->Archetype))<=ERProcedural::TargetAreaM2(TeamSize,C.TemplateAsset->Archetype)*.1+.01);
             RoomCounts.Add(L.Rooms.Num());BlockCounts.Add(L.VillageBlocks.Num());Bounds.Add({FMath::RoundToInt32(L.ArenaSize.X),FMath::RoundToInt32(L.ArenaSize.Y)});
             TestTrue(TEXT("starts remain independent of expected team size"),L.AlphaSpawns.Num()>=8 && L.OmegaSpawns.Num()==L.AlphaSpawns.Num());
             for(int32 I=0;I<L.AlphaSpawns.Num();++I)
@@ -362,7 +362,7 @@ bool FERMapDensityBudgetTest::RunTest(const FString&)
         {
             FERProceduralConfig C;C.TemplateAsset=T;C.ExpectedTeamSize=N;C.Seed=Seed;FERBlockRoomConfig B;FERProceduralLayout L;
             if(!TestTrue(*FString::Printf(TEXT("%s %dv%d seed%d builds inside density budget"),*Id,N,N,Seed),ERProcedural::Build(C,B,L)))return false;
-            TestTrue(TEXT("actual perimeter area within ten percent of1500m² per team member"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-ERProcedural::TargetAreaM2(N))<=ERProcedural::TargetAreaM2(N)*.1+.01);
+            TestTrue(TEXT("actual area within ten percent of the template budget"),FMath::Abs(ERProcedural::PlayableAreaM2(L)-ERProcedural::TargetAreaM2(N,T->Archetype))<=ERProcedural::TargetAreaM2(N,T->Archetype)*.1+.01);
             if(Id==TEXT("FireTraining"))TestTrue(TEXT("every training-hall size stays compact"),FMath::Max(L.ArenaSize.X,L.ArenaSize.Y)<=FMath::Min(L.ArenaSize.X,L.ArenaSize.Y)*1.5f);
             if(Id==TEXT("Rooms"))TestTrue(TEXT("every room profile has independent base access"),IndependentRoomBaseAccess(L));
             if(N>1)for(const auto& Hole:L.UnderpassBreaches)
@@ -389,7 +389,9 @@ bool FERRoomsFloorBudgetTest::RunTest(const FString&)
     L.RoomLinks.Add({0,1,{500,0,620},{1500,0,620},360,560,40});
     L.ElevatedDecks.Add(FBox(FVector(-500,-500,600),FVector(500,500,620)));
     TestEqual(TEXT("upper crossing and decks add no primary floor"),ERProcedural::PlayableAreaM2(L),228.);
-    TestEqual(TEXT("750 square metres for each player on both teams"),ERProcedural::TargetAreaM2(2),3000.f);
+    TestEqual(TEXT("750 square metres for each player on open ground"),ERProcedural::TargetAreaM2(2,EERMapArchetype::CentralBuilding),3000.f);
+    TestTrue(TEXT("sealed rooms take 60% of the open budget"),FMath::IsNearlyEqual(ERProcedural::TargetAreaM2(4,EERMapArchetype::Rooms),3600.f,.01f));
+    TestEqual(TEXT("no template shrinks below the 1v1 budget"),ERProcedural::TargetAreaM2(1,EERMapArchetype::UrbanTown),1500.f);
     return true;
 }
 #endif

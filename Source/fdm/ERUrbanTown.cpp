@@ -25,15 +25,26 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
         FERLayoutFixedPiece P;P.Transform=FTransform(FQuat::Identity,Center,Size/100)*Placement;P.Material=Material;P.Roof=Roof;
         L.FixedPieces.Add(P);if(Pair){P.Transform=P.Transform*Turn;L.FixedPieces.Add(P);}
     };
-    auto Wall=[&](FVector Start,float Length,float Yaw,float Height,EERBlockMaterial Material,bool Door,float DoorCenter)
+    // Glazing: a storefront span along the wall, split into panes of at most 180cm between 20cm piers.
+    auto Wall=[&](FVector Start,float Length,float Yaw,float Height,EERBlockMaterial Material,bool Door,float DoorCenter,FVector2D Glazing=FVector2D::ZeroVector)
     {
         const int32 First=L.Panels.Num();
         FERCellWorld::AddConstruction(0,Material,FTransform(FRotator(0,Yaw,0),Start)*Placement,FVector(Length,5,Height),Cells,L.Panels);
+        const int32 Panes=Glazing.Y-Glazing.X>=120 ? FMath::CeilToInt32((Glazing.Y-Glazing.X+20)/200):0;
+        const float Pane=Panes ? (Glazing.Y-Glazing.X-(Panes-1)*20)/Panes:0;
         for(int32 I=First;I<L.Panels.Num();++I)
         {
             auto& P=L.Panels[I];P.Id=Id++;P.bAnchorBottom=true;
             if(Door)P.Holes.Add(FBox2D(FVector2D(DoorCenter-R.DoorWidth*.5,0),FVector2D(DoorCenter+R.DoorWidth*.5,260)));
+            for(int32 J=0;J<Panes;++J)P.Holes.Add(FBox2D(FVector2D(Glazing.X+J*(Pane+20),95),FVector2D(Glazing.X+J*(Pane+20)+Pane,255)));
         }
+        for(int32 J=0;J<Panes;++J)
+        {
+            const int32 Glass=L.Panels.Num();
+            FERCellWorld::AddConstruction(0,EERBlockMaterial::Glass,FTransform(FRotator(0,Yaw,0),Start+FRotator(0,Yaw,0).RotateVector(FVector(Glazing.X+J*(Pane+20),0,0))+FVector(0,0,95))*Placement,FVector(Pane,5,160),Cells,L.Panels);
+            for(int32 I=Glass;I<L.Panels.Num();++I){L.Panels[I].Id=Id++;L.Panels[I].bAnchorBottom=true;}
+        }
+        if(Panes)L.FeatureNames.AddUnique(TEXT("Storefront"));
         const int32 End=L.Panels.Num();
         for(int32 I=First;I<End;++I){auto P=L.Panels[I];P.Id=Id++;P.Transform=P.Transform*Turn;L.Panels.Add(MoveTemp(P));}
     };
@@ -52,6 +63,16 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
     {
         TArray<FVector> World;for(const auto& P:Local)World.Add(Placement.TransformPosition(P));
         Set.Add(World);for(auto& P:World)P=Turn.TransformPosition(P);Set.Add(MoveTemp(World));
+    };
+    // Lot-local rectangle to a furnishable space and its half-turn mate.
+    TArray<FVector> LotDoors;
+    auto Interior=[&](FVector2D Min,FVector2D Max,EERInteriorKind Kind,uint8 Walls,float Height)
+    {
+        if(Max.X-Min.X<280 || Max.Y-Min.Y<280)return;
+        FERLayoutInterior Space;Space.Frame=FTransform(FVector((Min+Max)*.5,0))*Placement;Space.Half=(Max-Min)*.5;
+        Space.Kind=Kind;Space.Walls=Walls;Space.Height=Height;
+        for(const auto& Door:LotDoors)Space.Doors.Add(Placement.TransformPosition(Door));
+        AddInteriorPair(L,MoveTemp(Space));
     };
     // The envelope contains closed urban fabric. Its playable outline has
     // diagonal corners, projecting lots and paired deep perimeter recesses.
@@ -85,7 +106,11 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
     const bool Compact=T->SizingTeamSize<=3;
     const float LeftMargin=Compact ? 200.f:0.f,RightMargin=Compact ? 850.f:0.f;
     const float CoreWidth=Arena.X-2*Street-LeftMargin-RightMargin,CoreHalfDepth=HY-1050;
-    const int32 Columns=Compact ? 1:FMath::Max(2,2*FMath::FloorToInt32((CoreWidth+Gap)/3200));
+    // Compact plans draw one broad block, two blocks split by an alley, or a block beside an open market.
+    const uint32 Variant=HashCombineFast(uint32(C.Seed),0x544f5756u);
+    const bool Split=Compact && CoreWidth>=3400 && Variant%3u!=0;
+    const bool Market=Split && (Variant>>3)%2u==0;
+    const int32 Columns=Compact ? (Split ? 2:1):FMath::Max(2,2*FMath::FloorToInt32((CoreWidth+Gap)/3200));
     const int32 Rows=FMath::Max(1,FMath::FloorToInt32((CoreHalfDepth+Gap*.5)/2400));
     const float BandDepth=(CoreHalfDepth-(Rows-.5f)*Gap)/Rows;
     if(BandDepth<650 || CoreWidth-(Columns-1)*Gap<Columns*700)return false;
@@ -126,7 +151,15 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
             const TArray<FVector> Outline{{0,0,0},{ShoulderX,0,0},{ShoulderX,ShoulderY,0},{Width,ShoulderY,0},
                 {Width,Depth,0},{NotchX,Depth,0},{NotchX,NotchY,0},{0,NotchY,0}};
             const bool Closed=Columns>2 && Col%3==2;
-            if(Closed)
+            if(Market && Col==1 && Row==0)
+            {
+                // An open square of stalls: the route crosses it between the two streets.
+                LotDoors.Reset();
+                Route({{Width*.5f,-160,112},{Width*.5f,Depth+160,112}});
+                Interior({0,0},{Width,Depth},EERInteriorKind::Court,0,400);
+                L.FeatureNames.AddUnique(TEXT("MarketSquare"));
+            }
+            else if(Closed)
             {
                 const float H=FMath::Max(680.f,Height);
                 ClosedBox({Width*.5,NotchY*.5,H*.5},{Width,NotchY,H},Material);
@@ -142,8 +175,11 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
                 {
                     const FVector A=Outline[Edge],D=Outline[(Edge+1)%Outline.Num()]-A;
                     const bool Portal=Edge==0 || Edge==4;
-                    const float DoorAlong=Edge==0 ? DoorX:Width-ExitX;
-                    Wall(A,float(D.Size2D()),float(D.Rotation().Yaw),R.StoreyHeight,Material,Portal,DoorAlong);
+                    const float DoorAlong=Edge==0 ? DoorX:Width-ExitX,Run=float(D.Size2D());
+                    // Street fronts are glazed beside their door, or across a doorless recess.
+                    const FVector2D Glazing=Random.RandRange(0,2)==0 ? FVector2D::ZeroVector:
+                        Portal ? FVector2D(DoorAlong+R.DoorWidth*.5f+60,Run-50):Edge==2 ? FVector2D(60,Run-60):FVector2D::ZeroVector;
+                    Wall(A,Run,float(D.Rotation().Yaw),R.StoreyHeight,Material,Portal,DoorAlong,Glazing);
                     if(Storeys>1)
                     {
                         const float UH=Height-R.StoreyHeight-20;
@@ -181,6 +217,16 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
                 }
                 Through.Add({ExitX,Depth+160,112});
                 Route(Through);
+                // Sales floor behind the front, back rooms past each partition, and the open court.
+                const float Headroom=R.StoreyHeight-10,BackEnd=Depth>=1300 && Width>=1000 ? (NotchY+Depth)*.5f:Depth;
+                LotDoors={{DoorX,0,0},{ExitX,PartitionY,0},{ExitX,Depth,0}};
+                if(BackEnd<Depth)LotDoors.Add({Width*.63f,BackEnd,0});
+                Interior({8,8},{ShoulderX-8,ShoulderY},EERInteriorKind::Shop,1|2|8,Headroom);
+                Interior({8,ShoulderY+8},{Width-8,PartitionY-4},EERInteriorKind::Shop,2|4|8,Headroom);
+                Interior({8,PartitionY+8},{Width-8,NotchY-8},EERInteriorKind::BackRoom,1|2|8,Headroom);
+                Interior({NotchX+8,NotchY+8},{Width-8,BackEnd-8},EERInteriorKind::BackRoom,2|4|8,Headroom);
+                if(BackEnd<Depth)Interior({NotchX+8,BackEnd+8},{Width-8,Depth-8},EERInteriorKind::BackRoom,15,Headroom);
+                Interior({10,NotchY+10},{NotchX-10,Depth},EERInteriorKind::Court,1|2,400);
                 const FBox Bounds=FBox(FVector::ZeroVector,FVector(Width,Depth,Height)).TransformBy(Placement);
                 L.TownBuildings.Add(Bounds);L.TownBuildings.Add(Bounds.TransformBy(Turn));
                 Polygon(Outline,L.TownFootprints);L.FeatureNames.Add(TEXT("ThroughShop"));
@@ -274,6 +320,11 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
     for(int32 I=1;I<Left.Num();++I)Patrol.Add(Turn.TransformPosition(Left[I]));
     for(int32 I=Bottom.Num()-2;I>=0;--I)Patrol.Add(Bottom[I]);
     L.Routes={Exit,Patrol,MateExit};
+    // Kerb furniture backs onto the outer walls of the ring, clear of both spawn corners.
+    LotDoors.Reset();
+    Interior({-HX+4,-HY+900},{-HX+Street*.5f,IndentMin-200},EERInteriorKind::Street,8,400);
+    Interior({-HX+4,IndentMax+200},{-HX+Street*.5f,HY-CutY-300},EERInteriorKind::Street,8,400);
+    Interior({-HX+900,-HY+4},{HX-CutX-250,-HY+Street*.5f},EERInteriorKind::Street,1,400);
     ERLayoutQueries::FLayoutSolids Solids(L);
     auto Clear=[&](const TArray<TArray<FVector>>& Paths)
     {

@@ -580,6 +580,17 @@ bool BuildRooms(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERProc
         if(HallPassage)L.FeatureNames.Add(TEXT("HallPassage"));
         L.FeatureNames.Add(HallStyle==2 ? TEXT("IrregularHalls"):HallStyle==1 ? TEXT("CompactHalls"):TEXT("RectangularHalls"));
     }
+    // Halls become depots, mess rooms, barracks, plants or column halls. Junction chambers stay bare.
+    TArray<FERLayoutInterior> Single;
+    for(int32 Index=0;Index<L.RoomNodes.Num();++Index)
+    {
+        const auto& V=L.RoomNodes[Index];const int32 Paired=Mirror(Index);
+        if(V.Upper || V.Junction || V.Size.GetMin()<700 || Paired<Index)continue;
+        FERLayoutInterior Space;Space.Frame=FTransform(V.Center);Space.Half=V.Size*.5-FVector2D(12);
+        Space.Height=V.Height;Space.Kind=EERInteriorKind::Hall;Space.Outline=V.Polygon;
+        if(Paired==Index)Single.Add(MoveTemp(Space));else AddInteriorPair(L,MoveTemp(Space));
+    }
+    L.Interiors.Append(Single);
     // Validate whole swept standing routes against every oriented screen before
     // publishing; all paths follow the real sloped supporting floor.
     for(const auto* Paths:{&L.RoomAccessRoutes,&L.StairRoutes,&L.CrossingRoutes,&SpawnRoutes})for(const auto& Path:*Paths)

@@ -64,6 +64,21 @@ struct FERVillageBlock
     int32 Storeys=1;
     bool SelfSymmetric=false;
 };
+// A furnishable space: Frame sits at the floor centre with local X/Y along its walls.
+// Mates are consecutive entries; a reflected mate furnishes with local Y negated.
+enum class EERInteriorKind : uint8 { Shop, BackRoom, Home, Hall, Court, Street };
+struct FERLayoutInterior
+{
+    FTransform Frame;
+    FVector2D Half=FVector2D::ZeroVector;
+    float Height=300;
+    EERInteriorKind Kind=EERInteriorKind::Shop;
+    // Local walls that can back furniture: 1 at -Y, 2 at +X, 4 at +Y, 8 at -X.
+    uint8 Walls=15;
+    bool Reflected=false,Paired=false;
+    TArray<FVector> Doors; // Map-local door centres: nothing stands within reach of them.
+    TArray<FVector2D> Outline; // Optional convex floor outline around the frame origin.
+};
 // Contiguous ranges refer to the existing per-team start arrays.
 struct FERLayoutSpawnZone
 {
@@ -74,6 +89,9 @@ struct FERLayoutSpawnZone
 struct FERProceduralLayout
 {
     TArray<FERLayoutSpawnZone> SpawnZones;
+    TArray<FERLayoutInterior> Interiors;
+    // Furniture is appended last: everything from these indices on belongs to the interior kit.
+    int32 InteriorPieces=0,InteriorPanelStart=INDEX_NONE,InteriorFixedStart=INDEX_NONE;
     TArray<FERLayoutRect> Rooms, Corridors;
     TArray<FERLayoutWall> Walls;
     TArray<FERLayoutOpening> Openings;
@@ -185,9 +203,20 @@ namespace ERProcedural
     bool SpawnZonesClearInWorld(class UWorld* World,const FTransform& Frame,const FERProceduralLayout& Layout);
     bool BuildSpawnZones(int32 Seed,FERProceduralLayout& Layout,const FERCellSettings& Cells);
     bool ConfigureTeamSize(class UERMapTemplate& Template,int32 ExpectedTeamSize,int32 Seed=42);
-    inline float TargetAreaM2(int32 ExpectedTeamSize) { return ExpectedTeamSize*1500.f; }
-    inline bool ValidTeamArea(FVector Size,int32 ExpectedTeamSize)
-    { const double Area=Size.X*Size.Y/10000.,Target=TargetAreaM2(ExpectedTeamSize);return FMath::IsFinite(Area) && Area>=Target*.9-.01 && Area<=Target*1.1+.01; }
+    // Recognisable rooms from the shared furniture kit; never moves walls, routes or starts.
+    void FurnishInteriors(int32 Seed,FERProceduralLayout& Layout,const FERCellSettings& Cells);
+    // Adds the room and its mate: half-turn about the origin, or reflection across Y=0.
+    void AddInteriorPair(FERProceduralLayout& Layout,FERLayoutInterior Interior,bool Mirror=false);
+    // Share of the open-ground budget of 1500m² per team-size unit. Streets and sealed rooms
+    // bend every walk, so they shrink until bases sit a comparable walk apart, not a comparable area.
+    inline float AreaDensity(EERMapArchetype Archetype)
+    {
+        return Archetype==EERMapArchetype::Rooms ? .6f:Archetype==EERMapArchetype::UrbanTown ? .7f:1.f;
+    }
+    // Never below the 1v1 budget: every template keeps its smallest valid plan.
+    inline float TargetAreaM2(int32 ExpectedTeamSize,EERMapArchetype Archetype) { return FMath::Max(1500.f,ExpectedTeamSize*1500.f*AreaDensity(Archetype)); }
+    inline bool ValidTeamArea(FVector Size,int32 ExpectedTeamSize,EERMapArchetype Archetype)
+    { const double Area=Size.X*Size.Y/10000.,Target=TargetAreaM2(ExpectedTeamSize,Archetype);return FMath::IsFinite(Area) && Area>=Target*.9-.01 && Area<=Target*1.1+.01; }
     bool FoldLayoutToMirror(FERProceduralLayout& Layout,const FERCellSettings& Cells);
     double PlayableAreaM2(const FERProceduralLayout& Layout);
     bool BuildCircularCentralBuilding(const UERMapTemplate& Template,int32 Seed,TArray<FERMapTemplatePiece>& Pieces,FERProceduralLayout& Layout,TArray<FVector>& Patrol,int32 CrossingOverride=0);

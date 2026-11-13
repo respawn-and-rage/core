@@ -19,6 +19,10 @@ Sealed half-turn room graph with no arena floor outside it. 4, 6, 8 or 10 rooms.
   Corner bases use an L shape with distinct west and south bypasses to their two mouths;
   larger graphs keep both lateral mouths open. The timber can be breached after spawning.
 - Sparse 2.4m timber boards every 5m on runs over 10m; at most two furniture boards per room.
+- Every hall is declared to the [interior kit](../MAPS.md#shared-rules) with its convex outline:
+  depots, mess rooms, barracks, plants and column halls. Ramps, galleries and clipped corners
+  count as obstacles; junction chambers stay bare.
+- Area density is 0.6 of the open-ground budget.
 - White emissive 60cm square ceiling panels use the owned `M_OfficeCeilingWhite` finish;
   fixtures are visual only and do not block movement or shots.
 - Prototype, off by default: `bEnablePCGExMacroGraph` swaps the straight lower spine for a baked

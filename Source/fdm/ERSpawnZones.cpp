@@ -21,7 +21,7 @@ struct FSpawnSpace
 {
     const FERProceduralLayout& Layout;
     FLayoutSolids Solids;
-    TArray<FBox> Excluded,WallFaces;
+    TArray<FBox> Excluded,WallFaces,Slopes;
     explicit FSpawnSpace(const FERProceduralLayout& L):Layout(L),Solids(L)
     {
         for(const auto& P:L.Panels)if(!P.Skin.IsEmpty() && !P.bSolidSkin)
@@ -32,6 +32,8 @@ struct FSpawnSpace
         {
             if(FMath::Abs(FVector::CrossProduct(F.B-F.A,F.C-F.A).GetSafeNormal().Z)<.7)
                 WallFaces.Add((FBox(ForceInit)+F.A+F.B+F.C+F.D).ExpandBy(1));
+            // Ramps and gallery undersides are walkable faces that can still cross a standing capsule.
+            else Slopes.Add(FBox(ForceInit)+F.A+F.B+F.C+F.D);
         }
         for(const auto& Ramp:L.UnderpassRamps)Excluded.Add(FBox(FVector(Ramp.Bounds.Min.X,Ramp.Bounds.Min.Y,-10000),FVector(Ramp.Bounds.Max.X,Ramp.Bounds.Max.Y,10000)));
         for(const auto& Hole:L.UnderpassBreaches)Excluded.Add(FBox(FVector(Hole.Min.X,Hole.Min.Y,-10000),FVector(Hole.Max.X,Hole.Max.Y,10000)));
@@ -46,6 +48,10 @@ struct FSpawnSpace
         const FVector Margin(35,35,93);
         for(const auto* Set:{&Excluded,&WallFaces})for(const auto& Box:*Set)
             if(FMath::LineBoxIntersection(Box.ExpandBy(Margin),A,B,B-A))return false;
+        const double Feet=FMath::Min(A.Z,B.Z)-100,Head=FMath::Max(A.Z,B.Z)+Margin.Z;
+        const FBox Sweep=(FBox(ForceInit)+A+B).ExpandBy(FVector(Margin.X,Margin.Y,0));
+        for(const auto& Box:Slopes)
+            if(Box.Max.Z>Feet+25 && Box.Min.Z<Head && Sweep.Min.X<Box.Max.X && Sweep.Max.X>Box.Min.X && Sweep.Min.Y<Box.Max.Y && Sweep.Max.Y>Box.Min.Y)return false;
         return true;
     }
     bool Floor(FVector P) const
@@ -276,7 +282,8 @@ bool ERProcedural::SpawnZonesClearInWorld(UWorld* World,const FTransform& Frame,
         {
             if(!Bank.IsValidIndex(I))return false;
             const FVector Point=Frame.TransformPosition(Bank[I].GetLocation());FHitResult Hit;
-            if(Zone.FirstStart>0 && World->SweepSingleByChannel(Hit,Point,Frame.TransformPosition(Zone.Center),FQuat::Identity,ECC_Pawn,Capsule,Query) && Hit.ImpactNormal.Z<.72)return false;
+            if(Zone.FirstStart>0 && World->SweepSingleByChannel(Hit,Point,Frame.TransformPosition(Zone.Center),FQuat::Identity,ECC_Pawn,Capsule,Query) && Hit.ImpactNormal.Z<.72)
+            {UE_LOG(LogTemp,Warning,TEXT("ER_SPAWN_ZONE_CENTER_REJECT team=%d start=%d point=%s center=%s hit=%s component=%s"),Zone.Team,I,*Point.ToString(),*Zone.Center.ToString(),*Hit.ImpactPoint.ToString(),*GetNameSafe(Hit.GetComponent()));return false;}
             if(World->OverlapBlockingTestByChannel(Point,FQuat::Identity,ECC_Pawn,Capsule,Query) ||
                !World->SweepSingleByChannel(Hit,Point,Point-FVector(0,0,125),FQuat::Identity,ECC_Pawn,FCollisionShape::MakeSphere(20),Query))
             {UE_LOG(LogTemp,Warning,TEXT("ER_SPAWN_ZONE_PHYSICS_REJECT team=%d start=%d point=%s"),Zone.Team,I,*Point.ToString());return false;}
