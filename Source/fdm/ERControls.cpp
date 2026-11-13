@@ -42,6 +42,7 @@ TConstArrayView<FERControlBinding> FERControls::Bindings()
         {SlotKey(6), TEXT("Item shortcut 7")}, {SlotKey(7), TEXT("Item shortcut 8")},
         {SlotKey(8), TEXT("HE grenade")}, {SlotKey(9), TEXT("Smoke grenade")}, {SlotKey(10), TEXT("Claymore")},
         {EKeys::Tab, TEXT("Scoreboard")}, {EKeys::Escape, TEXT("Menu")}, {EKeys::P, TEXT("Screenshots")},
+        {EKeys::X, TEXT("Weapon flashlight")},
     };
     return MakeArrayView(Items);
 }
@@ -102,6 +103,15 @@ void FERControls::Load()
             const FKey SavedKey{FName(*Saved)};
             if (CanBind(Item.DefaultKey, SavedKey)) ActiveKey = SavedKey;
         }
+        // An older profile may have assigned X before the flashlight action existed.
+        // Preserve those bindings and put the new action on a free key.
+        if (Item.DefaultKey == EKeys::X && Used.Contains(ActiveKey))
+            for (const FERControlBinding& Candidate : Bindings())
+                if (!Used.Contains(Candidate.DefaultKey) && CanBind(Item.DefaultKey, Candidate.DefaultKey))
+                {
+                    ActiveKey = Candidate.DefaultKey;
+                    break;
+                }
         if (Used.Contains(ActiveKey))
         {
             Overrides.Reset();

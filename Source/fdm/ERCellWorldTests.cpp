@@ -426,4 +426,59 @@ bool FERCellNetTransactionTest::RunTest(const FString& Parameters)
     World->DestroyWorld(false);
     return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERMapLampCellsTest, "EclipseRecoil.Destruction.Cells.MapLamps",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FERMapLampCellsTest::RunTest(const FString&)
+{
+    TArray<FERCellPanelDesc> Panels;
+    TArray<FERMapLamp> Lamps;
+    FERCellSettings Settings;
+    ERMapLighting::BuildDepot(Settings.CellSize, nullptr, Panels, Lamps);
+    if (!TestEqual(TEXT("six perimeter banks"), Lamps.Num(), 6)) return false;
+    FERCellWorld Authority, Peer;
+    auto* Materials = NewObject<UERBlockMaterialCatalog>();
+    FString Error;
+    if (!TestTrue(TEXT("build lamp cells"), Authority.Build(Panels, Settings, Materials, Error) &&
+        Peer.Build(Panels, Settings, Materials, Error))) return false;
+
+    FERCellSupport Support;
+    TArray<TArray<FERCellId>> Unsupported;
+    if (!TestTrue(TEXT("build floodlight supports"), Support.Build(Authority, false))) return false;
+    Support.Evaluate(Authority, Unsupported);
+    TestTrue(TEXT("intact lenses and plates are connected to their pole"), Unsupported.IsEmpty());
+    const auto& Bank = Lamps[0];
+    TestEqual(TEXT("four powered lenses"), Bank.WorkingLenses(Authority), 4);
+    const FERCellId Lens{Bank.Lenses[0], 0, 0, 0};
+    TMap<FERCellId, float> Damage;
+    Damage.Add(Lens, 20.f);
+    const auto Hit = Authority.ApplyDamage(Damage);
+    TestEqual(TEXT("a shot removes a single lens"), Hit.Destroyed, 1);
+    TestEqual(TEXT("one lens loss leaves three powered"), Bank.WorkingLenses(Authority), 3);
+    for (int32 Chunk : Hit.ChangedChunks)
+    {
+        TArray<uint8> Mask;
+        TArray<uint64> Alive;
+        TSet<int32> Dirty;
+        Authority.EncodeChunk(Chunk, Mask);
+        if (!TestTrue(TEXT("peer decodes lens mask"), Peer.DecodeChunk(Chunk, Mask, Alive))) return false;
+        Peer.SetChunkAlive(Chunk, Alive, Dirty);
+    }
+    TestEqual(TEXT("peer sees the same broken lens"), Bank.WorkingLenses(Peer), 3);
+
+    const auto& Pole = Authority.GetPanels()[Bank.Pole];
+    Damage.Reset();
+    for (int32 X = 0; X < Pole.Dims.X; ++X)
+        for (int32 Y = 0; Y < Pole.Dims.Y; ++Y)
+            Damage.Add({Bank.Pole, X, Y, Pole.Dims.Z / 2}, TNumericLimits<float>::Max());
+    Authority.ApplyDamage(Damage);
+    Support.Evaluate(Authority, Unsupported);
+    TArray<FERCellId> Fallen;
+    for (const auto& Component : Unsupported) Fallen.Append(Component);
+    Authority.DetachCells(Fallen);
+    TestEqual(TEXT("severing the steel pole disables the whole bank"), Bank.WorkingLenses(Authority), 0);
+    TestEqual(TEXT("other floodlights stay on"), Lamps[1].WorkingLenses(Authority), 4);
+    return true;
+}
 #endif

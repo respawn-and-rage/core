@@ -1,4 +1,5 @@
 #pragma once
+#include "ERMapLighting.h"
 #include "CoreMinimal.h"
 #include "ERServerSettings.h"
 #include "GameFramework/Actor.h"
@@ -45,7 +46,7 @@ struct FERBlockCollapseSettings
 // Protocol 49: compact Central Building villas and paired pools.
 // Protocol 44: square office ceiling lights and tree-free Village. Protocol 43: connected Town central galleries. Protocol 42: irregular Town parcels and polygonal inaccessible ground. Protocol 41: urban Town loop and ground-floor shops. Protocol 40: circular Central Building ground railing passage. Protocol 39: longitudinal Village terrain. Protocol 38: dense longitudinal Fire Training and bent high routes. Protocol 37: concrete Fire Training shell. Protocol 36: fully procedural closed Fire Training. Protocol 35: rear cover firing steps. Protocol 34: varied circular cover groups. Protocol 33: varied circular Central Building geometry and crossings. Protocol 32: paired seeded spawn zones. Protocol 31: thin brick Alleys towers. Protocol 30: irregular 3v3 Alleys streets and lots. Protocol 29: dense 3v3 Alleys core. Protocol 28: 750m²/player and Rooms primary-floor sizing. Protocol 27: mandatory initial spawn occlusion. Protocol 26: circular graded Central Building and reflected template layouts. Protocol 25: Alleys roof links, lateral wall access and firing slits. Protocol 24: Central Building residential windows, room wings and accessible balconies. Protocol 23: no Village piece stands unsupported on a fresh map. Protocol 22: Village back gallery rail rests on the deck. Protocol 21: authority-chosen map candidate in the descriptor. Protocol 20: optional baked Rooms macro graph in the descriptor. Protocol 19:per-template palettes and Stone alley houses; optional hall passage and varied Rooms hall shapes and diagonal corner bases with four through-rooms, longitudinal Fire Training and distributed Village ground cover and variable Rooms/Village graphs at500m²/player density; expected team size plus material-rule snapshot and bounded compressed skin masks; 5cm cells with complete shard-payload witnesses. BlockCount holds the cell count, PageVersions the
 // versions of the chunk-mask shards (AERCellNetShard).
-namespace ERCellProtocol { inline constexpr uint32 Version=64; }
+namespace ERCellProtocol { inline constexpr uint32 Version=69; }
 USTRUCT()
 struct FERBlockNetworkDescriptor
 {
@@ -188,7 +189,13 @@ protected:
     virtual FString GetLayoutStatistics() const;
     virtual SIZE_T GetLayoutBytes() const { return 0; }
     bool BuildCellWorld(const TArray<FERCellPanelDesc>& Panels);
+    UPROPERTY() TObjectPtr<class UMaterialInterface> MapLampSurface;
+    TArray<FERMapLamp> MapLamps;
+    void ConfigureMapLamps();
 private:
+    UPROPERTY(Transient) TArray<TObjectPtr<class USpotLightComponent>> MapLampEmitters;
+    int64 LastLampRemovalCount = -1;
+    void RefreshMapLamps();
     friend class FERCellNetTransactionTest;
     friend class FERCellRecoveryTest;
     FERCellWorld CellWorld;

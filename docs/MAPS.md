@@ -63,19 +63,35 @@ Central Building, Alleys, Village, Town and Depot roll a cosmetic lighting seed
 on the authority at the start of each match. The seed gives standard lighting and
 sunset equal chances. It is replicated to peers and persists through arena
 regeneration. Standard lighting uses the authored lights and the full Atmospheric
-Skybox palette. Sunset picks a low-sun panorama with warm direct light, cool
-skylight and a dedicated fill for the first-person rig.
+Skybox palette. Sunset picks a FreeStylized panorama, with warm direct light at
+19.25° elevation, cool skylight and a dedicated fill for the first-person rig.
+Checkouts without those textures fall back to the Atmospheric Skybox sunset palette.
+Play Offline offers a named sky picker with previews for outdoor maps. It has 15
+standard panoramas, six sunset panoramas and four night panoramas. Every sunset uses the same 19.25°
+lighting and rotates the panorama to align its sun or brightest opening in azimuth.
+Central Building also exposes its three crossing variants.
 Each panorama rotates toward the strongest directional light using an approximate sun azimuth.
 Overcast images use their brightest opening. The backdrop uses
-one unlit 2048px texture and a flat ground plane below the playable terrain.
+one unlit texture (2048px for standard skies, 4096px for sunset and night) and a flat ground
+plane below the playable terrain.
 Village and variants with a grass ground use a dedicated horizon finish with the shared grass texture.
-The sky is visible in real-time Skylight captures. Fire Training and Rooms are lit by three shadowless directional lights
-(key, fill and an upward bounce for ceilings: `er.InteriorKeyLux`, `er.InteriorFillLux`,
-`er.InteriorBounceLux`) instead of point-light grids; `er.InteriorLights 0` restores the grids for
-comparison. The level sun of a closed hall casts no shadows, since its shell would hide them all.
-Walls, ceiling and emissive panels keep the hall reading as closed.
+The sky is visible in real-time Skylight captures. Night disables the level sun,
+reduces skylight and adds six perimeter steel poles aimed inward and down. Each square
+panel has four breakable lenses sharing one spotlight. The banks use narrow
+beams without dynamic shadows, with two opposing banks providing stronger light.
+Night uses reduced exposure.
+Each broken lens removes a quarter of the output. A severed pole collapses through
+the cell support graph and its bank goes dark.
 
-`setup_outdoor_backdrops.py` creates the private art derivatives in Unreal; `setup_outdoor_sky_capture.py` updates the sky material flag and `setup_outdoor_sky_yaw.py` adds the yaw parameter in existing installations. Verify
+Buildings use the same breakable square fixtures as Rooms, with short-range,
+shadowless spotlights. Fire Training and Rooms retain a low ambient fill
+(`er.InteriorKeyLux`, `er.InteriorFillLux`, `er.InteriorBounceLux`).
+`er.InteriorLights 0` disables the fill. Only cell masks replicate damage to the
+fixtures. Dedicated servers build the same collision without render emitters.
+
+`setup_outdoor_backdrops.py` creates the private art derivatives in Unreal and
+`setup_outdoor_sunsets.py` imports the sunset and night textures and menu previews from the maps bundle.
+`setup_outdoor_sky_capture.py` updates the sky material flag and `setup_outdoor_sky_yaw.py` adds the yaw parameter in existing installations. Verify
 with the Metal galleries for Central Building and Village, and compare the
 `ER_OUTDOOR_BACKDROP` log across seeds and peers.
 
@@ -128,8 +144,8 @@ Fire Training cargo uses matte ribbed `AluminiumSiding02`. Other cargo uses `Lig
 in the shared catalog for oxidized and ribbed finishes.
 Village has no exterior trees. Rooms and Fire Training use an owned unlit white
 emissive finish on square 60cm ceiling panels. The outdoor backdrop, light panels
-and Central Building’s native pool water are exceptions to the shared finish catalog. Characters,
-weapons and combat effects are separate systems.
+and the water used by Central Building’s pools and Village’s streams are exceptions to the shared
+finish catalog. Characters, weapons and combat effects are separate systems.
 
 Both recipes and theme libraries require the shared catalog. Missing catalog references,
 foreign palette finishes and legacy cargo preservation reject generation before publishing

@@ -12,7 +12,6 @@
 #include "Sound/SoundWave.h"
 #include "Sound/SoundAttenuation.h"
 #include "Components/DynamicMeshComponent.h"
-#include "Components/PointLightComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Engine/DirectionalLight.h"
 #include "HAL/IConsoleManager.h"
@@ -136,6 +135,8 @@ bool ERProcedural::BuildGeometry(const FERProceduralConfig& C,const FERBlockRoom
         Canonical->CompositionSeed=C.TemplateAsset->CompositionSeed;Canonical->SizingTeamSize=C.TemplateAsset->SizingTeamSize;Canonical->SizingRoomsGroundOnly=C.TemplateAsset->SizingRoomsGroundOnly;Canonical->SizingArena=C.TemplateAsset->SizingArena;
         FERProceduralConfig Paired=C;Paired.TemplateAsset=Canonical.Get();FERProceduralLayout Next;
         if(!BuildGeometry(Paired,B,Next,Cells) || !FoldLayoutToMirror(Next,Cells))return false;
+        if(C.TemplateAsset->Archetype==EERMapArchetype::Village && C.TemplateAsset->Village.Watercourses)
+            PlanVillageWatercourses(Next,C.Seed,true);
         Out=MoveTemp(Next);return true;
     }
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::UrbanTown) return BuildUrbanTown(C,B,Out,Cells);
@@ -446,7 +447,12 @@ bool AERProceduralMap::GenerateLogicalWorld()
 {
     ResolveMapCandidate();
     FERProceduralLayout Next;
-    if (!ERProcedural::Build(LayoutConfig,Config,Next,CellSettings) || !BuildCellWorld(Next.Panels)) return false;
+    if (!ERProcedural::Build(LayoutConfig,Config,Next,CellSettings)) return false;
+    MapLamps.Reset();
+    if (const auto* Recipe = LayoutConfig.TemplateAsset.Get())
+        ERMapLighting::Build(Next, *Recipe, CellSettings.CellSize, MapLampSurface,
+            EROutdoorBackdrop::IsNight(*GetWorld()), MapLamps);
+    if (!BuildCellWorld(Next.Panels)) return false;
     PlayabilityDraft.Reset();
     if(HasAuthority() && ERPlayability::Mode()==EERPlayabilityMode::ReportOnly && LayoutConfig.TemplateAsset)
     {
@@ -487,7 +493,7 @@ void AERProceduralMap::OnGenerationFinished()
     UE_LOG(LogTemp,Display,TEXT("ER_MAP_PLAYABILITY_LIVE %s"),*ERPlayability::Summary(*PlayabilityDraft));
     PlayabilityDraft.Reset();
 }
-static TAutoConsoleVariable<int32> CVarERInteriorLights(TEXT("er.InteriorLights"),1,TEXT("Closed interiors: 0 point-light grid, 1 two shadowless directional lights."));
+static TAutoConsoleVariable<int32> CVarERInteriorLights(TEXT("er.InteriorLights"),1,TEXT("Closed interiors: enable low ambient fill alongside destructible lamps."));
 static TAutoConsoleVariable<float> CVarERInteriorKeyLux(TEXT("er.InteriorKeyLux"),.75f,TEXT("Closed interiors: key directional light, lux."));
 static TAutoConsoleVariable<float> CVarERInteriorFillLux(TEXT("er.InteriorFillLux"),.3f,TEXT("Closed interiors: opposite fill directional light, lux."));
 static TAutoConsoleVariable<float> CVarERInteriorBounceLux(TEXT("er.InteriorBounceLux"),.25f,TEXT("Closed interiors: upward bounce light on ceilings and undersides, lux."));
@@ -508,7 +514,7 @@ void AERProceduralMap::ConfigureInteriorLighting()
     {
         Light->SetMobility(EComponentMobility::Movable);
         Light->SetCastShadows(false);Light->SetAffectTranslucentLighting(true);
-        Light->SetIntensity(Lux);Light->SetLightColor(FLinearColor::White);
+        Light->SetIntensity(Lux * .25f);Light->SetLightColor(FLinearColor::White);
         Light->SetAtmosphereSunLight(false);
         Light->SetWorldRotation(Rotation);Light->SetVisibility(true);
     };
@@ -614,6 +620,11 @@ SIZE_T AERProceduralMap::GetLayoutBytes() const
     Bytes+=Layout.InaccessibleGround.GetAllocatedSize()+Layout.TownBuildings.GetAllocatedSize()+Layout.TownCourts.GetAllocatedSize()+Layout.TownGates.GetAllocatedSize()+Layout.TownStreetNames.GetAllocatedSize()+Layout.UpperRoute.GetAllocatedSize()+Layout.LowerRoute.GetAllocatedSize();
     for(const auto& Gate:Layout.TownGates)Bytes+=Gate.Passage.GetAllocatedSize();
     for(const auto& Route:Layout.RoomAccessRoutes)Bytes+=Route.GetAllocatedSize();
+    Bytes+=Layout.VillageStreams.GetAllocatedSize();
+    for(const auto& Stream:Layout.VillageStreams)
+        Bytes+=Stream.LowerBank.GetAllocatedSize()+Stream.UpperBank.GetAllocatedSize();
+    Bytes+=Layout.VillageRingInner.GetAllocatedSize()+Layout.VillageRingOuter.GetAllocatedSize()+
+        Layout.VillageWaterwayTerrainVertices.GetAllocatedSize()+Layout.VillageWaterwayTerrainFaces.GetAllocatedSize();
     Bytes+=Layout.Houses.GetAllocatedSize()+Layout.TerrainPads.GetAllocatedSize()+Layout.PoolWater.GetAllocatedSize()+Layout.Ladders.GetAllocatedSize()+Layout.DistrictTowers.GetAllocatedSize()+Layout.DistrictTowerHeights.GetAllocatedSize();
     for(const auto& House:Layout.Houses)
     {
@@ -670,7 +681,7 @@ void AERProceduralMap::ConfigureTemplateFloors()
         AlleyTerrain->SetCanEverAffectNavigation(false);AlleyTerrain->SetDeferredCollisionUpdatesEnabled(true,false);
         AlleyTerrain->SetComplexAsSimpleCollisionEnabled(true,false);AlleyTerrain->SetCollisionProfileName(TEXT("BlockAll"));
         AlleyTerrain->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
-        AlleyTerrain->SetMaterial(0,Layout.GroundSurface);AlleyTerrain->RegisterComponent();if(Layout.CircularArena)ERProcedural::BuildCentralTerrain(AlleyTerrain,Layout);else if(!Layout.VillageTerrainProfile.IsEmpty())ERProcedural::BuildVillageTerrain(AlleyTerrain,Layout);else ERProcedural::BuildAlleyTerrain(AlleyTerrain,Layout);
+        AlleyTerrain->SetMaterial(0,Layout.GroundSurface);AlleyTerrain->RegisterComponent();if(Layout.CircularArena)ERProcedural::BuildCentralTerrain(AlleyTerrain,Layout);else if(Template->Archetype==EERMapArchetype::Village)ERProcedural::BuildVillageTerrain(AlleyTerrain,Layout);else ERProcedural::BuildAlleyTerrain(AlleyTerrain,Layout);
     }
     for(auto* Mesh:{TileFloors.Get(),WoodFloors.Get(),Ceilings.Get(),Stairs.Get()}){Mesh->ClearInstances();Mesh->SetStaticMesh(BlockMesh);}
     FixedCollision->SetStaticMesh(BlockMesh);
@@ -773,7 +784,7 @@ void AERProceduralMap::ConfigureTemplateFloors()
     FlushMetal();
     if(!Layout.PoolWater.IsEmpty() && PoolWaterSurface && GetNetMode()!=NM_DedicatedServer)
     {
-        if(Layout.FeatureNames.Contains(TEXT("VillaWaterfront")))
+        if(!Layout.VillageWaterwayTerrainFaces.IsEmpty() || Layout.FeatureNames.Contains(TEXT("VillaWaterfront")))
         {
             auto* Water=NewObject<UDynamicMeshComponent>(this);
             AddInstanceComponent(Water);Water->SetupAttachment(RootComponent);
@@ -781,7 +792,8 @@ void AERProceduralMap::ConfigureTemplateFloors()
             Water->SetCanEverAffectNavigation(false);Water->SetCastShadow(false);
             Water->SetMaterial(0,PoolWaterSurface);
             Water->ComponentTags.Add(TEXT("ERTemplateVisual"));
-            ERProcedural::BuildWaterfrontSurface(Water,Layout);
+            if(!Layout.VillageWaterwayTerrainFaces.IsEmpty())ERProcedural::BuildVillageWaterwaySurface(Water,Layout);
+            else ERProcedural::BuildWaterfrontSurface(Water,Layout);
             Water->RegisterComponent();PoolSurfaces.Add(Water);
         }
         else for(const auto& Bounds:Layout.PoolWater)
@@ -798,51 +810,15 @@ void AERProceduralMap::ConfigureTemplateFloors()
             Water->RegisterComponent();PoolSurfaces.Add(Water);
         }
     }
-    UInstancedStaticMeshComponent* CeilingPanels=nullptr;
-    if(FireTraining && GetNetMode()!=NM_DedicatedServer && Template->FireTraining.CeilingPanelMesh)
-    {
-        CeilingPanels=NewObject<UInstancedStaticMeshComponent>(this);AddInstanceComponent(CeilingPanels);
-        CeilingPanels->SetupAttachment(RootComponent);CeilingPanels->SetMobility(EComponentMobility::Movable);
-        CeilingPanels->SetStaticMesh(Template->FireTraining.CeilingPanelMesh);
-        CeilingPanels->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        CeilingPanels->SetCanEverAffectNavigation(false);CeilingPanels->SetCastShadow(false);
-        CeilingPanels->ComponentTags.Add(TEXT("ERTemplateRoof"));CeilingPanels->ComponentTags.Add(TEXT("ERTemplateVisual"));
-        CeilingPanels->RegisterComponent();FixedMeshes.Add(CeilingPanels);
-    }
-    const bool LegacyInteriorLights=CVarERInteriorLights.GetValueOnGameThread()==0;
-    if(FireTraining && GetNetMode()!=NM_DedicatedServer)
-        for(float X=-Layout.WarehouseWidth*.5f+600;X<Layout.WarehouseWidth*.5f;X+=1200)
-            for(float Y=-Layout.WarehouseLength*.5f+600;Y<Layout.WarehouseLength*.5f;Y+=1200)
-            {
-                if(CeilingPanels)CeilingPanels->AddInstance(FTransform(FQuat::Identity,FVector(X,Y,Layout.IndoorCeiling-5),FVector(.6,.6,.04)));
-                if(!LegacyInteriorLights)continue;
-                auto* Light=NewObject<UPointLightComponent>(this);AddInstanceComponent(Light);
-                Light->SetupAttachment(RootComponent);Light->SetMobility(EComponentMobility::Movable);
-                Light->SetRelativeLocation({X,Y,Layout.IndoorCeiling-65});
-                const float HeightRatio=Layout.IndoorCeiling/560.f;
-                Light->SetIntensityUnits(ELightUnits::Candelas);
-                Light->SetIntensity(6.f*FMath::Square(HeightRatio));
-                Light->SetAttenuationRadius(1200.f*HeightRatio);Light->SetCastShadows(false);
-                Light->SetSourceRadius(40);Light->SetSpecularScale(.35f);
-                Light->SetLightColor(FLinearColor::White);Light->RegisterComponent();WarehouseLights.Add(Light);
-            }
-    if((FireTraining || ClosedRooms) && GetNetMode()!=NM_DedicatedServer && GetWorld()->IsGameWorld() && !LegacyInteriorLights)ConfigureInteriorLighting();
+    if ((FireTraining || ClosedRooms) && GetNetMode() != NM_DedicatedServer &&
+        GetWorld()->IsGameWorld() && CVarERInteriorLights.GetValueOnGameThread() != 0)
+        ConfigureInteriorLighting();
     for(const auto& Desc:Layout.Ladders)
     {
         FActorSpawnParameters Params;Params.Owner=this;
         auto* Ladder=GetWorld()->SpawnActor<AERLadder>(AERLadder::StaticClass(),Desc.Frame*GetActorTransform(),Params);
         if(Ladder){Ladder->Height=Desc.Height;Ladder->DeckHeight=Desc.DeckHeight;LadderActors.Add(Ladder);}
     }
-    if(ClosedRooms && GetNetMode()!=NM_DedicatedServer && LegacyInteriorLights)
-        for(const FVector P:Layout.RoomLightPoints)
-        {
-            auto* Light=NewObject<UPointLightComponent>(this);AddInstanceComponent(Light);
-            Light->SetupAttachment(RootComponent);Light->SetMobility(EComponentMobility::Movable);
-            Light->SetRelativeLocation(P);Light->SetIntensityUnits(ELightUnits::Candelas);
-            Light->SetIntensity(6);Light->SetAttenuationRadius(1200);
-            Light->SetCastShadows(false);Light->SetLightColor(FLinearColor::White);
-            Light->RegisterComponent();WarehouseLights.Add(Light);
-        }
     if(HasAuthority() && Layout.Routes.Num()>1 && (Template->Archetype==EERMapArchetype::CentralBuilding || Template->Archetype==EERMapArchetype::MiddleEasternAlleys || Template->Archetype==EERMapArchetype::FireTraining || Template->Archetype==EERMapArchetype::Village || Template->Archetype==EERMapArchetype::UrbanTown || ClosedRooms))
     {
         // Crossing rules have different route lengths. Never leave saved
@@ -965,6 +941,11 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
         }
     }
     for(const auto& Water:Layout.PoolWater){MixVector(Water.Min);MixVector(Water.Max);}
+    for(const auto& Stream:Layout.VillageStreams)
+        for(const auto* Bank:{&Stream.LowerBank,&Stream.UpperBank})
+            for(const auto& Point:*Bank)MixVector(FVector(Point,Stream.Surface));
+    for(const auto* Bank:{&Layout.VillageRingInner,&Layout.VillageRingOuter})
+        for(const auto& Point:*Bank)MixVector(FVector(Point,0));
     for(const auto& Knot:Layout.VillageTerrainProfile)MixVector({Knot.X,Knot.Y,0});
     if(LayoutConfig.TemplateAsset->Town.Enabled)
     {
@@ -1004,6 +985,18 @@ float AERProceduralMap::WaterDepthAt(const FVector& WorldFeet) const
     if(Layout.FeatureNames.Contains(TEXT("VillaWaterfront")) &&
         FMath::Square(P.X/(Layout.ArenaSize.X*.5-20))+FMath::Square(P.Y/(Layout.ArenaSize.Y*.5-20))>1)
         return 0.f;
+    if(!Layout.VillageStreams.IsEmpty())
+    {
+        const auto* Stream=ERProcedural::VillageStreamAt(Layout,FVector2D(P));
+        if(!Stream)return 0.f;
+        const double Depth=Stream->Surface-P.Z;
+        return Depth>=0 && Depth<=105 ? float(Depth):0.f;
+    }
+    if(!Layout.VillageRingInner.IsEmpty())
+    {
+        const float Depth=float(Layout.PoolWater[0].Max.Z-P.Z);
+        return Depth>=0.f && Depth<=105.f && ERProcedural::VillageRingContains(Layout,FVector2D(P)) ? Depth:0.f;
+    }
     for(const FBox& Water:Layout.PoolWater)
         if(P.X>=Water.Min.X && P.X<=Water.Max.X && P.Y>=Water.Min.Y && P.Y<=Water.Max.Y)
         {
@@ -1029,6 +1022,20 @@ bool AERProceduralMap::WaterSurfaceAt(const FVector& WorldPosition,FVector& OutS
     if(Layout.FeatureNames.Contains(TEXT("VillaWaterfront")) &&
         FMath::Square(P.X/(Layout.ArenaSize.X*.5-20))+FMath::Square(P.Y/(Layout.ArenaSize.Y*.5-20))>1)
         return false;
+    if(!Layout.VillageStreams.IsEmpty())
+    {
+        const auto* Stream=ERProcedural::VillageStreamAt(Layout,FVector2D(P));
+        if(!Stream || P.Z>Stream->Surface-1 || P.Z<Stream->Surface-105)return false;
+        OutSurface=GetActorTransform().TransformPosition(FVector(P.X,P.Y,Stream->Surface));
+        return true;
+    }
+    if(!Layout.VillageRingInner.IsEmpty())
+    {
+        const double Z=Layout.PoolWater[0].Max.Z;
+        if(P.Z>Z-1 || P.Z<Z-105 || !ERProcedural::VillageRingContains(Layout,FVector2D(P)))return false;
+        OutSurface=GetActorTransform().TransformPosition(FVector(P.X,P.Y,Z));
+        return true;
+    }
     for(const FBox& Water:Layout.PoolWater)
         if(P.X>=Water.Min.X && P.X<=Water.Max.X && P.Y>=Water.Min.Y && P.Y<=Water.Max.Y &&
            P.Z<=Water.Max.Z-1 && P.Z>=Water.Max.Z-105)

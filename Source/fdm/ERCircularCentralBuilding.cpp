@@ -248,6 +248,8 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
         {
             const double DeckFront=FMath::Max(Rect.Min.Y,double(FrontY));
             TArray<double> CX{Rect.Min.X,Rect.Max.X},CY{DeckFront,Rect.Max.Y};
+            double LampBayArea=0;
+            FVector2D LampBayCenter=FVector2D::ZeroVector;
             if(StairAbove)
             {
                 for(double Cut:{DeckHole.Min.X,DeckHole.Max.X})if(Cut>Rect.Min.X && Cut<Rect.Max.X)CX.AddUnique(Cut);
@@ -264,7 +266,17 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
                 const FVector2D Mid((CX[IX-1]+CX[IX])*.5,(CY[IY-1]+CY[IY])*.5);
                 if((StairAbove && DeckHole.IsInside(Mid)) ||
                    (RoofPool && Floor==L.BuildingFloors-1 && RoofPoolHole.IsInside(Mid)))continue;
+                const FVector2D Span(CX[IX]-CX[IX-1],CY[IY]-CY[IY-1]);
                 BuildingBox({Mid.X,Mid.Y,Z+300+(Rise-300)*.5f},{CX[IX]-CX[IX-1],CY[IY]-CY[IY-1],Rise-300},EERBlockMaterial::Metal,true,true,true);
+                // Mount within the largest uninterrupted ceiling bay, clear of the stairs and pool.
+                if(Span.X>=120. && Span.Y>=120. && Span.X*Span.Y>LampBayArea)
+                {LampBayArea=Span.X*Span.Y;LampBayCenter=Mid;}
+            }
+            if(LampBayArea>0)
+            {
+                const FVector Fixture=L.CentralBuildingCenter+FVector(LampBayCenter,Z+297);
+                L.CentralCeilingMounts.Add(Fixture);
+                L.CentralCeilingMounts.Add(Mate(Fixture));
             }
         }
         if(StairAbove)

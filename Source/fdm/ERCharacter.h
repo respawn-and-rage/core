@@ -205,6 +205,7 @@ public:
     float GrenadeThrowPoseBlend = 0;
     UFUNCTION(Server, Reliable) void ServerStopFire();
     UFUNCTION(Server, Reliable) void ServerReload();
+    UFUNCTION(Server, Reliable) void ServerToggleWeaponLight();
     UFUNCTION(Server, Reliable) void ServerSelectWeapon(int32 Slot);
     void InitializeLoadout(int32 Primary);
     FVector GetVisualMuzzle(bool bFirstPerson) const;
@@ -216,6 +217,9 @@ public:
     void ApplyDeathVisuals();
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 private:
+    UPROPERTY(Replicated) bool bWeaponLightOn = false;
+    UPROPERTY(Transient) TObjectPtr<class USpotLightComponent> WeaponLight;
+    void UpdateWeaponLight(bool bStowed);
     friend class AERAttachedTracer;
     FERFireInputState ServerFireInput;
     FERShotPresentationWindow ShotPresentation;

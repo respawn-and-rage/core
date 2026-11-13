@@ -12,6 +12,7 @@
 #include "ERCapacityProbe.h"
 #include "ERMapCatalog.h"
 #include "EROutdoorBackdrop.h"
+#include "ERDepotNight.h"
 #include "ERRecon.h"
 #include "ERReconProbe.h"
 #include "ERCharacter.h"
@@ -84,6 +85,8 @@ void AERGameState::BeginPlay()
     {
         DepotSkySeed=EROutdoorBackdrop::RollLightingSeed();
         OnRep_DepotSkySeed();
+        if (EROutdoorBackdrop::IsNight(*GetWorld()))
+            GetWorld()->SpawnActor<AERDepotNight>();
     }
 }
 
@@ -162,13 +165,15 @@ void AERGameMode::InitGame(const FString& MapName, const FString& Options, FStri
             It->LayoutConfig.Seed = UGameplayStatics::GetIntOption(Options, TEXT("MapSeed"), Rules.Get("Map.FixedSeed")>0?int32(Rules.Get("Map.Seed")):It->LayoutConfig.Seed);
             FParse::Value(FCommandLine::Get(), TEXT("ERMapSeed="), It->LayoutConfig.Seed);
             It->LayoutConfig.CrossingOverride=0;
+            if (GetNetMode() == NM_Standalone && MapName.EndsWith(TEXT("L_CentralBuilding")))
+                It->LayoutConfig.CrossingOverride = FMath::Clamp(UGameplayStatics::GetIntOption(Options, TEXT("MapCrossing"), 0), 0, 3);
             It->LayoutConfig.bEnablePCGExMacroGraph=false;
             It->bSelectMapCandidates=false;
 #if !UE_BUILD_SHIPPING
             It->bSelectMapCandidates=UGameplayStatics::GetIntOption(Options,TEXT("MapSelection"),0)!=0 || FParse::Param(FCommandLine::Get(),TEXT("ERMapSelection"));
             // The authority decides; clients follow the descriptor, never a local flag.
             It->LayoutConfig.bEnablePCGExMacroGraph=UGameplayStatics::GetIntOption(Options,TEXT("RoomsMacroGraph"),0)!=0 || FParse::Param(FCommandLine::Get(),TEXT("ERRoomsMacroGraph"));
-            if(FParse::Param(FCommandLine::Get(),TEXT("ERIndustrialMapProbe")))
+            if(GetNetMode() != NM_Standalone && FParse::Param(FCommandLine::Get(),TEXT("ERIndustrialMapProbe")))
                 It->LayoutConfig.CrossingOverride=UGameplayStatics::GetIntOption(Options,TEXT("MapCrossing"),0);
 #endif
             It->LayoutConfig.Floors=UGameplayStatics::GetIntOption(Options,TEXT("MapFloors"),It->LayoutConfig.Floors);

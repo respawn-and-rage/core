@@ -70,6 +70,9 @@ spacing at most 75cm. Spawn and route heights use the same triangles as collisio
 The perimeter uses visible concrete plinths and original-height steel fence courses;
 there is no rectangular floor underneath or taller invisible perimeter wall.
 Team sizing budgets the rounded ground area, excluding upper storeys and roofs.
+The level's authored lighting is the sun and skylight. Local lighting comes from
+the generated breakable fixtures; `setup_central_building_remove_legacy_lights.py`
+removes the obsolete pair of fixed fill lights from older level assets.
 
 `CircularTerrain=false` retains rectangular authored studies and their crossing rules
 in `ERCentralBuilding.cpp`: open yard, destructible wall with timber crossings, or

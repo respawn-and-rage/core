@@ -36,6 +36,9 @@ struct FSpawnSpace
         for(const auto& Ramp:L.UnderpassRamps)Excluded.Add(FBox(FVector(Ramp.Bounds.Min.X,Ramp.Bounds.Min.Y,-10000),FVector(Ramp.Bounds.Max.X,Ramp.Bounds.Max.Y,10000)));
         for(const auto& Hole:L.UnderpassBreaches)Excluded.Add(FBox(FVector(Hole.Min.X,Hole.Min.Y,-10000),FVector(Hole.Max.X,Hole.Max.Y,10000)));
         Excluded.Append(L.VillageFloorHoles);
+        if(L.FeatureNames.Contains(TEXT("VillageWatercourses")))
+            for(const auto& Water:L.PoolWater)
+                Excluded.Add(FBox(FVector(Water.Min.X,Water.Min.Y,-10000),FVector(Water.Max.X,Water.Max.Y,10000)));
     }
     bool Clear(FVector A,FVector B) const
     {

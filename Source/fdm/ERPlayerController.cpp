@@ -17,6 +17,7 @@
 #include "ERMenuPreview.h"
 #include "Containers/Ticker.h"
 #include "ERMapCatalog.h"
+#include "EROutdoorBackdrop.h"
 #include "Internationalization/Internationalization.h"
 #include "ERMouseResponse.h"
 #include "Misc/App.h"
@@ -264,7 +265,18 @@ void UERGameInstance::StartSession()
     Options += FString::Printf(TEXT("?Primary=%d?AlphaSkin=%d?OmegaSkin=%d?Team=%d?ERAlphaBots=%d?EROmegaBots=%d?ERBotMode=%s"),
         GetStartingWeapon(), AlphaSkin, OmegaSkin, FMath::Clamp(PlayerTeam,0,1), FMath::Clamp(AlphaBots,0,10), FMath::Clamp(OmegaBots,0,10), Behaviors[FMath::Clamp(BotBehavior,0,2)]);
     Options += FString::Printf(TEXT("?Magazines=%d?HE=%d?Smoke=%d?Stun=%d"), SpareMagazines, HECount, SmokeCount, StunCount);
-    if(Map.Procedural)Options+=FString::Printf(TEXT("?MapSeed=%d"),SessionRules.Get("Map.FixedSeed")>0?int32(SessionRules.Get("Map.Seed")):FMath::Rand());
+    if (Map.Procedural)
+    {
+        const int32 DefaultSeed = SessionRules.Get("Map.FixedSeed") > 0 ? int32(SessionRules.Get("Map.Seed")) : FMath::Rand();
+        Options += FString::Printf(TEXT("?MapSeed=%d"), DefaultSeed);
+    }
+    if (SessionMode == 0)
+    {
+        if (FCString::Strcmp(Map.Id, TEXT("central_building")) == 0 && OfflineCrossingChoice > 0)
+            Options += FString::Printf(TEXT("?MapCrossing=%d"), OfflineCrossingChoice);
+        if (EROutdoorBackdrop::IsOutdoorMap(Map.Package) && OfflineSkyChoice > 0)
+            Options += FString::Printf(TEXT("?EROfflineSky=%d"), OfflineSkyChoice);
+    }
     UGameplayStatics::OpenLevel(GetWorld(), FName(Map.Package), true, Options);
 }
 void UERGameInstance::Host(int32 BotCount, bool bStationaryTarget)
@@ -641,6 +653,7 @@ void AERPlayerController::SetupInputComponent()
     Super::SetupInputComponent();
     const int32 FirstRawBinding = InputComponent->KeyBindings.Num();
     InputComponent->BindKey(EKeys::P, IE_Pressed, this, &AERPlayerController::CapturePlayerScreenshots);
+    InputComponent->BindKey(EKeys::X, IE_Pressed, this, &AERPlayerController::ToggleWeaponLight);
     InputComponent->BindKey(EKeys::E, IE_Pressed, this, &AERPlayerController::SprintPressed);
     InputComponent->BindKey(EKeys::E, IE_Released, this, &AERPlayerController::SprintReleased);
     InputComponent->BindKey(EKeys::W, IE_Pressed, this, &AERPlayerController::ForwardPressed);
@@ -692,6 +705,12 @@ void AERPlayerController::SetupInputComponent()
         Input->BindAction(ScoreboardAction, ETriggerEvent::Canceled, this, &AERPlayerController::ScoreboardReleased);
         Input->BindAction(MenuAction, ETriggerEvent::Started, this, &AERPlayerController::MenuPressed);
     }
+}
+void AERPlayerController::ToggleWeaponLight()
+{
+    if (!bMenuOpen)
+        if (auto* PlayerCharacter = Cast<AERCharacter>(GetPawn()))
+            PlayerCharacter->ServerToggleWeaponLight();
 }
 void AERPlayerController::PostProcessInput(float DeltaTime, bool bGamePaused)
 {

@@ -65,7 +65,7 @@ static float AlleyGroundField(const FERProceduralLayout& L,FVector2D P)
 }
 float AlleyGroundHeight(const FERProceduralLayout& L,FVector2D P)
 {
-    if(!L.VillageTerrainProfile.IsEmpty())return VillageGroundHeight(L,P);
+    if(!L.VillageTerrainProfile.IsEmpty() || L.FeatureNames.Contains(TEXT("VillageWatercourses")))return VillageGroundHeight(L,P);
     if(L.CircularArena)return CentralGroundHeight(L,P);
     for(const auto& R:L.UnderpassRamps)if(P.X>=R.Bounds.Min.X-.001 && P.X<=R.Bounds.Max.X+.001 && P.Y>=R.Bounds.Min.Y-.001 && P.Y<=R.Bounds.Max.Y+.001)return AlleyRampHeight(R,P);
     if(!L.SeededDistrict)return AlleyGroundField(L,P);

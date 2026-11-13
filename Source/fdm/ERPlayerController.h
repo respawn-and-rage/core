@@ -51,6 +51,8 @@ public:
     // Server-only session history; survives seamless map travel, never saved.
     TArray<FName> RoundMapHistory;
     int32 MapChoice = 0;
+    int32 OfflineCrossingChoice = 0;
+    int32 OfflineSkyChoice = 0;
     int32 PlayerTeam = 0;
     int32 AlphaBots = 0;
     int32 OmegaBots = 1;
@@ -166,6 +168,7 @@ public:
     int32 ScreenshotIndex = 0, SavedScreenshotCount = 0;
     uint64 ScreenshotReadFrame = 0;
     virtual void SetupInputComponent() override;
+    void ToggleWeaponLight();
     virtual void PostProcessInput(float DeltaTime, bool bGamePaused) override;
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;

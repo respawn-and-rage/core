@@ -63,10 +63,6 @@ if not assets.does_asset_exist(map_path):
     sun.light_component.set_editor_property('intensity',3.5)
     sky=spawn(ue.SkyLight,'Industrial_Sky',(0,0,2200));sky.light_component.set_editor_property('intensity',1.1)
     spawn(ue.SkyAtmosphere,'Industrial_Atmosphere',(0,0,0))
-    for x in [-700,700]:
-        light=spawn(ue.PointLight,'Industrial_Interior_'+str(x),(x,0,230)).light_component
-        light.set_editor_property('intensity',35);light.set_editor_property('attenuation_radius',1800)
-        light.set_editor_property('cast_shadows',False)
     if not levels.save_current_level():raise RuntimeError('Cannot save industrial level')
 if not levels.load_level(map_path):raise RuntimeError('Cannot open industrial lighting')
 world=ue.get_editor_subsystem(ue.UnrealEditorSubsystem).get_editor_world()

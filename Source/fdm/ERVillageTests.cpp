@@ -16,6 +16,7 @@ bool FERVillageLayoutTest::RunTest(const FString& Parameters)
     auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.village");T->Archetype=EERMapArchetype::Village;T->Symmetry=EERTemplateSymmetry::HalfTurn;
     FERProceduralConfig C;C.TemplateAsset=T;FERBlockRoomConfig B;FERProceduralLayout L,Again;
     TSet<int32> BlockCounts,BaseVariants,Storeys;FString Manifest=TEXT("[");
+    int32 Loops=0,Streams=0;
     TSet<FString> Shapes;TArray<int32> Seeds;for(int32 I=0;I<512;++I)Seeds.Add(I);Seeds.Append({7919,-17,INT32_MIN,INT32_MAX});
     auto Key=[](const FERCellPanelDesc& P,bool Turn)
     {
@@ -25,6 +26,67 @@ bool FERVillageLayoutTest::RunTest(const FString& Parameters)
     for(int32 Seed:Seeds)
     {
         C.Seed=Seed;if(!TestTrue(TEXT("Village accepts seed"),ERProcedural::Build(C,B,L)))return false;
+        if(L.FeatureNames.Contains(TEXT("VillageLoopStreams")))
+        {
+            ++Loops;
+            TestTrue(TEXT("ring has sampled banks and rounded corners"),
+                L.VillageRingInner.Num()>40 && L.VillageRingInner.Num()==L.VillageRingOuter.Num());
+            const FBox2D Interior(L.VillageRingInner);
+            TestTrue(TEXT("ring encloses at least a quarter of the arena in each direction"),
+                Interior.GetSize().X>=L.ArenaSize.X*.25 && Interior.GetSize().Y>=L.ArenaSize.Y*.25);
+            for(const auto& Block:L.VillageBlocks)
+            {
+                const FVector2D Center(Block.Frame.GetLocation());
+                for(double DX:{-.5,.5})for(double DY:{-.5,.5})
+                    TestTrue(TEXT("curved ring surrounds each building footprint"),
+                        ERProcedural::VillageRingContains(L,Center+FVector2D(DX*Block.Size.X,DY*Block.Size.Y),true));
+            }
+            int32 Bends=0;
+            for(int32 I=0;I<L.VillageRingInner.Num();++I)
+            {
+                const int32 J=(I+1)%L.VillageRingInner.Num();
+                const FVector2D A=(L.VillageRingInner[I]+L.VillageRingOuter[I])*.5;
+                const FVector2D Next=(L.VillageRingInner[J]+L.VillageRingOuter[J])*.5;
+                const FVector2D Segment=Next-A;
+                if(FMath::Abs(Segment.X)>1 && FMath::Abs(Segment.Y)>1)++Bends;
+                TestTrue(TEXT("closed channel has water between adjacent sections"),
+                    ERProcedural::VillageRingContains(L,(A+Next)*.5));
+            }
+            TestTrue(TEXT("straight reaches give way to meanders"),Bends>40);
+        }
+        if(L.FeatureNames.Contains(TEXT("VillageTransverseStreams")))
+        {
+            ++Streams;
+            TestEqual(TEXT("transverse channels come in a symmetric pair"),L.VillageStreams.Num(),2);
+            for(const auto& Stream:L.VillageStreams)
+            {
+                const double HX=L.ArenaSize.X*.5;
+                TestTrue(TEXT("both mouths extend beyond the palisade"),
+                    Stream.LowerBank[0].X < -HX-100 && Stream.LowerBank.Last().X > HX+100);
+                const double Row=Stream.LowerBank[0].Y;
+                double MaxBend=0;
+                for(int32 I=1;I<Stream.LowerBank.Num();++I)
+                {
+                    MaxBend=FMath::Max(MaxBend,FMath::Abs(Stream.LowerBank[I].Y-Row));
+                    const FVector2D Mid=(Stream.LowerBank[I-1]+Stream.UpperBank[I-1]+
+                        Stream.LowerBank[I]+Stream.UpperBank[I])*.25;
+                    TestTrue(TEXT("water is continuous through bends"),ERProcedural::VillageStreamAt(L,Mid)==&Stream);
+                }
+                TestTrue(TEXT("transverse channels contain a visible bend"),MaxBend>=45);
+            }
+        }
+        for(const auto& Water:L.PoolWater)
+        {
+            const auto XY=FVector2D(Water.GetCenter());
+            TestTrue(TEXT("water surface 10cm below the bank"),
+                FMath::IsNearlyEqual(Water.Max.Z,ERProcedural::VillageGroundHeight(L,XY)-10.,.01));
+            TestTrue(TEXT("channel water depth within bounds"),Water.GetSize().Z>=50 && Water.GetSize().Z<=100);
+            const FBox Pair(FVector(-Water.Max.X,-Water.Max.Y,Water.Min.Z),FVector(-Water.Min.X,-Water.Min.Y,Water.Max.Z));
+            TestTrue(TEXT("watercourses are half-turn pairs"),L.PoolWater.ContainsByPredicate([&](const FBox& Other)
+            {
+                return Other.Min.Equals(Pair.Min) && Other.Max.Equals(Pair.Max);
+            }));
+        }
         const int32 N=L.VillageBlocks.Num();int32 Floors=0,Centered=0;
         for(float Y=-L.ArenaSize.Y*.5f;Y<L.ArenaSize.Y*.5f;Y+=100)
         {
@@ -87,12 +149,36 @@ bool FERVillageLayoutTest::RunTest(const FString& Parameters)
             TestTrue(TEXT("starts inside opposed outer strips"),A.Y<-L.ArenaSize.Y*.5+450 && O.Y>L.ArenaSize.Y*.5-450);
         }
         C.Seed=Seed;ERProcedural::Build(C,B,Again);
+        TestTrue(TEXT("deterministic watercourses"),L.PoolWater==Again.PoolWater &&
+            L.VillageRingInner==Again.VillageRingInner && L.VillageRingOuter==Again.VillageRingOuter);
         TestTrue(TEXT("deterministic layout"),L.ArenaSize==Again.ArenaSize && L.Panels.Num()==Again.Panels.Num());
         for(int32 I=0;I<L.Panels.Num();++I)if(!L.Panels[I].Transform.Equals(Again.Panels[I].Transform)){AddError(TEXT("nondeterministic Village"));return false;}
     }
     Manifest+=TEXT("]");IFileManager::Get().MakeDirectory(*(FPaths::ProjectSavedDir()/TEXT("Testing")),true);
     TestTrue(TEXT("actual generated variety manifest exported"),FFileHelper::SaveStringToFile(Manifest,*(FPaths::ProjectSavedDir()/TEXT("Testing/village-variety.json")),FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
     TestEqual(TEXT("all block counts exercised"),BlockCounts.Num(),5);TestEqual(TEXT("all base variants exercised"),BaseVariants.Num(),3);TestEqual(TEXT("all storey counts exercised"),Storeys.Num(),3);
+    TestTrue(TEXT("seeded Village builds closed loops"),Loops>0);
+    TestTrue(TEXT("seeded Village builds transverse streams"),Streams>0);
+    AddInfo(FString::Printf(TEXT("ER_VILLAGE_WATERCOURSES loops=%d transverse=%d"),Loops,Streams));
+    auto* Saved=LoadObject<UERMapTemplate>(nullptr,TEXT("/Game/EclipseRecoil/Art/MapTemplates/DA_Village"));
+    if(TestNotNull(TEXT("saved Village recipe"),Saved))
+    {
+        FERProceduralConfig Gameplay=C;
+        Gameplay.TemplateAsset=Saved;
+        Gameplay.ExpectedTeamSize=3;
+        int32 RingSeed=INDEX_NONE,StreamSeed=INDEX_NONE;
+        for(int32 Seed=0;Seed<128 && (RingSeed==INDEX_NONE || StreamSeed==INDEX_NONE);++Seed)
+        {
+            Gameplay.Seed=Seed;
+            FERProceduralLayout Sized;
+            if(!ERProcedural::Build(Gameplay,B,Sized))continue;
+            if(Sized.FeatureNames.Contains(TEXT("VillageLoopStreams")))RingSeed=Seed;
+            if(Sized.FeatureNames.Contains(TEXT("VillageTransverseStreams")))StreamSeed=Seed;
+        }
+        TestTrue(TEXT("sized Village builds a central ring"),RingSeed!=INDEX_NONE);
+        TestTrue(TEXT("sized Village builds edge-to-edge streams"),StreamSeed!=INDEX_NONE);
+        AddInfo(FString::Printf(TEXT("ER_VILLAGE_WATERCOURSE_EXAMPLES team=3 ring=%d transverse=%d"),RingSeed,StreamSeed));
+    }
     const auto Previous=L.Panels.Num();T->Village.DeckHeight=NAN;
     TestFalse(TEXT("invalid recipe rejected atomically"),ERProcedural::Build(C,B,L));TestEqual(TEXT("previous output retained"),L.Panels.Num(),Previous);
     T->Village.DeckHeight=240;T->Village.BlockWidth={2001,2002};
@@ -125,6 +211,36 @@ bool FERVillagePhysicsTest::RunTest(const FString& Parameters)
             const float X=L.ArenaSize.X*.5f-80;
             if(World->LineTraceSingleByChannel(Hit,{X,Y,H+25},{X,Y,H-25},ECC_Visibility,Q) && Hit.GetComponent() && Hit.GetComponent()->GetName()==TEXT("AlleyTerrain"))
                 TestTrue(TEXT("visible terrain and queried ground agree"),FMath::IsNearlyEqual(float(Hit.ImpactPoint.Z),H,.05f));
+        }
+        if(!L.PoolWater.IsEmpty())
+        {
+            bool FoundBed=false;
+            for(const auto& Water:L.PoolWater)
+            {
+                for(double Along:{.25,.5,.75})
+                {
+                    FVector Point=Water.GetCenter();
+                    if(Water.GetSize().X>Water.GetSize().Y)Point.X=FMath::Lerp(Water.Min.X,Water.Max.X,Along);
+                    else Point.Y=FMath::Lerp(Water.Min.Y,Water.Max.Y,Along);
+                    if(!World->LineTraceSingleByChannel(Hit,{Point.X,Point.Y,Water.Max.Z+40},
+                        {Point.X,Point.Y,Water.Min.Z-5},ECC_Visibility,Q) ||
+                        Hit.ImpactPoint.Z>Water.Max.Z-35)continue;
+                    FoundBed=true;
+                    TestTrue(TEXT("carved bed gives wading depth"),Map->WaterDepthAt(Hit.ImpactPoint)>=35);
+                }
+            }
+            TestTrue(TEXT("stream has a real bed under the water"),FoundBed);
+            for(const auto& Bridge:L.GroundRoutes)
+            {
+                for(int32 I=1;I<Bridge.Num();++I)
+                    TestFalse(TEXT("bridge and both ramps clear a standing capsule"),
+                        World->SweepSingleByChannel(Hit,Bridge[I-1],Bridge[I],FQuat::Identity,ECC_Pawn,Capsule,Q));
+                const FVector Center=(Bridge[1]+Bridge[2])*.5;
+                TestTrue(TEXT("bridge deck supports the crossing"),
+                    World->LineTraceSingleByChannel(Hit,Center,Center-FVector(0,0,108),ECC_Visibility,Q) &&
+                    FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Center.Z-100.,.1));
+                TestEqual(TEXT("bridge deck stays dry"),Map->WaterDepthAt(Center-FVector(0,0,100)),0.f);
+            }
         }
         TestTrue(TEXT("valid cell world"),Map->ValidateCells());TestTrue(TEXT("Village uses a shared palette"),L.ThemeIndex!=INDEX_NONE && !L.ThemeName.IsNone());
         int32 Floors=0;for(const auto& Block:L.VillageBlocks)Floors+=Block.Storeys;
@@ -245,8 +361,27 @@ bool FERVillagePhysicsTest::RunTest(const FString& Parameters)
             TestTrue(TEXT("ground plan exported"),FFileHelper::SaveStringToFile(SVG,*(FPaths::ProjectSavedDir()/(Seed==73 ? TEXT("Testing/Village-GroundPlan.svg"):FString::Printf(TEXT("Testing/Village-GroundPlan-seed%d.svg"),Seed)))));
         }
     }
+    Map->LayoutConfig.Seed=12;
+    Map->LayoutConfig.ExpectedTeamSize=3;
+    Asset->Village.DeckHeight=240;
+    if(TestTrue(TEXT("3v3 transverse stream generates in world"),Map->Regenerate()))
+    {
+        const auto& L=Map->GetLayout();
+        TestEqual(TEXT("3v3 seed 12 builds both transverse streams"),L.VillageStreams.Num(),2);
+        for(const auto& Stream:L.VillageStreams)for(double Sign:{-1.,1.})
+        {
+            const double HX=L.ArenaSize.X*.5;
+            const double Y=(Stream.LowerBank[0].Y+Stream.UpperBank[0].Y)*.5;
+            const FVector Outside(Sign*(HX+85),Y,Stream.Surface-25);
+            TestTrue(TEXT("water remains past the palisade"),Map->WaterDepthAt(Outside)>20);
+            TestTrue(TEXT("palisade blocks the mouth below water level"),
+                World->SweepSingleByChannel(Hit,{Sign*(HX-60),Y,Outside.Z},Outside,FQuat::Identity,
+                    ECC_Pawn,FCollisionShape::MakeSphere(8),Q) &&
+                Hit.GetComponent() && Hit.GetComponent()->GetName()==TEXT("FixedFenceCollision"));
+        }
+    }
     World->DestroyWorld(false);
     GEngine->DestroyWorldContext(World);
-    AddInfo(FString::Printf(TEXT("ER_VILLAGE_PHYSICS seeds=15 result=%s"),HasAnyErrors() ? TEXT("FAIL"):TEXT("PASS")));return true;
+    AddInfo(FString::Printf(TEXT("ER_VILLAGE_PHYSICS seeds=16 result=%s"),HasAnyErrors() ? TEXT("FAIL"):TEXT("PASS")));return true;
 }
 #endif

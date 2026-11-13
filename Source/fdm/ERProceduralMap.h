@@ -52,6 +52,11 @@ struct FERTemplateBase
     int32 StepCount=0;
     FVector Point(FVector Local) const { return Frame.TransformPosition(Local); }
 };
+struct FERVillageStream
+{
+    TArray<FVector2D> LowerBank,UpperBank;
+    double Surface=0,Depth=0;
+};
 struct FERVillageBlock
 {
     FTransform Frame;
@@ -98,6 +103,10 @@ struct FERProceduralLayout
     TArray<TArray<FVector>> RoofTransfers;
     TArray<FBox> TerrainPads;
     TArray<FBox> PoolWater;
+    TArray<FVector2D> VillageRingInner,VillageRingOuter;
+    TArray<FERVillageStream> VillageStreams;
+    TArray<FVector> VillageWaterwayTerrainVertices;
+    TArray<FIntVector> VillageWaterwayTerrainFaces;
     bool GradedTerrain=false;
     EERTemplateSymmetry LayoutSymmetry=EERTemplateSymmetry::None;
     bool CircularArena=false;
@@ -120,6 +129,7 @@ struct FERProceduralLayout
     int32 BuildingFloors=0;
     int32 CentralShape=0;
     TArray<FBox> CentralFootprints;
+    TArray<FVector> CentralCeilingMounts;
     TArray<FTransform> CentralEntrances;
     FVector CentralBuildingSize=FVector::ZeroVector;
     FVector CentralBuildingCenter=FVector::ZeroVector;
@@ -200,6 +210,12 @@ namespace ERProcedural
     float VillageGroundHeight(const FERProceduralLayout& Layout,FVector2D Position);
     void PlanVillageTerrain(FERProceduralLayout& Layout,int32 Seed,float Envelope,const TArray<float>& WallYs);
     void ApplyVillageTerrain(FERProceduralLayout& Layout);
+    void PlanVillageWatercourses(FERProceduralLayout& Layout,int32 Seed,bool Mirror);
+    bool TriangulateVillageWaterways(FERProceduralLayout& Layout,double BedHeight);
+    const FERVillageStream* VillageStreamAt(const FERProceduralLayout& Layout,FVector2D Point);
+    bool VillageRingContains(const FERProceduralLayout& Layout,FVector2D Point,bool IncludeDryInterior=false);
+    void BuildVillageWaterwayTerrain(class UDynamicMeshComponent* Component,const FERProceduralLayout& Layout);
+    void BuildVillageWaterwaySurface(class UDynamicMeshComponent* Component,const FERProceduralLayout& Layout);
     void BuildVillageTerrain(class UDynamicMeshComponent* Component,const FERProceduralLayout& Layout);
     float AlleyGroundHeight(const FERProceduralLayout& Layout,FVector2D Position);
     float AlleyBaseHeight(FVector Arena,FVector2D Position,bool Balanced=false);

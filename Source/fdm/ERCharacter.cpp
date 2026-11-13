@@ -18,6 +18,7 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/PointLightComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -629,6 +630,7 @@ void AERCharacter::Tick(float DeltaTime)
     WorldRifle->SetVisibility(Weapon && !bStowed && !Health->bDead && (bReadyToThrow || !(Weapon && Weapon->IsGrenadeHandHidden())));
     FirstPersonSight->SetVisibility(!bOptic && !Health->bDead && !(Movement->bHighClimb || bHideStowed) && AppliedWeaponData && AppliedWeaponData->SightMesh);
     WorldSight->SetVisibility(!Health->bDead && !bStowed && AppliedWeaponData && AppliedWeaponData->SightMesh);
+    UpdateWeaponLight(bStowed || Movement->bHighClimb);
     const double FlashRemaining = MuzzleFlashUntil - GetWorld()->GetTimeSeconds();
     const bool bFlash = FlashRemaining > 0 && !Health->bDead && bNetworkReady && !(Movement->bHighClimb || bStowed);
     const bool bViewFlash = bFlash && !bOptic;
@@ -810,9 +812,13 @@ void AERCharacter::ResetAimPunch()
         ClientDamageFeedback(0,FVector::ZeroVector,AuthorityPunch,false);
 }
 void AERCharacter::PossessedBy(AController* NewController)
-{Super::PossessedBy(NewController);ResetAimPunch();}
+{
+    Super::PossessedBy(NewController);
+    bWeaponLightOn = NewController && NewController->IsPlayerController() && EROutdoorBackdrop::IsNight(*GetWorld());
+    ResetAimPunch();
+}
 void AERCharacter::UnPossessed()
-{ResetAimPunch();Super::UnPossessed();}
+{bWeaponLightOn=false;ResetAimPunch();Super::UnPossessed();}
 void AERCharacter::OnRep_Controller()
 {
     Super::OnRep_Controller();
@@ -1407,6 +1413,49 @@ FVector AERCharacter::GetRenderedMuzzle(bool bFirstPerson) const
             return PC->PlayerCameraManager->GetCameraCacheView().TransformWorldToFirstPerson(Muzzle, false);
     return Muzzle;
 }
+void AERCharacter::ServerToggleWeaponLight_Implementation()
+{
+    if (!Controller || !Controller->IsPlayerController() || Health->bDead || !bNetworkReady) return;
+    bWeaponLightOn = !bWeaponLightOn;
+    ForceNetUpdate();
+}
+
+void AERCharacter::UpdateWeaponLight(bool bStowed)
+{
+    const bool bFirearm = AppliedWeaponData && (AppliedWeaponData->Payload == EERPayload::Bullet ||
+        AppliedWeaponData->Payload == EERPayload::Rocket || AppliedWeaponData->Payload == EERPayload::LaunchedHE);
+    if (!bWeaponLightOn || !bFirearm || bStowed || Health->bDead || !bNetworkReady)
+    {
+        if (WeaponLight && WeaponLight->IsVisible()) WeaponLight->SetVisibility(false);
+        return;
+    }
+    if (GetNetMode() == NM_DedicatedServer || !FApp::CanEverRender()) return;
+    if (!WeaponLight)
+    {
+        WeaponLight = NewObject<USpotLightComponent>(this, TEXT("WeaponFlashlight"));
+        AddInstanceComponent(WeaponLight);
+        WeaponLight->SetupAttachment(GetRootComponent());
+        WeaponLight->SetMobility(EComponentMobility::Movable);
+        WeaponLight->SetIntensityUnits(ELightUnits::Candelas);
+        WeaponLight->SetIntensity(160.f);
+        WeaponLight->SetAttenuationRadius(2000.f);
+        WeaponLight->SetMaxDrawDistance(2600.f);
+        WeaponLight->SetMaxDistanceFadeRange(450.f);
+        WeaponLight->SetInnerConeAngle(9.f);
+        WeaponLight->SetOuterConeAngle(17.f);
+        WeaponLight->SetCastShadows(false);
+        WeaponLight->SetAffectGlobalIllumination(false);
+        WeaponLight->SetAffectTranslucentLighting(false);
+        WeaponLight->SetVolumetricScatteringIntensity(0.f);
+        WeaponLight->SetSpecularScale(.35f);
+        WeaponLight->RegisterComponent();
+    }
+    const bool bFirstPerson = IsLocallyControlled();
+    const FRotator Aim = bFirstPerson ? GetViewRotation() : GetBaseAimRotation();
+    const FVector Origin = GetRenderedMuzzle(bFirstPerson) - FRotationMatrix(Aim).GetUnitAxis(EAxis::Z) * 5.;
+    WeaponLight->SetWorldLocationAndRotation(Origin, Aim);
+    if (!WeaponLight->IsVisible()) WeaponLight->SetVisibility(true);
+}
 void AERCharacter::UpdateWeaponPresentation()
 {
     auto* Data = Weapon ? Weapon->Data.Get() : nullptr;
@@ -1658,6 +1707,7 @@ void AERCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
     DOREPLIFETIME(AERCharacter, bPresetInventory); DOREPLIFETIME(AERCharacter, ActivePreset); DOREPLIFETIME(AERCharacter, ActiveVariant);
     DOREPLIFETIME(AERCharacter, Inventory);
     DOREPLIFETIME(AERCharacter,bNetworkReady);
+    DOREPLIFETIME(AERCharacter,bWeaponLightOn);
     DOREPLIFETIME_CONDITION(AERCharacter,FireAcknowledgement,COND_OwnerOnly);
     DOREPLIFETIME_CONDITION(AERCharacter, SpawnFacingYaw, COND_InitialOnly);
     DOREPLIFETIME_CONDITION(AERCharacter, RecoilState, COND_OwnerOnly);

@@ -7,6 +7,7 @@
 #include "ERMenuPreview.h"
 #include "ERInterfaceStyle.h"
 #include "ERMapCatalog.h"
+#include "EROutdoorBackdrop.h"
 #include "ERLobbyRules.h"
 #include "ERWeapon.h"
 #include "Engine/GameViewportClient.h"
@@ -38,6 +39,7 @@
 #include "Widgets/Input/SNumericEntryBox.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Text/STextBlock.h"
+#include "UObject/StrongObjectPtr.h"
 
 namespace
 {
@@ -265,6 +267,7 @@ void AERPlayerController::ShowMenu(bool bShow)
     auto Panel = SNew(SVerticalBox);
     TSharedPtr<SWidget> Focus;
     TSharedPtr<SWidget> PlayerPreview;
+    TSharedPtr<SWidget> OfflineStart;
     auto PlayerFooter=SNew(SVerticalBox);
     auto Go = [this](int32 Page) { return [this, Page]() { OpenMenuPage(Page); return FReply::Handled(); }; };
     auto* Online = GI->GetSubsystem<UEROnline>();
@@ -390,14 +393,48 @@ void AERPlayerController::ShowMenu(bool bShow)
         {
             GI->SessionMode = 0;
             Field=Columns(Panel);
-            IntChoice(TEXT("Map"), ERMaps::Labels(), &GI->MapChoice);
+            Choice(Field(), TEXT("Map"), ERMaps::Labels(), [GI]() { return GI->MapChoice; }, [this, GI](int32 Index)
+            {
+                if (GI->MapChoice == Index) return;
+                GI->MapChoice = Index;
+                GI->OfflineCrossingChoice = GI->OfflineSkyChoice = 0;
+                OpenMenuPage(1);
+            });
+            const auto& Map = ERMaps::At(GI->MapChoice);
+            if (FCString::Strcmp(Map.Id, TEXT("central_building")) == 0)
+                IntChoice(TEXT("Map variant"), {TEXT("Random"), TEXT("Open yard"), TEXT("Climbable wall"), TEXT("Fenced crossings")}, &GI->OfflineCrossingChoice);
+            if (EROutdoorBackdrop::IsOutdoorMap(Map.Package))
+            {
+                struct FSkyPreview
+                {
+                    TStrongObjectPtr<UTexture2D> Texture;
+                    FSlateBrush Brush;
+                    FVector2D Aspect{1, 1};
+                };
+                const auto Preview = MakeShared<FSkyPreview>();
+                const auto SelectSky = [GI, Preview](int32 Index)
+                {
+                    GI->OfflineSkyChoice = Index;
+                    Preview->Texture.Reset(EROutdoorBackdrop::LoadOfflineSkyPreview(Index, Preview->Aspect));
+                    Preview->Brush.SetResourceObject(Preview->Texture.Get());
+                };
+                SelectSky(GI->OfflineSkyChoice);
+                const auto SkyField = Field();
+                Choice(SkyField, TEXT("Skybox"), EROutdoorBackdrop::OfflineSkyLabels(),
+                    [GI]() { return GI->OfflineSkyChoice; }, SelectSky);
+                Add(SkyField, SNew(SBox).HAlign(HAlign_Center)
+                    .Visibility_Lambda([Preview]() { return Preview->Texture.IsValid() ? EVisibility::Visible : EVisibility::Collapsed; })
+                    [SNew(SBox).HeightOverride(132)
+                        .WidthOverride_Lambda([Preview]() { return FOptionalSize(float(132 * Preview->Aspect.X)); })
+                        [SNew(SImage).Image_Lambda([Preview]() { return &Preview->Brush; })]]);
+            }
             TArray<FString> BotCounts; for (int32 I = 0; I <= 10; ++I) BotCounts.Add(FString::FromInt(I));
             IntChoice(TEXT("Alpha bots"), BotCounts, &GI->AlphaBots);
             IntChoice(TEXT("Omega bots"), BotCounts, &GI->OmegaBots);
             IntChoice(TEXT("Bot behavior"), {TEXT("Stationary targets"), TEXT("Movement only"), TEXT("Movement and combat")}, &GI->BotBehavior);
             Add(Panel, Button(TEXT("Player"), Go(6)));
             Add(Panel, Button(TEXT("Gameplay settings"),Go(10)));
-            Add(Panel, Button(TEXT("Start Match"), [GI]() { GI->StartSession(); return FReply::Handled(); }));
+            OfflineStart = Button(TEXT("Start Match"), [GI]() { GI->StartSession(); return FReply::Handled(); });
         }
         else if (MenuPage == 2)
         {
@@ -850,6 +887,10 @@ void AERPlayerController::ShowMenu(bool bShow)
     else
     {
         TSharedRef<SWidget> Content = SNew(SScrollBox) + SScrollBox::Slot()[Panel];
+        if (OfflineStart.IsValid())
+            Content = SNew(SVerticalBox)
+                + SVerticalBox::Slot().FillHeight(1)[Content]
+                + SVerticalBox::Slot().AutoHeight().Padding(0, 12, 0, 0)[OfflineStart.ToSharedRef()];
         if(MenuPage==6)
             Content=SNew(SScaleBox).Stretch(EStretch::ScaleToFit)
                 [SNew(SBox).WidthOverride(1600).HeightOverride(900)

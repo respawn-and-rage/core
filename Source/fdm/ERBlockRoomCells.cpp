@@ -216,6 +216,7 @@ void AERBlockRoom::DisableEmptyCellCollision()
 
 void AERBlockRoom::FlushSkinMeshes()
 {
+    RefreshMapLamps();
     FlushCellGroups();
     auto Order=DirtySkinPanels.Array();Order.Sort();DirtySkinPanels.Reset();
     for(int32 SkinPanelIndex:Order)

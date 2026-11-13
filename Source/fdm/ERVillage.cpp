@@ -477,6 +477,8 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     for(const auto& Passage:L.VillagePassages)L.Routes.Add(Passage);
     L.Spawn=L.AlphaSpawns[0].GetLocation();
     PlanVillageTerrain(L,C.Seed,Envelope,WallYs);
+    L.FeatureNames={TEXT("Jungle"),TEXT("VariableSymmetricBlocks"),TEXT("OneToThreeStoreys"),TEXT("VariableSpawnBases"),TEXT("RearSpawnGalleries"),TEXT("CornerLookouts"),TEXT("SideShacks"),TEXT("GrayCoverPockets"),TEXT("AdaptiveStandingSideWalls"),TEXT("LogPalisade"),TEXT("SealedPerimeter"),TEXT("OnlyHatchedGroundPassages")};
+    if(!T->ReflectionBuild && R.Watercourses)PlanVillageWatercourses(L,C.Seed,false);
     if(T->SizingTeamSize>=2)
     {
         // Distribute native ground-level timber/metal L shelters across the
@@ -492,7 +494,9 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
             const auto Bounds=FBox(FVector(-50),FVector(50)).TransformBy(P.Transform);
             if(Bounds.Min.Z<260 && Bounds.Max.Z>0)Occupied.Add(Bounds);
         }
-        TArray<TArray<FVector>> Reserved=L.Routes;Reserved.Append(L.StairRoutes);Reserved.Append(L.VillageSideBypasses);
+        for(const auto& Water:L.PoolWater)
+            Occupied.Emplace(FVector(Water.Min.X,Water.Min.Y,-100),FVector(Water.Max.X,Water.Max.Y,260));
+        TArray<TArray<FVector>> Reserved=L.Routes;Reserved.Append(L.GroundRoutes);Reserved.Append(L.StairRoutes);Reserved.Append(L.VillageSideBypasses);
         auto Clear=[&](const FBox& Bounds)
         {
             if(Bounds.Min.X<-HX+90 || Bounds.Max.X>HX-90 || Bounds.Min.Y<-HY+1000 || Bounds.Max.Y>HY-1000)return false;
@@ -564,7 +568,7 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
         // A sparse candidate cannot pass just because its area is correct.
         if(Pairs<Minimum)return false;
     }
-    FERLayoutFixedPiece Backdrop;Backdrop.Transform=FTransform(FQuat::Identity,FVector(0,0,-22),FVector(L.ArenaSize.X+200000,L.ArenaSize.Y+200000,4)/100);Backdrop.Material=EERBlockMaterial::Wood;Backdrop.VisualOnly=true;L.FixedPieces.Add(Backdrop);
+    FERLayoutFixedPiece Backdrop;Backdrop.Transform=FTransform(FQuat::Identity,FVector(0,0,L.PoolWater.IsEmpty() ? -22:-82),FVector(L.ArenaSize.X+200000,L.ArenaSize.Y+200000,4)/100);Backdrop.Material=EERBlockMaterial::Wood;Backdrop.VisualOnly=true;L.FixedPieces.Add(Backdrop);
     if(!R.ExteriorTrees.IsEmpty())for(int32 I=0;I<64;++I)
     {
         auto* Mesh=R.ExteriorTrees[I%R.ExteriorTrees.Num()].Get();if(!Mesh)return false;
@@ -578,7 +582,6 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
         FERLayoutFixedPiece Sky;Sky.Mesh=R.SkyDomeMesh;Sky.VisualOnly=true;Sky.Material=EERBlockMaterial::Wood;
         Sky.Transform=FTransform(FQuat::Identity,FVector::ZeroVector,FVector(200000,200000,200000)/100);L.FixedPieces.Add(Sky);
     }
-    L.FeatureNames={TEXT("Jungle"),TEXT("VariableSymmetricBlocks"),TEXT("OneToThreeStoreys"),TEXT("VariableSpawnBases"),TEXT("RearSpawnGalleries"),TEXT("CornerLookouts"),TEXT("SideShacks"),TEXT("GrayCoverPockets"),TEXT("AdaptiveStandingSideWalls"),TEXT("LogPalisade"),TEXT("SealedPerimeter"),TEXT("OnlyHatchedGroundPassages")};
     ApplyVillageTerrain(L);
     Out=MoveTemp(L);return true;
 }

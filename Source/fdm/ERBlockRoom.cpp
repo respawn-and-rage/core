@@ -18,6 +18,7 @@
 #include "EngineUtils.h"
 #include "Misc/App.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "Engine/DamageEvents.h"
 #include "Engine/StaticMesh.h"
 #include "HAL/PlatformTime.h"
@@ -43,6 +44,8 @@ AERBlockRoom::AERBlockRoom()
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube"));
     BlockMesh = Cube.Object;
     Floor->SetStaticMesh(Cube.Object);
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> Lamp(ERMapLighting::LampMaterialPath);
+    MapLampSurface = Lamp.Object;
     static ConstructorHelpers::FObjectFinder<USoundWave> GlassBreakUnfa(
         TEXT("/Game/EclipseRecoil/Audio/GlassBreak/S_ER_GlassBreak_221528"));
     static ConstructorHelpers::FObjectFinder<USoundWave> GlassBreakDatasoundsample(
@@ -120,6 +123,7 @@ bool AERBlockRoom::Regenerate()
     LastHit = TEXT("none"); LastCombat = TEXT("none"); LastUpdateMs = 0; LastGroupsRebuilt = 0; DamageRevision = 0;
     ClearOwnedEffects();
     ConfigureFloors();
+    ConfigureMapLamps();
     const double CellStart=FPlatformTime::Seconds();
     BuildCellComponents();
     GenerationProfile.AddMs=(FPlatformTime::Seconds()-CellStart)*1000;
@@ -139,6 +143,60 @@ bool AERBlockRoom::Regenerate()
     UE_LOG(LogTemp, Display, TEXT("ER_BLOCK_GENERATED %s support_contacts=%d support_build=%.2fms"), *GetStatistics(), Support.GetContactCount(), Support.BuildMs);
     OnGenerationFinished();
     return true;
+}
+
+void AERBlockRoom::ConfigureMapLamps()
+{
+    for (const auto& Emitter : MapLampEmitters)
+    {
+        RemoveInstanceComponent(Emitter.Get());
+        Emitter->DestroyComponent();
+    }
+    MapLampEmitters.Reset();
+    LastLampRemovalCount = -1;
+    if (GetNetMode() == NM_DedicatedServer || !FApp::CanEverRender() || !GetWorld()->IsGameWorld()) return;
+    int32 Banks = 0;
+    for (const FERMapLamp& Lamp : MapLamps)
+    {
+        auto* Emitter = NewObject<USpotLightComponent>(this);
+        AddInstanceComponent(Emitter);
+        Emitter->SetupAttachment(GetRootComponent());
+        Emitter->SetMobility(EComponentMobility::Movable);
+        Emitter->SetRelativeLocationAndRotation(Lamp.Position, Lamp.Direction);
+        Emitter->SetIntensityUnits(ELightUnits::Candelas);
+        Emitter->SetAttenuationRadius(Lamp.Radius);
+        Emitter->SetOuterConeAngle(Lamp.Floodlight ? 35.f : 49.f);
+        Emitter->SetInnerConeAngle(Lamp.Floodlight ? 21.f : 30.f);
+        Emitter->SetSourceRadius(Lamp.Floodlight ? 38.f : 24.f);
+        Emitter->SetLightColor(Lamp.Floodlight ? FLinearColor(.76f,.85f,1.f) : FLinearColor(.9f,.94f,1.f));
+        Emitter->SetCastShadows(false);
+        if (Lamp.Floodlight) Emitter->SetAffectTranslucentLighting(false);
+        Emitter->SetAffectGlobalIllumination(false);
+        Emitter->SetVolumetricScatteringIntensity(0.f);
+        Emitter->SetSpecularScale(.35f);
+        Emitter->RegisterComponent();
+        MapLampEmitters.Add(Emitter);
+        Banks += Lamp.Floodlight ? 1 : 0;
+    }
+    RefreshMapLamps();
+    if (!MapLamps.IsEmpty())
+        UE_LOG(LogTemp, Display, TEXT("ER_MAP_LIGHTS banks=%d indoor=%d shadow_maps=0"),
+            Banks, MapLamps.Num() - Banks);
+}
+
+void AERBlockRoom::RefreshMapLamps()
+{
+    if (MapLampEmitters.IsEmpty() || LastLampRemovalCount == CellWorld.GetRemovedCount()) return;
+    LastLampRemovalCount = CellWorld.GetRemovedCount();
+    for (int32 Index = 0; Index < MapLamps.Num(); ++Index)
+    {
+        const FERMapLamp& Lamp = MapLamps[Index];
+        auto* Emitter = MapLampEmitters[Index].Get();
+        const int32 Working = Lamp.WorkingLenses(CellWorld);
+        const float Intensity = Lamp.Candelas * float(Working) / float(Lamp.Lenses.Num());
+        if (Emitter->Intensity != Intensity) Emitter->SetIntensity(Intensity);
+        if (Emitter->IsVisible() != (Working > 0)) Emitter->SetVisibility(Working > 0);
+    }
 }
 void AERBlockRoom::ConfigureFloors()
 {

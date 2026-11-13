@@ -272,6 +272,18 @@ https://sketchfab.com/3d-models/tree-low-poly-4cd243eb74c74b3ea2190ebcec0439fb
 License: CC BY 4.0 - http://creativecommons.org/licenses/by/4.0/
 Changes: Original 850-triangle geometry, centered and combined material slots; masked leaves, exterior instancing.
 
+Outdoor sunset panoramas — Skyboxes 03, 12, 24, 111, 117 and 132
+by FreeStylized
+https://freestylized.com/category/skybox/evening_dusk_sky/
+License: https://freestylized.com/disclaimer/
+Adaptation: reprojected into polar textures and reduced for menu previews.
+
+Outdoor night panoramas — Skyboxes 17, 77, 85 and 92
+by FreeStylized
+https://freestylized.com/category/skybox/night_sky/
+License: https://freestylized.com/disclaimer/
+Adaptation: supplied Upscayl variants reprojected into polar textures and reduced for menu previews.
+
 Village panoramic background — J&E Gray Park
 by Greg Zaal / Poly Haven
 https://polyhaven.com/a/je_gray_park

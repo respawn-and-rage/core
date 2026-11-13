@@ -120,6 +120,11 @@ void ApplyVillageTerrain(FERProceduralLayout& L)
 }
 void BuildVillageTerrain(UDynamicMeshComponent* Component,const FERProceduralLayout& L)
 {
+    if(!L.VillageWaterwayTerrainFaces.IsEmpty())
+    {
+        BuildVillageWaterwayTerrain(Component,L);
+        return;
+    }
     using UE::Geometry::FIndex3i;
     UE::Geometry::FDynamicMesh3 Mesh;Mesh.EnableAttributes();
     auto* Normals=Mesh.Attributes()->PrimaryNormals();auto* UVs=Mesh.Attributes()->PrimaryUV();

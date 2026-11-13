@@ -101,7 +101,9 @@ to zero and can be adjusted in the menu. Saved mouse preferences are preserved.
 
 Defaults: WASD, mouse, left click fire, right click scope, Space jump/climb/respawn, Shift walk,
 double-tap W or hold E sprint, Ctrl/C crouch and prone, R reload, 1–8 / F / G / H or
-wheel select (the wheel has a 250ms quiet period), Tab scoreboard, Esc menu, P screenshots.
+wheel select (the wheel has a 250ms quiet period), Tab scoreboard, Esc menu, P screenshots,
+X weapon flashlight. It starts on when a player spawns in an offline night match. The narrow
+20m cone follows the equipped firearm, pauses while the weapon is stowed and has no dynamic shadows.
 P saves the current viewport (including HUD) plus front, right, left, back and top
 views of the possessed character as PNGs at the viewport resolution. The screen is
 captured after rendering through Unreal/Slate. External views render over successive

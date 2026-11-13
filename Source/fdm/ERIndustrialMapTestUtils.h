@@ -1,5 +1,6 @@
 #pragma once
 #include "ERIndustrialFence.h"
+#include "EROutdoorBackdrop.h"
 #include "ERProceduralMap.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -30,7 +31,14 @@ inline bool FactoryPaletteMatches(AERProceduralMap& Map)
     }
     // Runtime drops the duplicate descriptor array after building its cells.
     FERProceduralLayout AuthoredLayout;
-    if(Themed && !ERProcedural::Build(Map.LayoutConfig,Map.Config,AuthoredLayout,Map.CellSettings))return Fail(__LINE__);
+    if (Themed)
+    {
+        if (!ERProcedural::Build(Map.LayoutConfig, Map.Config, AuthoredLayout, Map.CellSettings)) return Fail(__LINE__);
+        auto* LampSurface = LoadObject<UMaterialInterface>(nullptr, ERMapLighting::LampMaterialPath);
+        TArray<FERMapLamp> Lamps;
+        ERMapLighting::Build(AuthoredLayout, *T, Map.CellSettings.CellSize, LampSurface,
+            EROutdoorBackdrop::IsNight(*Map.GetWorld()), Lamps);
+    }
     TMap<FString,UMaterialInterface*> Expected;
     for(const auto& P:Map.GetCellWorld().GetPanels())
     {

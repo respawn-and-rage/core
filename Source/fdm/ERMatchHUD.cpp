@@ -79,7 +79,7 @@ void AERHUD::DrawPreMatchCountdown(const AERGameState* GS)
         {{Fire, TEXT("FIRE / USE ITEM")}, {Label(EKeys::RightMouseButton), TEXT("AIM / ZOOM")},
          {Label(EKeys::R), TEXT("RELOAD")}, {Fire + TEXT(" / ") + Jump, TEXT("RESPAWN")}},
         {{FString::Join(SlotLabels, TEXT(" / ")), TEXT("SELECT ITEM (IF CARRIED)")}, {Cycle, TEXT("CYCLE ITEMS")}},
-        {{Label(EKeys::Tab), TEXT("SCOREBOARD")}, {Label(EKeys::Escape), TEXT("MENU")}, {Label(EKeys::P), TEXT("SCREENSHOTS")}},
+        {{Label(EKeys::Tab), TEXT("SCOREBOARD")}, {Label(EKeys::Escape), TEXT("MENU")}, {Label(EKeys::P), TEXT("SCREENSHOTS")}, {Label(EKeys::X), TEXT("FLASHLIGHT")}},
     };
     constexpr float KeyScale = .78f, ActionScale = .78f;
     const float KeyPad = 6.f * S, LabelGap = 7.f * S, GroupGap = 18.f * S;

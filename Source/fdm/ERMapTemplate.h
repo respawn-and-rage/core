@@ -38,6 +38,7 @@ struct FERVillageRecipe
     UPROPERTY(EditAnywhere, BlueprintReadWrite) int32 StoreyBudget=10;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) float DeckHeight=240;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) float PerimeterHeight=1100;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) bool Watercourses=true;
     // Legacy serialized field; palette selection now belongs to ThemeLibrary.
     UPROPERTY() FName Theme=TEXT("Jungle");
     UPROPERTY(EditAnywhere, BlueprintReadWrite) TArray<TObjectPtr<class UStaticMesh>> ExteriorTrees;

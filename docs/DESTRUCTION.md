@@ -32,6 +32,9 @@ update them with `SetMesh` only: fast vertex or index updates are not compatible
 - `FDynamicMesh3` conventions: front faces satisfy `GetTriNormal == normal`, one overlay
   element per vertex, right-handed UV frames. `nullrhi` cannot see errors here.
 - Resolve cells from the impact point, never `Hit.Item`.
+- Lamp lenses use the glass pane model. Light output follows the committed
+  alive masks. Night floodlight poles and backing plates use reinforced metal
+  cells, so the support graph can detach a severed bank.
 
 ## Materials
 
