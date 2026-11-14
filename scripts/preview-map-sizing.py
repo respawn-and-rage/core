@@ -17,10 +17,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMES = {'CentralBuilding': 'Central Building', 'MiddleEasternAlleys': 'Vicoli',
-         'FireTraining': 'Fire Training', 'Rooms': 'Rooms', 'Village': 'Village', 'Town': 'Town'}
+         'FireTraining': 'Fire Training', 'Rooms': 'Rooms', 'Village': 'Village', 'Town': 'Town', 'Rocky': 'Rocky'}
 NOTES = {'CentralBuilding': 'Edificio centrale: 1 piano + tetto', 'MiddleEasternAlleys': '2 vie, 1 muro centrale, sottopasso',
          'FireTraining': '1 navata lunga e stretta, passerelle locali', 'Rooms': '6 stanze, gallerie e incrocio su 2 quote',
-         'Village': '1 blocco, 2 passaggi a gomito + fianchi', 'Town': 'Anello spezzato, corti rientranti e passaggi a L'}
+         'Village': '1 blocco, 2 passaggi a gomito + fianchi', 'Town': 'Anello spezzato, corti rientranti e passaggi a L',
+         'Rocky': 'Creste, cenge e conca centrale'}
 BACKGROUND = '#f7f6f1'
 PALETTE = ['#c1b5a3', '#aa8070', '#929b9d', '#ad9065', '#b9aa84', '#717c88', '#b6d8d7']
 FONT = '/System/Library/Fonts/Supplemental/Arial.ttf'
@@ -97,9 +98,33 @@ class Drawing:
 PLAYABILITY=False
 
 
+# Metres above the spawn court. Keep the same bins for every Rocky seed.
+ROCKY_ELEVATION_COLORS = (
+    '#28164f', '#493582', '#8572bb', '#e1edf7', '#b6dcec', '#78c4d7', '#5ba997',
+    '#b5cb83', '#f0d368', '#e69a46', '#ca583b', '#872d39',
+)
+
+
+def rocky_elevation_color(height):
+    height = 0 if abs(height)<0.10 else height
+    band = max(0, min(len(ROCKY_ELEVATION_COLORS)-1, math.floor(height/2)+3))
+    return ROCKY_ELEVATION_COLORS[band]
+
+
+def rocky_elevation_legend(d, x, y):
+    d.text(x, y, 'Quota sopra le basi (m)', 18, bold=True)
+    for i, color in enumerate(ROCKY_ELEVATION_COLORS):
+        left = x+i*72
+        d.polygon([(left,y+28),(left+68,y+28),(left+68,y+47),(left,y+47)],color)
+        low=2*i-6
+        label = f'{low}…{low+2}' if i+1<len(ROCKY_ELEVATION_COLORS) else f'{low}+'
+        d.text(left+34,y+53,label,14,center=True)
+    d.text(x,y+76,'Terreno e sommità delle rocce · marrone: cenge · tratteggio viola: tunnel, fucsia: cavità',15)
+
+
 def card(d, plan, x, y, w, h, scale):
     ident=plan['template']; tw,th,_=plan['dimensions_m']; n=plan['team_size']
-    d.text(x+24,y+14,NAMES[ident],26,bold=True)
+    d.text(x+24,y+14,plan.get('rocky_landform',NAMES[ident]),26,bold=True)
     area=plan['area_m2']
     d.text(x+24,y+49,f'{tw:g} × {th:g} m  |  {area:,.0f} m²'.replace(',', ' '),23,bold=True)
     zone_count=len(plan.get("spawn_zones",[]))//2
@@ -111,6 +136,27 @@ def card(d, plan, x, y, w, h, scale):
     outline=([p((tw*.5*math.cos(i*math.tau/128),th*.5*math.sin(i*math.tau/128),0)) for i in range(128)]
              if plan.get('circular') else [(ox,oy),(ox+tw*scale,oy),(ox+tw*scale,oy+th*scale),(ox,oy+th*scale)])
     d.polygon(outline,'#e9e8e0','#697a83',1.3)
+    terrain=plan.get('terrain_grid')
+    rocky=ident=='Rocky' and terrain is not None
+    # The exported spawn point is one metre above its supporting surface.
+    datum=plan['spawns'][0]['point'][2]-1 if rocky and plan['spawns'] else 0
+    if terrain:
+        gx,gy,_=terrain['origin']
+        spacing,cols,heights=terrain['spacing'],terrain['columns'],terrain['heights']
+        top=max(max(heights),.01)
+        for j in range(len(heights)//cols-1):
+            y0,y1=max(gy+j*spacing,-th/2),min(gy+(j+1)*spacing,th/2)
+            if y0>=y1:
+                continue
+            for i in range(cols-1):
+                x0,x1=max(gx+i*spacing,-tw/2),min(gx+(i+1)*spacing,tw/2)
+                if x0>=x1 or (plan.get('circular') and ((x0+x1)/tw)**2+((y0+y1)/th)**2>1):
+                    continue
+                k=j*cols+i
+                height=(heights[k]+heights[k+1]+heights[k+cols]+heights[k+cols+1])/4
+                t=height/top
+                color=rocky_elevation_color(height-datum) if rocky else '#%02x%02x%02x'%(round(235-45*t),round(234-26*t),round(220-44*t))
+                d.polygon([p((x0,y0)),p((x1,y0)),p((x1,y1)),p((x0,y1))],color)
     profile=plan.get('village_terrain_profile',[])
     if profile:
         def elevation(yy):
@@ -124,12 +170,14 @@ def card(d, plan, x, y, w, h, scale):
             color='#%02x%02x%02x'%(round(235-45*t),round(234-26*t),round(220-44*t))
             d.polygon([p((-tw/2,ya)),p((tw/2,ya)),p((tw/2,yb)),p((-tw/2,yb))],color)
     for at in range(0,math.ceil(tw),5):
-        d.line([(ox+at*scale,oy),(ox+at*scale,oy+th*scale)],'#d9ded8',.6)
+        span=th/2*math.sqrt(max(0,1-(2*at/tw-1)**2)) if plan.get('circular') else th/2
+        d.line([p((at-tw/2,-span)),p((at-tw/2,span))],'#d9ded8',.6)
     for at in range(0,math.ceil(th),5):
-        d.line([(ox,oy+at*scale),(ox+tw*scale,oy+at*scale)],'#d9ded8',.6)
+        span=tw/2*math.sqrt(max(0,1-(2*at/th-1)**2)) if plan.get('circular') else tw/2
+        d.line([p((-span,at-th/2)),p((span,at-th/2))],'#d9ded8',.6)
     for f in plan['floors']:
         d.polygon([p(v) for v in f], '#f5f1e4','#b3ae9d',.7)
-    if plan.get('circular') and not plan.get('central_hill'):
+    if ident=='CentralBuilding' and plan.get('circular') and not plan.get('central_hill'):
         hx,hy=p(plan['hill_center'])
         d.text(hx,hy-10,f'COLLINA +{plan["hill_height_m"]:.1f} m',12,color='#72894f',bold=True,center=True)
     for deck in plan.get('upper_decks',[]):
@@ -141,7 +189,9 @@ def card(d, plan, x, y, w, h, scale):
         if z1<0:
             continue
         poly=[p(v) for v in hull(s['corners'])]
-        if z0>s.get('ground_z_m',0)+1.9:
+        if rocky:
+            d.polygon(poly,rocky_elevation_color(z1-datum),'#54616b',.65)
+        elif z0>s.get('ground_z_m',0)+1.9:
             if poly and ident!='CentralBuilding':
                 d.line(poly+[poly[0]],'#a3b4bd',.65)
         else:
@@ -151,13 +201,18 @@ def card(d, plan, x, y, w, h, scale):
         if min(v[2] for v in s)<1.9:
             d.line(poly+[poly[0]],'#697a83',max(1,scale*.15))
     for footprint in plan.get('inaccessible_ground', []):
-        d.polygon([p(v) for v in footprint], '#171c20', '#171c20', .8)
+        poly=[p(v) for v in footprint]
+        if rocky and poly:
+            d.line(poly+[poly[0]],'#343c46',.85)
+        elif not rocky:
+            d.polygon(poly, '#171c20', '#171c20', .8)
     for route in plan['routes']:
         kind=route['kind']
         if kind=='stairs':
             continue
-        color='#2b817b' if kind=='connector' else '#8a6aa0' if kind=='lower' else '#4b8c8c' if kind=='upper' else '#6d9462'
-        d.line([p(v) for v in route['points']],color,3 if kind=='connector' else 1.8,kind in ('lower','upper'))
+        color={'connector':'#2b817b','lower':'#7043a2','tunnel':'#7043a2','upper':'#186d84',
+               'rock_shelf':'#a96a35','ford':'#26798c','cave':'#9c2f84'}.get(kind,'#6d9462')
+        d.line([p(v) for v in route['points']],color,3 if kind in ('connector','tunnel','upper') else 1.8,kind in ('lower','tunnel','cave'))
         if kind=='connector':
             cx,cy=p((0,0,0));d.text(cx,cy-20,'PASSAGGIO',11,color=color,bold=True,center=True)
     for firing in plan.get('firing_positions',[]):
@@ -201,7 +256,20 @@ def card(d, plan, x, y, w, h, scale):
         d.text(x+24,y+h-102,f'Pavimento utile {floor:,.0f} m² · {floor/(tw*th)*100:.0f}% della pianta'.replace(',',' '),15,color='#53636b')
     d.text(x+24,y+h-78,f'Obiettivo {plan["target_area_m2"]:g} m² ±10% · scarto {(area/plan["target_area_m2"]-1)*100:+.1f}%',15,color='#53636b')
     note=NOTES[ident] if n<=2 else 'Vincoli e topologia adattati alla squadra'
-    if ident=='FireTraining':
+    if ident=='Rocky' and terrain:
+        center_col=round(-gx/spacing)
+        center_row=round(-gy/spacing)
+        center=heights[center_row*cols+center_col]-datum
+        center=0 if abs(center)<.05 else center
+        lookouts=[route['points'][-1][2]-1-datum for route in plan['routes'] if route['kind']=='upper']
+        note=f'Centro {center:+.1f} m'
+        if lookouts:
+            note+=f' · arrivo salita {max(lookouts):+.1f} m'
+        if any(route['kind']=='ford' for route in plan['routes']):
+            note+=' · guado centrale'
+        if any(route['kind']=='cave' for route in plan['routes']):
+            note+=' · cavità coperta'
+    elif ident=='FireTraining':
         crossing=next((r for r in plan['routes'] if r['kind']=='crossing'),None)
         top=crossing['points'][0][2]-1 if crossing else 0
         note=f"{plan.get('ground_rooms',0)} stanze interne · {plan.get('ground_covers',0)} coperture · soffitto {plan.get('indoor_height_m',0):g} m · rete a +{top:g} m · "+{0:'passerelle a H',1:'ponti sfalsati',2:'anello sopraelevato',3:'doppi gomiti',4:'raccordi sfalsati',5:'passerella a S'}.get(plan.get('catwalk_variant',0),'')
@@ -234,28 +302,34 @@ def render(plans, output):
     output.mkdir(parents=True,exist_ok=True)
     for plan in plans:
         tw,th,_=plan['dimensions_m']
-        d=Drawing(1100,1100)
+        d=Drawing(1100,1195 if plan["template"]=="Rocky" else 1100)
         card(d,plan,0,0,1100,1070,min(880/tw,820/th))
         d.text(25,1065,'Proiezione del generatore reale · ingombri verticali, tetti omessi · griglia 5 m',17,color='#65727a')
+        if plan["template"]=="Rocky":
+            rocky_elevation_legend(d,25,1093)
         d.save(output/f'{plan["template"]}-seed{plan["seed"]}')
     first_seed=plans[0]['seed']; selected=[p for p in plans if p['seed']==first_seed]
-    d=Drawing(1860,1740); n=plans[0]['team_size']
+    rows=(len(selected)+2)//3
+    legend=1450+max(0,rows-2)*655
+    d=Drawing(1860,legend+290); n=plans[0]['team_size']
     d.text(32,22,f'PIANTE {n} VS {n}',36,bold=True)
     d.text(32,69,'Stessa scala per tutti i template · dimensioni effettive del perimetro · griglia 5 m',21,color='#64717a')
     scale=min(min(440/p['dimensions_m'][0],390/p['dimensions_m'][1]) for p in selected)
     for i,plan in enumerate(selected):
         card(d,plan,(i%3)*620,122+(i//3)*655,620,635,scale)
-    d.text(32,1450,'COME LEGGERE LE PIANTE',21,bold=True)
+    d.text(32,legend,'COME LEGGERE LE PIANTE',21,bold=True)
     for j,(label,color) in enumerate([('Blu / arancio: possibili punti di spawn','#496876'),('Verde: percorsi principali e passaggi','#6d9462'),('Tratteggio viola: sottopasso','#8a6aa0'),('Tratteggio azzurro: percorsi sui tetti','#4b8c8c'),('Contorni chiari: strutture sopraelevate','#8c9ca7'),('Nero: aree inaccessibili escluse dai m²','#171c20')]):
-        d.text(32+(j%2)*930,1490+(j//2)*36,label,17,color=color)
-    d.text(32,1620,'Piante tecniche, tetti omessi.',18)
-    d.text(32,1652,'Le varianti restano da provare in partita.',18)
-    d.text(32,1700,f'Generatore Unreal · seed {first_seed} · scala squadra indipendente dal numero di giocatori ammessi',19,color='#64717a')
+        d.text(32+(j%2)*930,legend+40+(j//2)*36,label,17,color=color)
+    d.text(32,legend+170,'Piante tecniche, tetti omessi.',18)
+    d.text(32,legend+202,'Le varianti restano da provare in partita.',18)
+    d.text(32,legend+250,f'Generatore Unreal · seed {first_seed} · scala squadra indipendente dal numero di giocatori ammessi',19,color='#64717a')
     d.save(output/f'overview-{n}v{n}')
     for stem,title,identifiers in (
         ('central-fire','CENTRAL BUILDING / FIRE TRAINING',('CentralBuilding','FireTraining')),
         ('rooms-fire','ROOMS / FIRE TRAINING',('Rooms','FireTraining')),
     ):
+        if not set(identifiers).issubset(p['template'] for p in selected):
+            continue
         focused=[next(p for p in selected if p['template']==ident) for ident in identifiers]
         focus=Drawing(1600,1100)
         focus.text(32,22,f'{n} VS {n} · {title}',32,bold=True)
@@ -269,14 +343,31 @@ def render(plans, output):
     # should be visible without having to switch between individual SVG tabs.
     seeds=list(dict.fromkeys(p['seed'] for p in plans))[:3]
     varied=[p for ident in ('Rooms','Village') for seed in seeds for p in plans if p['template']==ident and p['seed']==seed]
-    comparison=Drawing(620*len(seeds),1510)
-    comparison.text(32,22,f'{n} VS {n} · VARIANTI ROOMS / VILLAGE',32,bold=True)
-    comparison.text(32,69,'Seed a confronto alla stessa scala · dimensioni in metri · griglia 5 m',21,color='#64717a')
-    variety_scale=min(min(440/p['dimensions_m'][0],390/p['dimensions_m'][1]) for p in varied)
-    for i,plan in enumerate(varied):
-        card(comparison,plan,(i%len(seeds))*620,122+(i//len(seeds))*655,620,635,variety_scale)
-    comparison.text(32,1462,'Topologie del generatore reale · 750 m² per giocatore previsto, ±10% sull’area',19,color='#64717a')
-    comparison.save(output/f'rooms-village-{n}v{n}')
+    comparisons=[]
+    if varied:
+        comparison=Drawing(620*len(seeds),1510)
+        comparison.text(32,22,f'{n} VS {n} · VARIANTI ROOMS / VILLAGE',32,bold=True)
+        comparison.text(32,69,'Seed a confronto alla stessa scala · dimensioni in metri · griglia 5 m',21,color='#64717a')
+        variety_scale=min(min(440/p['dimensions_m'][0],390/p['dimensions_m'][1]) for p in varied)
+        for i,plan in enumerate(varied):
+            card(comparison,plan,(i%len(seeds))*620,122+(i//len(seeds))*655,620,635,variety_scale)
+        comparison.text(32,1462,'Topologie del generatore reale · 750 m² per giocatore previsto, ±10% sull’area',19,color='#64717a')
+        comparison.save(output/f'rooms-village-{n}v{n}')
+        comparisons.append(f'<h2>Variabilità Rooms / Village</h2><a href="rooms-village-{n}v{n}.svg"><img src="rooms-village-{n}v{n}.svg" alt="Confronto quotato delle varianti Rooms e Village"/></a>')
+    rocky=[p for p in plans if p['template']=='Rocky']
+    if len(rocky)>1:
+        columns=4 if len(rocky)==7 else 2 if len(rocky)==4 else 3
+        rows=(len(rocky)+columns-1)//columns
+        comparison=Drawing(columns*620,220+rows*655)
+        comparison.text(32,22,f'ROCKY · {n} VS {n}',36,bold=True)
+        comparison.text(32,69,'Quote del terreno e percorsi · stessa scala · griglia 5 m',21,color='#64717a')
+        scale=min(min(440/p['dimensions_m'][0],390/p['dimensions_m'][1]) for p in rocky)
+        for i,plan in enumerate(rocky):
+            card(comparison,plan,(i%columns)*620,110+(i//columns)*655,620,635,scale)
+        rocky_elevation_legend(comparison,32,105+rows*655)
+        filename=f'rocky-{n}v{n}'
+        comparison.save(output/filename)
+        comparisons.append(f'<h2>Varianti Rocky</h2><a href="{filename}.svg"><img src="{filename}.svg" alt="Confronto quotato delle varianti Rocky"/></a>')
     room_variants=[p for p in plans if p['template']=='Rooms' and p['rooms']==4][:3]
     if room_variants:
         variants=Drawing(800*len(room_variants),1100)
@@ -290,7 +381,7 @@ def render(plans, output):
         f=f'{plan["template"]}-seed{plan["seed"]}'
         tw,th,_=plan['dimensions_m']
         cards.append(f'<article><h2>{NAMES[plan["template"]]} · {tw:g} × {th:g} m</h2><p>Seed {plan["seed"]} · {n} vs {n} · {plan["area_m2"]:g} m² / obiettivo {n*1500} m² ±10%</p><a href="{f}.svg"><img src="{f}.svg" alt="Pianta quotata"/></a></article>')
-    (output/'index.html').write_text(f'<!doctype html><html lang="it"><meta charset="utf-8"><title>Piante {n}vs{n}</title><style>body{{background:{BACKGROUND};color:#243440;font:17px Arial;margin:28px}}main{{display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:22px}}img{{width:100%}}article{{border:1px solid #cdd2cc;padding:16px}}h1{{margin-bottom:8px}}</style><h1>Piante {n} vs {n}</h1><p>Dimensioni reali in metri. Squadre previste indipendenti dalla capienza. Clicca una pianta per lo SVG.</p><h2>Tutti i template · stessa scala</h2><a href="overview-{n}v{n}.svg"><img src="overview-{n}v{n}.svg" alt="Tutti i template quotati alla stessa scala"/></a><h2>Variabilità Rooms / Village</h2><a href="rooms-village-{n}v{n}.svg"><img src="rooms-village-{n}v{n}.svg" alt="Confronto quotato delle varianti Rooms e Village"/></a><main>'+''.join(cards)+'</main></html>')
+    (output/'index.html').write_text(f'<!doctype html><html lang="it"><meta charset="utf-8"><title>Piante {n}vs{n}</title><style>body{{background:{BACKGROUND};color:#243440;font:17px Arial;margin:28px}}main{{display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:22px}}img{{width:100%}}article{{border:1px solid #cdd2cc;padding:16px}}h1{{margin-bottom:8px}}</style><h1>Piante {n} vs {n}</h1><p>Dimensioni reali in metri. Squadre previste indipendenti dalla capienza. Clicca una pianta per lo SVG.</p><h2>Template · stessa scala</h2><a href="overview-{n}v{n}.svg"><img src="overview-{n}v{n}.svg" alt="Template quotati alla stessa scala"/></a>'+''.join(comparisons)+'<main>'+''.join(cards)+'</main></html>')
 
 
 def main():
@@ -300,19 +391,26 @@ def main():
     p.add_argument('--verify-seeds',type=int,default=32,help='Verify seeds 0..N-1 plus signed edge cases (max4096)')
     p.add_argument('--reuse',action='store_true',help='Only redraw a previous native export')
     p.add_argument('--output',type=Path)
+    p.add_argument('--templates',nargs='+',choices=NAMES,help='Export only these templates')
     p.add_argument('--playability',action='store_true',help='Overlay tactical graph (blue), chokes (magenta) and spawn sight lines (red)')
     args=p.parse_args()
     global PLAYABILITY
     PLAYABILITY=args.playability
     if not 0<=args.verify_seeds<=4096 or any(not -(2**31)<=s<2**31 for s in args.seeds):
         p.error('Seed validation count or signed32 seed out of range')
-    folder=ROOT/'Saved/Testing/MapPlans';folder.mkdir(parents=True,exist_ok=True)
+    folder=ROOT/'Saved/Testing/MapPlans'
+    templates=sorted(set(args.templates or []))
+    if templates:
+        folder=folder/'-'.join(templates)
+    folder.mkdir(parents=True,exist_ok=True)
     export=folder/f'plans-{args.team_size}v{args.team_size}.json'
     log=folder/f'generator-{args.team_size}v{args.team_size}.log'
     receipt=folder/f'verified-{args.team_size}v{args.team_size}.json'
     if not args.reuse:
         editor=Path(os.environ.get('UE_ROOT','/Users/Shared/Epic Games/UE_5.8'))/'Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor'
         command=[str(editor),str(ROOT/'RespawnAndRage.uproject'),'/Engine/Maps/Entry','-nullrhi','-nosound','-unattended','-NoSplash','-Multiprocess','-stdout','-FullStdOutLogOutput','-ExecCmds=Automation RunTests EclipseRecoil.Maps.TeamSizing','-TestExit=Automation Test Queue Empty',f'-ERMapPlanTeamSize={args.team_size}','-ERMapPlanSeeds='+','.join(map(str,args.seeds)),f'-ERMapPlanVerifySeeds={args.verify_seeds}']
+        if templates:
+            command.append('-ERMapPlanTemplates='+','.join(templates))
         before=__import__('time').time()
         with log.open('w') as f:
             result=subprocess.run(command,cwd=ROOT,stdout=f,stderr=subprocess.STDOUT,timeout=1200)
@@ -325,6 +423,8 @@ def main():
     elif not receipt.exists() or json.loads(receipt.read_text()).get('policy') != 'template-area-density-v29' or json.loads(receipt.read_text()).get('sha256') != hashlib.sha256(export.read_bytes()).hexdigest():
         raise SystemExit('Native export is not verified; regenerate without --reuse')
     plans=json.loads(export.read_text())
+    if args.templates:
+        plans=[q for q in plans if q['template'] in args.templates]
     if not plans or any(q['team_size']!=args.team_size for q in plans) or (not args.reuse and {q['seed'] for q in plans} != set(args.seeds)):
         raise SystemExit('Invalid native export')
     if any(not .9*q['target_area_m2']-.01 <= q['area_m2'] <= 1.1*q['target_area_m2']+.01 for q in plans):

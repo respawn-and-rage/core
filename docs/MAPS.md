@@ -12,6 +12,7 @@ entries expose rotation toggles; a Town-only pool remains Town-only. All maps co
 | `rooms` | `L_Rooms` | `DA_Rooms` | offline only |
 | `village` | `L_Village` | `DA_Village` | yes |
 | `town` | `L_Town` | `DA_Town` | yes |
+| `rocky` | `L_Rocky` | `DA_Rocky` | offline only |
 | `depot` | `L_Depot` | fixed reference | offline only |
 
 Recipes live in `Art/MapTemplates`. Reproduce a layout with
@@ -38,13 +39,22 @@ fight from. Fill is not a goal.
   boards are broken. Never a tower in plain sight with its ladder facing the fight.
 - **No bare ground.** Wide flat floor with a few scattered obstacles is a defect. Open floor is
   taken by structures that give rooms, enclosures and height, not by more obstacles.
+- **More than one level.** A fight has a floor above or below it: an upper room behind windows,
+  a roof, a terrace, a lower passage. Each level is reached by its own climb.
 - **Variety between seeds.** A seed should change the plan, not only its dimensions.
 - **General rules first.** A rule that makes maps play better belongs in a shared pass that reads
   only common layout data, so every template, present or future, inherits it.
 
-References: Central Building follows compact house maps (Lake, Safehouse, Bank), Town a dense
-shopping district (Chinatown), Village timber compounds (Shoots, St. Marc), Alleys three-lane
-towns (Dust II, Mirage). No reference geometry is imported.
+References are overhead plans kept by the owner; only their traits are used, and no reference
+geometry or layout is imported. What each template should tend to:
+
+| Template | References | Traits to reach |
+| --- | --- | --- |
+| Central Building | Lake, Safehouse, Bank | One multi-storey house off centre, a few enterable outbuildings, open ground broken by large natural or parked cover, starts on opposite flanks. |
+| Town | Chinatown, Italy, Monastery | A street ring around building masses, passages through them, narrow side alleys, upper rooms and roofs over the street, small courts. |
+| Village | Shoots, St. Marc | Long multi-storey timber blocks facing a central lane, or separate houses and sheds around a yard; side lanes and corner shacks. |
+| Alleys | Dust II, Mirage | Three lanes split by solid blocks, few connectors, a middle seen from above, raised and sunken stretches, two wide courts near each base. |
+| Rocky | Lunacy | Circular rock field divided by a climbable crest, two tunnels and small lunar outposts. |
 
 ## Shared rules
 
@@ -83,30 +93,50 @@ towns (Dust II, Mirage). No reference geometry is imported.
   run before readiness. Zone count is independent of player slots and capacity.
 - **Open ground.** `ERProcedural::EnrichOpenGround` runs on every accepted, unsealed layout before
   the interiors, and needs nothing from the builder. It rasters the arena at 1m, blocks the
-  boundary, exclusions, water, base courts, declared house footprints and every solid, keeps
-  lanes along recorded routes (170cm), starts and pockets (7m), cover entries and ladders, and
-  measures how far each open cell is from the nearest solid. While a cell on the sampled half is at least 4m clear, it builds
-  there and at the mate position, facing the middle of the arena: a **lookout** (one-room house
-  whose parapeted roof is reached only by the ladder inside, through a roof hatch; at least 18m
-  from every start; the door is boarded with timber in half of them), a **compound** (2m walls
-  around a yard, one open gate, one boarded gap, three 20cm rises to a firing step that clears
-  the wall), or a **cover group**. At most two pairs of lookouts and two of compounds, and
-  2–10 pairs in all by arena area. On graded terrain a structure stands on its own plinth with
-  its doorway on the uphill side, a compound yard gets a level slab, and a ladder stands on that
-  finished floor; lookouts accept 90cm of fall, cover 30cm, compounds 20cm.
-  Houses and yards are declared to the interior kit. The same pass then cuts **boarded breaches**:
-  a 110cm gap through a builder's ground-level Brick or Concrete wall at least 4m long, closed by
-  timber boards, where both sides are standing floor within 3m of a recorded route, 15m from every
-  start and 12m from another breach; 1–4 pairs by area, each with its mate gap in the mate wall.
-  A gap is kept only if the open hole, without its boards, still leaves every opposing pair of
-  starts screened. Breaking the boards joins two ways the intact map keeps apart, which is how
-  dense templates get their hidden routes. Names land in `FeatureNames` as `Ground.*`, and each
-  run logs one `ER_OPEN_GROUND` line with what it built and why spots were rejected.
-  `ERProcedural::Build` rechecks spawn occlusion after the pass and keeps the plain plan if it
-  would be lost (`ER_OPEN_GROUND_REVERTED`), then logs the cost of both shared passes as
-  `ER_SHARED_PASSES`. The pass appends: `GroundPanelStart`,
-  `GroundFixedStart` and `GroundLadderStart` mark where the builder's own construction ends, so a
-  template's tests judge its materials, counts and exact pairing up to those indices.
+  boundary, exclusions, water, base courts, declared house footprints and every solid, keeps lanes
+  along recorded routes (170cm), starts and pockets (7m), cover entries and ladders, and measures
+  how far each open cell is from the nearest solid. While a cell on the sampled half is at least
+  4m clear, it builds there and at the mate position, facing the middle of the arena: a
+  **lookout** (one-room house whose parapeted roof is reached only by the ladder inside, through a
+  roof hatch; at least 18m from every start; the door is boarded with timber in half of them), a
+  **compound** (2m walls around a yard, one open gate, one boarded gap, three 20cm rises to a
+  firing step that clears the wall), a **terrace** (fixed 140cm platform, at least 12m from every
+  start: seven 20cm rises at the back, a 90cm parapet with a gap in front, and two timber crates
+  of 45 and 95cm on the flank that can be jumped, or shot away), **boulders**, or a **cover
+  group**. At most two pairs of each large kind, three of boulders, the one built least going
+  first, and 2–10 pairs in all by arena area. Boulders are three rocks side by side with flat tops
+  50, 100 and 150 or 215cm above the ground, each a hop above the last, so the lower large rock
+  can be climbed. They are a kind of their own on natural ground (a template with terrain and no
+  houses), replace two cover groups in ten between houses on terrain, and never appear on flat
+  built ground. A rock follows the ground under it, so it needs no plinth. `FERLayoutBoulder` is a
+  generated faceted ellipsoid (`ERBoulders.cpp`), fixed and indestructible: its world mesh is its
+  collision, and layout queries see a pawn box around it and a smaller sight box inside it. Its
+  finish is bare rock from the shared catalog, `GroundCracked01` on sand and `RocksMossy01`
+  elsewhere. On graded terrain a structure stands on its own plinth with its doorway on the uphill
+  side, a compound yard gets a level slab, and a ladder stands on that finished floor; lookouts
+  accept 90cm of fall, cover 30cm, compounds 20cm, terraces 10cm. Houses and yards are declared to
+  the interior kit. The same pass then cuts **boarded breaches**: a 110cm gap through a builder's
+  ground-level Brick or Concrete wall at least 4m long, closed by timber boards, where both sides
+  are standing floor within 3m of a recorded route, 15m from every start and 12m from another
+  breach; 1–4 pairs by area, each with its mate gap in the mate wall. A gap is kept only if the
+  open hole, without its boards, still leaves every opposing pair of starts screened. Breaking the
+  boards joins two ways the intact map keeps apart, which is how dense templates get their hidden
+  routes. Last it opens **upper levels**: a group of touching roof-tagged fixed slabs 2.5–4.5m
+  above the ground, at least 20m² and reached by no ladder, stair or route, gets a metal ladder up
+  a solid stretch of its wall, beside a recorded route and off it where it can, 12m from every
+  start. Under open sky that is roof access. Under a ceiling it is an upper room: `CarveFixed`
+  cuts a 110×210cm doorway at the head of the ladder through the fixed boxes in the way, and every
+  glazed plate on the level's walls is cut open as a window, leaving the plate behind it as the
+  frame. A window or a roof that a start could see stays closed. Upper rooms are declared to the
+  interior kit; 1–3 pairs by area. A builder gets this by tagging its slabs `Roof` and marking
+  windows with thin Glass plates. Names land in `FeatureNames` as `Ground.*`, and each run logs
+  one `ER_OPEN_GROUND` line with what it built and why spots were rejected. `ERProcedural::Build`
+  rechecks spawn occlusion after the pass and keeps the plain plan if it would be lost
+  (`ER_OPEN_GROUND_REVERTED`), then logs the cost of both shared passes as `ER_SHARED_PASSES`. The
+  pass appends, and the remainders of a fixed box it cuts move to the end with them:
+  `GroundPanelStart`, `GroundFixedStart` and `GroundLadderStart` mark where the builder's own
+  construction ends, so a template's tests judge its materials, counts and exact pairing up to
+  those indices.
 - **Interiors.** A builder declares its rooms, courts and street edges as `FERLayoutInterior`
   (`AddInteriorPair`). `ERProcedural::FurnishInteriors` runs once on the accepted layout, after
   spawn zones and before the palette, and fills each with a room program from the shared kit:
@@ -124,7 +154,7 @@ towns (Dust II, Mirage). No reference geometry is imported.
 
 ## Outdoor backdrop
 
-Central Building, Alleys, Village, Town and Depot roll a cosmetic lighting seed
+Central Building, Alleys, Village, Town, Rocky and Depot roll a cosmetic lighting seed
 on the authority at the start of each match. The seed gives standard lighting and
 sunset equal chances. It is replicated to peers and persists through arena
 regeneration. Standard lighting uses the authored lights and the full Atmospheric
@@ -166,14 +196,16 @@ with the Metal galleries for Central Building and Village, and compare the
 
 `Map.ExpectedTeamSize` (1..16) budgets **750m² per expected player on open ground**:
 `target area = team size × 1500m² × AreaDensity`, never below 1500m², **±10% of area**, not per
-axis. `ERProcedural::AreaDensity` is 1 for Central Building, Village, Fire Training and Alleys, 0.7 for
+axis. `ERProcedural::AreaDensity` is 1 for Central Building, Village, Fire Training, Rocky and Alleys, 0.7 for
 Town and 0.6 for Rooms: closed streets and sealed rooms bend every walk, so they shrink until
 bases sit a comparable walk apart. Alleys keeps the full budget until a smaller district passes
 real-collision spawn occlusion on every tested seed. `TargetAreaM2` is the only place that knows the budget.
 Upper floors, roofs and
 lower passages do not count; Rooms counts primary room polygons and corridor floors, excluding galleries and upper crossings. Central Building counts
 the circular footprint (`PlayableAreaM2`), rather than its bounding square. Town subtracts
-the exact union of inaccessible central wings and polygonal perimeter recesses from its envelope. No saturation at 8.
+the exact union of inaccessible central wings and polygonal perimeter recesses from its envelope.
+Rocky subtracts solid ridge outcrops, spawn screens and tall rock cover from its circular footprint.
+No saturation at 8.
 
 `ERMapSizing.cpp` configures transient recipe copies: structural counts, spacing and bounds.
 It never scales characters, portals, stairs, ladders, kit meshes, material thickness or cells.
@@ -207,6 +239,7 @@ geometry, physics, calibration or damage, and their identity enters the digest.
 | Rooms | Tunnels | cast concrete shell, dry floor, timber cover | dry light concrete |
 | Village | Jungle | timber and corrugated sheet cladding | jungle ground |
 | [Town](maps/town.md) | Town | urban street loop, ground-floor through-shops, closed upper storeys | asphalt or pavers |
+| [Rocky](maps/rocky.md) | Rocky | offset stone ridges, rock outcrops and matte metal outposts | exposed bedrock |
 
 Roles stay separate so structures read at distance: shell sheets, structural steel, galvanized
 ladders, decks and painted cargo. `CargoSteel` replaces supplied container paint; the Jungle
@@ -242,8 +275,9 @@ route back to the playable area, including the ground behind stairs and raised p
 2. Register in `ERMapCatalog.cpp`, and add it to `MapsToCook` in `Config/DefaultGame.ini`.
 3. Native builder `ER<Name>.cpp`, reached from `ERProcedural::Build`; team sizing in `ERMapSizing.cpp`
    and an `AreaDensity`. Record every standing route, set `LayoutSymmetry` and the exclusion boxes:
-   the open-ground pass then works unasked. Declare enterable rooms with `AddInteriorPair` to
-   have them furnished. Add the template to `EclipseRecoil.Maps.Interiors`.
+   the open-ground pass then works unasked. Tag walkable roof slabs `Roof` and mark windows with
+   thin Glass plates to have upper levels opened. Declare enterable rooms with `AddInteriorPair`
+   to have them furnished. Add the template to `EclipseRecoil.Maps.Interiors`.
 4. Bind a `DA_Theme_<Name>` palette as `ThemeLibrary`, and add the map to the digest-affecting fields if it has new geometry data.
 5. Bump `AERBlockRoom::Protocol` for any change in generated geometry.
 6. Layout and physics automation, a `test-<name>.py`, and a page in `docs/maps/`.

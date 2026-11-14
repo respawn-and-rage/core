@@ -144,7 +144,7 @@ bool EROutdoorBackdrop::IsOutdoorMap(const FString& Name)
 {
     return Name.EndsWith(TEXT("L_Village")) || Name.EndsWith(TEXT("L_Depot")) ||
         Name.EndsWith(TEXT("L_CentralBuilding")) || Name.EndsWith(TEXT("L_MiddleEasternAlleys")) ||
-        Name.EndsWith(TEXT("L_Town"));
+        Name.EndsWith(TEXT("L_Town")) || Name.EndsWith(TEXT("L_Rocky"));
 }
 
 bool EROutdoorBackdrop::IsNight(const UWorld& World)

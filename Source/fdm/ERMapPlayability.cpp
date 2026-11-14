@@ -1315,6 +1315,7 @@ const TCHAR* ERPlayability::ArchetypeName(EERMapArchetype Archetype)
     case EERMapArchetype::Rooms:return TEXT("Rooms");
     case EERMapArchetype::Village:return TEXT("Village");
     case EERMapArchetype::UrbanTown:return TEXT("Town");
+    case EERMapArchetype::Rocky:return TEXT("Rocky");
     default:return TEXT("LegacyAssembly");
     }
 }

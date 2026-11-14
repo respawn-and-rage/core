@@ -22,11 +22,14 @@ Each shop declares its sales floor, back rooms and court to the
 and garages in front, storerooms, kitchens and offices behind. Kerb furniture backs onto the
 outer walls of the ring, clear of both spawn corners.
 
-All initial circulation stays on the ground, with 12cm pavement thresholds. One to
+The builder keeps its own circulation on the ground, with 12cm pavement thresholds. One to
 three storeys give the blocks height and overhead shelter; upper facades and concrete
-closures are fixed, inaccessible architecture. Ground-floor brick/concrete walls and
+closures are fixed architecture, and upper windows sit on the wall they belong to, stepping
+back with the front past the shoulder. The shared [upper levels](../MAPS.md#shared-rules) rule
+then opens some of it: a first floor becomes a furnished room behind open windows, a
+single-storey roof a terrace, each reached by one wall ladder. Ground-floor brick/concrete walls and
 drywall partitions use calibrated destructible cells. Roofs remain visible in play
-and use the normal minimap roof tag. There are no roof routes, stairs or ladders.
+and use the normal minimap roof tag. The builder adds no roof routes, stairs or ladders.
 Fixed window frames and glazed panels mark the upper facades; metal awnings mark
 the ground-floor portals. This version uses flat asphalt terrain and warm daylight.
 

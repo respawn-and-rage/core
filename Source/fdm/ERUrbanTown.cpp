@@ -114,7 +114,8 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
     const int32 Rows=FMath::Max(1,FMath::FloorToInt32((CoreHalfDepth+Gap*.5)/2400));
     const float BandDepth=(CoreHalfDepth-(Rows-.5f)*Gap)/Rows;
     if(BandDepth<650 || CoreWidth-(Columns-1)*Gap<Columns*700)return false;
-    auto Facade=[&](float Width,float Depth,int32 Storeys,float NotchX)
+    // Upper windows sit on the wall they belong to: the front steps back past the shoulder.
+    auto Facade=[&](float Width,float Depth,int32 Storeys,float NotchX,float ShoulderX,float ShoulderY)
     {
         const int32 Windows=FMath::Max(1,FMath::FloorToInt32(Width/350));
         for(int32 FloorIndex=1;FloorIndex<Storeys;++FloorIndex)for(int32 W=0;W<Windows;++W)
@@ -122,9 +123,10 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
             const float WX=Width*(W+.5f)/Windows,Z=FloorIndex*R.StoreyHeight+160;
             for(float FaceY:{-3.f,Depth+3})
             {
-                if(FaceY>0 && WX<NotchX+90)continue;
-                Fixed({WX,FaceY,Z},{160,8,180},EERBlockMaterial::Metal,true);
-                Fixed({WX,FaceY+(FaceY<0 ? -5:5),Z},{140,2,160},EERBlockMaterial::Glass,true);
+                if((FaceY>0 && WX<NotchX+90) || (FaceY<0 && FMath::Abs(WX-ShoulderX)<90))continue;
+                const float Y=FaceY<0 && WX>ShoulderX ? FaceY+ShoulderY:FaceY;
+                Fixed({WX,Y,Z},{160,8,180},EERBlockMaterial::Metal,true);
+                Fixed({WX,Y+(FaceY<0 ? -5:5),Z},{140,2,160},EERBlockMaterial::Glass,true);
             }
         }
     };
@@ -164,7 +166,7 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
                 const float H=FMath::Max(680.f,Height);
                 ClosedBox({Width*.5,NotchY*.5,H*.5},{Width,NotchY,H},Material);
                 ClosedBox({(Width+NotchX)*.5,(Depth+NotchY)*.5,H*.5},{Width-NotchX,Depth-NotchY,H},Material);
-                Facade(Width,Depth,FMath::Max(2,Storeys),NotchX);
+                Facade(Width,Depth,FMath::Max(2,Storeys),NotchX,Width+1000,0);
             }
             else
             {
@@ -197,7 +199,7 @@ bool ERProcedural::BuildUrbanTown(const FERProceduralConfig& C,const FERBlockRoo
                     Fixed({Width*.5,(ShoulderY+NotchY)*.5,Z},{Width,NotchY-ShoulderY,20},EERBlockMaterial::Concrete,true,true);
                     Fixed({(Width+NotchX)*.5,(Depth+NotchY)*.5,Z},{Width-NotchX,Depth-NotchY,20},EERBlockMaterial::Concrete,true,true);
                 }
-                Facade(Width,Depth,Storeys,NotchX);
+                Facade(Width,Depth,Storeys,NotchX,ShoulderX,ShoulderY);
                 Fixed({DoorX,-50,285},{280,100,10},EERBlockMaterial::Metal,true);
                 Fixed({ExitX,Depth+50,285},{280,100,10},EERBlockMaterial::Metal,true);
                 Fixed({ShoulderX*.5,-60,6},{ShoulderX,120,12},EERBlockMaterial::Concrete,true);

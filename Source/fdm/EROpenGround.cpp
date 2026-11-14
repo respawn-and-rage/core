@@ -5,13 +5,14 @@
 // Template-independent pass over open ground. It reads only shared layout data (solids, routes,
 // starts, exclusions, ground height), finds the widest uncovered floor on one half and builds a
 // structure there with its mate: a lookout reached through a roof hatch, a walled compound with a
-// firing step, or a small cover group. Some entrances are boarded and open only when broken.
+// firing step, a raised terrace with a crate climb, or a small cover group. Some entrances are
+// boarded and open only when broken. It then cuts boarded breaches through builder walls and
+// opens upper levels: roof slabs nothing reaches yet get a wall ladder, a doorway and windows.
 // New templates inherit it without declaring anything.
 namespace
 {
 constexpr float Cell=100,Margin=150,LaneHalf=170,StartReach=700,LookoutReach=1800;
-// Mode 0: destructible cells from the box. 1: one horizontal board. 2: fixed instanced box.
-struct FPart { FBox Box; EERBlockMaterial Material; uint8 Mode; TArray<FBox> Holes; };
+using FPart=FERKitPart;
 struct FFeature
 {
     const TCHAR* Name=TEXT("");
@@ -21,6 +22,7 @@ struct FFeature
     bool bLadder=false,bRoom=false,bLookout=false;
     float Slope=20; // Ground height difference the footprint tolerates, in centimetres.
     FVector LadderFoot=FVector::ZeroVector;float Deck=0,Floor=0;
+    TArray<FERLayoutBoulder> Rocks; // Centre heights are above the ground under each rock.
     EERInteriorKind Kind=EERInteriorKind::BackRoom;FVector2D RoomHalf=FVector2D::ZeroVector;
 };
 using M=EERBlockMaterial;
@@ -75,6 +77,47 @@ FFeature Compound(M Material,float Sink,float Board)
     return F;
 }
 
+// A platform above head height for whoever stands below it: seven low rises at the back, a parapet
+// to crouch behind, and two timber crates on the flank that can be jumped, or shot away.
+FFeature Terrace(M Material,float Sink)
+{
+    FFeature F;F.Name=TEXT("Ground.Terrace");F.Half={300,250};F.Slope=10;
+    const float Top=140;
+    F.Parts.Add({FBox(FVector(-150,-250,-Sink),FVector(200,250,Top)),M::Concrete,2,{}});
+    F.Parts.Add({FBox(FVector(-300,-150,-Sink),FVector(-150,250,Top)),M::Concrete,2,{}});
+    F.Parts.Add({FBox(FVector(200,50,-Sink),FVector(300,250,Top)),M::Concrete,2,{}});
+    for(int32 Step=0;Step<6;++Step)
+        F.Parts.Add({FBox(FVector(-300+Step*25.f,-250,-Sink),FVector(-275+Step*25.f,-150,20.f*(Step+1))),M::Concrete,2,{}});
+    F.Parts.Add({FBox(FVector(200,-150,-Sink),FVector(300,-50,45)),M::Wood,0,{}});
+    F.Parts.Add({FBox(FVector(200,-50,-Sink),FVector(300,50,95)),M::Wood,0,{}});
+    for(float Side:{-1.f,1.f})
+    {
+        F.Parts.Add({FBox(FVector(Side>0 ? 60.f:-300.f,230,Top),FVector(Side>0 ? 300.f:-60.f,250,Top+90)),Material,3,{}});
+        F.Parts.Add({FBox(FVector(Side>0 ? 280.f:-300.f,130,Top),FVector(Side>0 ? 300.f:-280.f,230,Top+90)),Material,3,{}});
+    }
+    F.Entry={{-450,-200,100},{-345,-200,100}};
+    return F;
+}
+
+// Rocks rising out of natural ground: a low one, a waist-high one and a large one side by side.
+// Each top is 50cm above the last, so the large rock can be climbed when it is not too tall.
+FFeature Outcrop(uint32 Pick)
+{
+    FFeature F;F.Name=TEXT("Ground.Boulders");F.Half={240,180};F.Slope=150;
+    const bool Tall=(Pick&8u)!=0;const float Grow=.9f+.2f*float((Pick>>8)%8u)/7;
+    auto Rock=[&](FVector2D At,FVector2D Radius,float Top,uint32 Salt)
+    {
+        // The flat top stands Top above the ground and the widest girth a quarter of that.
+        FERLayoutBoulder B;B.Radii=FVector(Radius.X*Grow,Radius.Y*Grow,Top/1.05f);
+        B.Center=FVector(At,Top-B.Radii.Z*ERProcedural::BoulderTop);
+        B.Shape=HashCombineFast(Pick,Salt);B.Yaw=float(B.Shape%360u);F.Rocks.Add(B);
+    };
+    Rock({-65,20},{165,135},Tall ? 215.f:150.f,1);
+    Rock({85,-25},{100,90},100,2);
+    Rock({165,-105},{68,60},50,3);
+    return F;
+}
+
 // For floor too small for a structure: a corner to hold and a crate to crouch behind.
 FFeature Cluster(M Material,bool Wide,float Sink)
 {
@@ -86,16 +129,94 @@ FFeature Cluster(M Material,bool Wide,float Sink)
     return F;
 }
 
-double Ground(const FERProceduralLayout& L,FVector2D P)
+double Ground(const FERProceduralLayout& L,FVector2D P){return ERProcedural::GroundHeight(L,P);}
+
+bool Aligned(const FQuat& Q)
 {
-    if(L.CircularArena)return ERProcedural::CentralGroundHeight(L,P);
-    if(!L.VillageBlocks.IsEmpty())return ERProcedural::VillageGroundHeight(L,P);
-    return L.GradedTerrain ? ERProcedural::AlleyGroundHeight(L,P):0.;
+    for(const FVector& Axis:{Q.GetAxisX(),Q.GetAxisY(),Q.GetAxisZ()})if(Axis.GetAbsMax()<.9999)return false;
+    return true;
+}
+
+// Cuts a world-axis box out of every plain fixed box it crosses. The remainders are appended, so
+// they belong to the open-ground range. False when something in the way cannot be cut.
+bool CarveFixed(FERProceduralLayout& L,const FBox& Hole,bool Apply)
+{
+    TArray<int32> Hit;
+    for(int32 I=0;I<L.FixedPieces.Num();++I)
+    {
+        const auto& P=L.FixedPieces[I];
+        const FTransform Frame(P.Transform.GetRotation(),P.Transform.GetLocation());
+        const FVector Half=P.Transform.GetScale3D()*50;
+        const FBox Bounds=FBox(-Half,Half).TransformBy(Frame);
+        if(!Bounds.Intersect(Hole) || Bounds.Overlap(Hole).GetSize().GetMin()<.5)continue;
+        if(P.Mesh || P.MeshCollision || !Aligned(Frame.GetRotation()))return false;
+        Hit.Add(I);
+    }
+    if(!Apply)return true;
+    for(int32 I:Hit)
+    {
+        const FERLayoutFixedPiece P=L.FixedPieces[I];
+        const FTransform Frame(P.Transform.GetRotation(),P.Transform.GetLocation());
+        const FVector Half=P.Transform.GetScale3D()*50;
+        const FBox B(-Half,Half),C=B.Overlap(Hole.TransformBy(Frame.Inverse()));
+        TArray<FBox> Rest;
+        if(C.Min.X>B.Min.X+1)Rest.Add(FBox(B.Min,FVector(C.Min.X,B.Max.Y,B.Max.Z)));
+        if(C.Max.X<B.Max.X-1)Rest.Add(FBox(FVector(C.Max.X,B.Min.Y,B.Min.Z),B.Max));
+        if(C.Min.Y>B.Min.Y+1)Rest.Add(FBox(FVector(C.Min.X,B.Min.Y,B.Min.Z),FVector(C.Max.X,C.Min.Y,B.Max.Z)));
+        if(C.Max.Y<B.Max.Y-1)Rest.Add(FBox(FVector(C.Min.X,C.Max.Y,B.Min.Z),FVector(C.Max.X,B.Max.Y,B.Max.Z)));
+        if(C.Min.Z>B.Min.Z+1)Rest.Add(FBox(FVector(C.Min.X,C.Min.Y,B.Min.Z),FVector(C.Max.X,C.Max.Y,C.Min.Z)));
+        if(C.Max.Z<B.Max.Z-1)Rest.Add(FBox(FVector(C.Min.X,C.Min.Y,C.Max.Z),FVector(C.Max.X,C.Max.Y,B.Max.Z)));
+        for(const FBox& Part:Rest)
+        {
+            FERLayoutFixedPiece Piece=P;
+            Piece.Transform=FTransform(Frame.GetRotation(),Frame.TransformPositionNoScale(Part.GetCenter()),Part.GetSize()/100);
+            L.FixedPieces.Add(Piece);
+        }
+    }
+    for(int32 H=Hit.Num()-1;H>=0;--H)
+    {
+        L.FixedPieces.RemoveAt(Hit[H]);
+        if(Hit[H]<L.GroundFixedStart)--L.GroundFixedStart;
+    }
+    return true;
 }
 }
 
 namespace ERProcedural
 {
+void AddKitParts(FERProceduralLayout& L,const TArray<FERKitPart>& Parts,const FTransform& Frame,bool Flip,int32& NextId,const FERCellSettings& Cells)
+{
+    auto Turned=[&](FBox B){if(Flip){const double Min=-B.Max.Y;B.Max.Y=-B.Min.Y;B.Min.Y=Min;}return B;};
+    for(const auto& Part:Parts)
+    {
+        const FBox B=Turned(Part.Box);
+        if(Part.Mode==2)
+        {
+            FERLayoutFixedPiece Piece;Piece.Material=Part.Material;
+            Piece.Transform=FTransform(Frame.GetRotation(),Frame.TransformPositionNoScale(B.GetCenter()),B.GetSize()/100);
+            L.FixedPieces.Add(Piece);continue;
+        }
+        const int32 First=L.Panels.Num();const FVector S=B.GetSize();
+        if(Part.Mode==1)
+        {
+            auto& Panel=L.Panels.AddDefaulted_GetRef();Panel.Id=NextId*8;Panel.Material=Part.Material;
+            Panel.Transform=FTransform(FMatrix(FVector(1,0,0),FVector(0,0,1),FVector(0,-1,0),FVector(B.Min.X,B.Max.Y,B.Min.Z)));
+            Panel.Transform.SetScale3D(FVector::OneVector);Panel.Size=FVector(S.X,S.Z,S.Y);
+            Panel.Cell=FVector(FERCellWorld::FitCell(S.X,Cells.CellSize),S.Z,FERCellWorld::FitCell(S.Y,Cells.CellSize));
+        }
+        else AddPieceCells(NextId,Part.Material,B,Part.Mode==3,Cells,L.Panels);
+        ++NextId;
+        // A wall is one panel whose X runs along its longer side from the box minimum.
+        const int32 Axis=S.X>=S.Y ? 0:1;
+        if(L.Panels.Num()==First+1)for(const auto& Hole:Part.Holes)
+        {
+            const FBox H=Turned(Hole);
+            L.Panels[First].Holes.Add(FBox2D(FVector2D(H.Min[Axis]-B.Min[Axis],H.Min.Z-B.Min.Z),FVector2D(H.Max[Axis]-B.Min[Axis],H.Max.Z-B.Min.Z)));
+        }
+        for(int32 P=First;P<L.Panels.Num();++P)L.Panels[P].Transform=L.Panels[P].Transform*Frame;
+    }
+}
+
 void EnrichOpenGround(int32 Seed,FERProceduralLayout& L,const FERCellSettings& Cells)
 {
     L.GroundPanelStart=L.Panels.Num();L.GroundFixedStart=L.FixedPieces.Num();L.GroundLadderStart=L.Ladders.Num();
@@ -170,7 +291,9 @@ void EnrichOpenGround(int32 Seed,FERProceduralLayout& L,const FERCellSettings& C
         }
     };
     for(const auto* Set:{&L.Routes,&L.SpawnExitRoutes,&L.StairRoutes,&L.RoomAccessRoutes,&L.CrossingRoutes,&L.DistrictRoutes,
-        &L.GroundRoutes,&L.VillagePassages,&L.VillageSideBypasses})Paths(*Set);
+        &L.GroundRoutes,&L.VillagePassages,&L.VillageSideBypasses,&L.RockScrambles})Paths(*Set);
+    if(L.RockyCoverOnly)
+        for(const auto& Route:L.RooftopRoutes)for(const auto& Point:Route)Keep(Point,350);
     Paths({L.UpperRoute,L.LowerRoute,L.UnderpassRoute,L.UnderpassApproach});
     TArray<FVector> Starts;
     for(const auto* Set:{&L.AlphaSpawns,&L.OmegaSpawns})for(const auto& Start:*Set){Starts.Add(Start.GetLocation());Keep(Start.GetLocation(),StartReach);}
@@ -217,35 +340,15 @@ void EnrichOpenGround(int32 Seed,FERProceduralLayout& L,const FERCellSettings& C
     int32 NextId=0;for(const auto& P:L.Panels)NextId=FMath::Max(NextId,P.Id/8+1);
     auto Commit=[&](const FFeature& F,const FTransform& Frame,bool Flip)
     {
-        auto Turned=[&](FBox B){if(Flip){const double Min=-B.Max.Y;B.Max.Y=-B.Min.Y;B.Min.Y=Min;}return B;};
         auto Point=[&](FVector P){if(Flip)P.Y=-P.Y;return Frame.TransformPositionNoScale(P);};
-        for(const auto& Part:F.Parts)
+        AddKitParts(L,F.Parts,Frame,Flip,NextId,Cells);
+        for(int32 I=0;I<F.Rocks.Num();++I)
         {
-            const FBox B=Turned(Part.Box);
-            if(Part.Mode==2)
-            {
-                FERLayoutFixedPiece Piece;Piece.Material=Part.Material;
-                Piece.Transform=FTransform(Frame.GetRotation(),Frame.TransformPositionNoScale(B.GetCenter()),B.GetSize()/100);
-                L.FixedPieces.Add(Piece);continue;
-            }
-            const int32 First=L.Panels.Num();const FVector S=B.GetSize();
-            if(Part.Mode==1)
-            {
-                auto& Panel=L.Panels.AddDefaulted_GetRef();Panel.Id=NextId*8;Panel.Material=Part.Material;
-                Panel.Transform=FTransform(FMatrix(FVector(1,0,0),FVector(0,0,1),FVector(0,-1,0),FVector(B.Min.X,B.Max.Y,B.Min.Z)));
-                Panel.Transform.SetScale3D(FVector::OneVector);Panel.Size=FVector(S.X,S.Z,S.Y);
-                Panel.Cell=FVector(FERCellWorld::FitCell(S.X,Cells.CellSize),S.Z,FERCellWorld::FitCell(S.Y,Cells.CellSize));
-            }
-            else AddPieceCells(NextId,Part.Material,B,false,Cells,L.Panels);
-            ++NextId;
-            // A wall is one panel whose X runs along its longer side from the box minimum.
-            const int32 Axis=S.X>=S.Y ? 0:1;
-            if(L.Panels.Num()==First+1)for(const auto& Hole:Part.Holes)
-            {
-                const FBox H=Turned(Hole);
-                L.Panels[First].Holes.Add(FBox2D(FVector2D(H.Min[Axis]-B.Min[Axis],H.Min.Z-B.Min.Z),FVector2D(H.Max[Axis]-B.Min[Axis],H.Max.Z-B.Min.Z)));
-            }
-            for(int32 P=First;P<L.Panels.Num();++P)L.Panels[P].Transform=L.Panels[P].Transform*Frame;
+            // A rock follows the ground it stands on, so a slope shows more of it on the low side.
+            FERLayoutBoulder Rock=F.Rocks[I];const FVector At=Point(Rock.Center);
+            Rock.Center=FVector(At.X,At.Y,Ground(L,FVector2D(At))+Rock.Center.Z);
+            Rock.Yaw=float(Frame.GetRotation().Rotator().Yaw)+(Flip ? -Rock.Yaw:Rock.Yaw);Rock.Reflected=Flip;
+            L.Boulders.Add(Rock);
         }
         if(F.bLadder)L.Ladders.Add({FTransform(Frame.GetRotation(),Point(F.LadderFoot)),F.Deck+5,F.Deck});
         if(!F.Entry.IsEmpty()){TArray<FVector> Path;for(const auto& P:F.Entry)Path.Add(Point(P));L.RoomAccessRoutes.Add(MoveTemp(Path));}
@@ -254,7 +357,9 @@ void EnrichOpenGround(int32 Seed,FERProceduralLayout& L,const FERCellSettings& C
     // The largest pair is about 0.3M cells: stop while one more still fits the layout's storage.
     const int64 CellRoom=SharedCellRoom(L);
     auto CellsAdded=[&]{int64 N=0;for(int32 P=L.GroundPanelStart;P<L.Panels.Num();++P)N+=PanelCellCount(L.Panels[P]);return N;};
-    int32 Pairs=0,Lookouts=0,Compounds=0,Spots=0,Crowded=0,Steep=0,Widest=0;bool Dirty=true;
+    int32 Pairs=0,Lookouts=0,Compounds=0,Terraces=0,Boulders=0,Spots=0,Crowded=0,Steep=0,Widest=0;bool Dirty=true;
+    // Rocks belong to natural ground: often where a template has terrain, seldom between its houses.
+    const uint32 RockShare=!Graded ? 0u:(!L.Houses.IsEmpty() || !L.TownBuildings.IsEmpty()) ? 2u:6u;
     for(int32 Guard=0;Guard<2500 && Pairs<Budget && L.Panels.Num()<3000;++Guard)
     {
         if(Dirty){if(CellsAdded()+400000>CellRoom)break;Measure();Dirty=false;}
@@ -273,12 +378,22 @@ void EnrichOpenGround(int32 Seed,FERProceduralLayout& L,const FERCellSettings& C
             if(Best%NX+DX>=0 && Best%NX+DX<NX && Best/NX+DY>=0 && Best/NX+DY<NY)Tried[Best+DY*NX+DX]=1;
         const FVector2D P=Center(Best%NX,Best/NX);
         double Nearest=TNumericLimits<double>::Max();for(const auto& Start:Starts)Nearest=FMath::Min(Nearest,FVector2D::Distance(P,FVector2D(Start)));
+        // The large kinds take turns, the one built least going first; a cover group fits anywhere.
+        const uint32 Pick=HashCombineFast(uint32(Seed),uint32(Pairs)*0x9e3779b9u+0x4f50454eu);
         TArray<int32> Kinds;
-        const bool First=Lookouts<=Compounds,Tower=Open[Best]>=5 && Lookouts<2 && Nearest>=LookoutReach;
-        if(First && Tower)Kinds.Add(0);
-        if(Open[Best]>=6 && Compounds<2)Kinds.Add(1);
-        if(!First && Tower)Kinds.Add(0);
-        Kinds.Add(2);
+        if(L.RockyCoverOnly)Kinds.Add(4);
+        else
+        {
+            if(Open[Best]>=5 && Lookouts<2 && Nearest>=LookoutReach)Kinds.Add(0);
+            if(Open[Best]>=6 && Compounds<2)Kinds.Add(1);
+            if(Open[Best]>=5 && Terraces<2 && Nearest>=1200)Kinds.Add(3);
+            // Where the ground is natural and not between houses, rocks are a kind of their own.
+            if(RockShare>=6 && Boulders<3)Kinds.Add(4);
+            auto Count=[&](int32 Kind){return Kind==0 ? Lookouts:Kind==1 ? Compounds:Kind==3 ? Terraces:Boulders;};
+            Kinds.StableSort([&](int32 A,int32 B){return Count(A)!=Count(B) ? Count(A)<Count(B):(A+Pick)%5u<(B+Pick)%5u;});
+            if((Pick>>12)%10u<RockShare && !Kinds.Contains(4))Kinds.Add(4);
+            Kinds.Add(2);
+        }
         // The slit, the firing step and the corner face the middle of the arena.
         const FVector2D In=(-P).GetSafeNormal();
         int32 Facing=0;double Dot=-2;
@@ -287,15 +402,14 @@ void EnrichOpenGround(int32 Seed,FERProceduralLayout& L,const FERCellSettings& C
         for(int32 K=0;K<Kinds.Num() && !Built;++K)for(int32 Turn=0;Turn<4 && !Built;++Turn)
         {
             const int32 Q=(Facing+(Turn==0 ? 0:Turn==1 ? 1:Turn==2 ? 3:2))%4;
-            const uint32 Pick=HashCombineFast(uint32(Seed),uint32(Pairs)*0x9e3779b9u+0x4f50454eu);
-            const FVector2D Size=Kinds[K]==0 ? FVector2D(250,200):Kinds[K]==1 ? FVector2D(350,300):FVector2D(150,170);
+            const FVector2D Size=Kinds[K]==0 ? FVector2D(250,200):Kinds[K]==1 ? FVector2D(350,300):Kinds[K]==3 ? FVector2D(300,250):Kinds[K]==4 ? FVector2D(240,180):FVector2D(150,170);
             const FVector2D Half=(Q%2) ? FVector2D(Size.Y,Size.X):Size,Reach=Half+FVector2D(Margin);
             const FVector2D MateP=Mirror ? FVector2D(P.X,-P.Y):-P;
             if(!Free(P-Reach,P+Reach) || !Free(MateP-Reach,MateP+Reach) || P.Y+Reach.Y>MateP.Y-Reach.Y){++Crowded;continue;}
             double Base=0,Low=0,MateBase=0,MateLow=0;
             if(Graded){Level(P,Half,Base,Low);Level(MateP,Half,MateBase,MateLow);}
             const float Sink=Graded ? float(FMath::Max(Base-Low,MateBase-MateLow))+40:0.f;
-            const FFeature F=Kinds[K]==0 ? Lookout(Style,(Pick&1u)!=0,Sink,Cells.WoodDepth):Kinds[K]==1 ? Compound(Style,Sink,Cells.WoodDepth):Cluster(Style,(Pick&2u)!=0,Sink);
+            const FFeature F=Kinds[K]==0 ? Lookout(Style,(Pick&1u)!=0,Sink,Cells.WoodDepth):Kinds[K]==1 ? Compound(Style,Sink,Cells.WoodDepth):Kinds[K]==3 ? Terrace(Style,Sink):Kinds[K]==4 ? Outcrop(Pick):Cluster(Style,(Pick&2u)!=0,Sink);
             if(Sink-40>F.Slope){++Steep;continue;}
             const FTransform Frame(FRotator(0,Q*90.,0),FVector(P,Base));
             const FTransform MateFrame(FRotator(0,Mirror ? -Q*90.:Q*90.+180,0),FVector(MateP,MateBase));
@@ -311,7 +425,7 @@ void EnrichOpenGround(int32 Seed,FERProceduralLayout& L,const FERCellSettings& C
             }
             Mark(Blocked,P-Half,P+Half);Mark(Blocked,MateP-Half,MateP+Half);
             L.FeatureNames.AddUnique(F.Name);++L.GroundFeatures;++Pairs;Built=true;Dirty=true;
-            if(Kinds[K]==0)++Lookouts;else if(Kinds[K]==1)++Compounds;
+            if(Kinds[K]==0)++Lookouts;else if(Kinds[K]==1)++Compounds;else if(Kinds[K]==3)++Terraces;else if(Kinds[K]==4)++Boulders;
         }
     }
     // Boarded breaches: a door-sized gap through a builder's masonry wall, closed by timber boards.
@@ -383,6 +497,184 @@ void EnrichOpenGround(int32 Seed,FERProceduralLayout& L,const FERCellSettings& C
         Cuts.Add(Point);Cuts.Add(Mate);++Breaches;++L.GroundFeatures;
         L.FeatureNames.AddUnique(TEXT("Ground.BoardedBreach"));
     }
-    UE_LOG(LogTemp,Display,TEXT("ER_OPEN_GROUND seed=%d grid=%dx%d pairs=%d/%d lookouts=%d compounds=%d breaches=%d spots=%d widest_m=%d crowded=%d steep=%d"),Seed,NX,NY,Pairs,Budget,Lookouts,Compounds,Breaches,Spots,Widest,Crowded,Steep);
+    // Upper levels: a roof slab of the builder that nothing reaches yet gets a ladder up its wall,
+    // away from the routes where it can. Under open sky that makes a roof terrace. Under a ceiling
+    // it makes an upper room: a doorway is cut at the head of the ladder and the glazed plates on
+    // its walls are cut open as windows. Neither may overlook a start.
+    struct FRoof{FBox Box;int32 Group;};
+    TArray<FRoof> Roofs;
+    for(int32 I=0;I<L.GroundFixedStart;++I)
+    {
+        const auto& P=L.FixedPieces[I];
+        const FTransform Frame(P.Transform.GetRotation(),P.Transform.GetLocation());
+        if(!P.Roof || P.Mesh || P.MeshCollision || P.VisualOnly || !Aligned(Frame.GetRotation()))continue;
+        const FVector Half=P.Transform.GetScale3D()*50;
+        const FBox Box=FBox(-Half,Half).TransformBy(Frame);
+        const double Rise=Box.Max.Z-Ground(L,FVector2D(Box.GetCenter()));
+        if(Rise<250 || Rise>450 || Box.GetSize().Z>60 || FMath::Min(Box.GetSize().X,Box.GetSize().Y)<200)continue;
+        Roofs.Add({Box,Roofs.Num()});
+    }
+    // Slabs that touch at one height are one level.
+    for(bool Merged=true;Merged;)
+    {
+        Merged=false;
+        for(int32 I=0;I<Roofs.Num();++I)for(int32 J=I+1;J<Roofs.Num();++J)
+            if(Roofs[I].Group!=Roofs[J].Group && FMath::Abs(Roofs[I].Box.Max.Z-Roofs[J].Box.Max.Z)<1 && Roofs[I].Box.ExpandBy(FVector(5,5,0)).Intersect(Roofs[J].Box))
+            {Roofs[I].Group=Roofs[J].Group=FMath::Min(Roofs[I].Group,Roofs[J].Group);Merged=true;}
+    }
+    auto SymDir=[&](FVector D){return Mirror ? FVector(D.X,-D.Y,0):FVector(-D.X,-D.Y,0);};
+    auto SymBox=[&](const FBox& B){return FBox(ForceInit)+Sym(B.Min)+Sym(B.Max);};
+    auto Eye=[&](const ERLayoutQueries::FLayoutSolids& S,FVector P){for(const auto& Start:Starts)if(S.SightClear(Start+FVector(0,0,60),P))return true;return false;};
+    ERLayoutQueries::FLayoutSolids Now(L);
+    struct FClimb{FVector Edge,N,At,In;double Foot=0;bool Hidden=false,Door=false;FBox Hole;};
+    // A ladder on the wall below an edge point: open floor beside a route at its foot, a clear
+    // climb, a standing landing on the slab and, where a wall is in the way, a doorway to cut.
+    auto Climb=[&](FVector Edge,FVector N,double Top,FClimb& Out)
+    {
+        const FVector U(-N.Y,N.X,0),At=Edge+N*71,In=Edge-N*84;
+        const int32 X=FMath::FloorToInt32((At.X-Origin.X)/Cell),Y=FMath::FloorToInt32((At.Y-Origin.Y)/Cell);
+        if(X<4 || Y<4 || X>=NX-4 || Y>=NY-4 || Outside[Y*NX+X])return false;
+        for(const auto* Set:{&L.InaccessibleGround,&L.WarehouseBaseCourts,&L.PoolWater})
+            for(const auto& Box:*Set)if(Box.ExpandBy(FVector(100,100,10000)).IsInsideOrOn(At))return false;
+        bool Near=false;for(int32 DY=-4;DY<=4;++DY)for(int32 DX=-4;DX<=4;++DX)Near|=Lane[(Y+DY)*NX+X+DX]!=0;
+        for(const auto& Start:Starts)Near&=FVector::Dist2D(Start,At)>=1200;
+        if(!Near)return false;
+        const double Floor=Ground(L,FVector2D(At));double Foot=Floor;
+        for(const auto& S:Now.Solids)
+            if(S.bPawn && S.Bounds.Max.Z>Foot && S.Bounds.Max.Z<=Floor+40 && At.X>S.Bounds.Min.X-36 && At.X<S.Bounds.Max.X+36 && At.Y>S.Bounds.Min.Y-36 && At.Y<S.Bounds.Max.Y+36)Foot=S.Bounds.Max.Z;
+        if(Top-Foot<240 || !Now.PawnClear(FVector(At.X,At.Y,Foot+96),FVector(At.X,At.Y,Top+96)) ||
+           !Now.PawnClear(FVector(In.X,In.Y,Top+96),FVector(In.X,In.Y,Top+100)) || Now.PawnClear(FVector(In.X,In.Y,Top+96),FVector(In.X,In.Y,Top-40)) ||
+           Eye(Now,FVector(At.X,At.Y,Top+150)))return false;
+        // The wall behind the ladder is solid: it never stands across a doorway or a shop window.
+        for(float Side:{-45.f,0.f,45.f})for(float Z:{60.f,180.f})
+            if(Now.SightClear(At+U*Side+FVector(0,0,Foot+Z),Edge-N*60+U*Side+FVector(0,0,Foot+Z)))return false;
+        const FBox Rails=FBox(ForceInit)+(Edge+N*11.5+U*50+FVector(0,0,Foot+.5))+(Edge+N*20.5-U*50+FVector(0,0,Top+110));
+        for(const auto& S:Now.Solids)if(S.Bounds.Intersect(Rails) && S.Bounds.Overlap(Rails).GetSize().GetMin()>.5)return false;
+        Out.Edge=Edge;Out.N=N;Out.At=At;Out.In=In;Out.Foot=Foot;Out.Hidden=!Lane[Y*NX+X];
+        Out.Door=!Now.PawnClear(FVector(At.X,At.Y,Top+96),FVector(In.X,In.Y,Top+96));
+        Out.Hole=FBox(ForceInit)+(Edge-N*14-U*55+FVector(0,0,Top+.5))+(Edge+N*11+U*55+FVector(0,0,Top+210));
+        return !Out.Door || CarveFixed(L,Out.Hole,false);
+    };
+    int32 Uppers=0,UpperRooms=0;
+    const int32 UpperBudget=FMath::Clamp(FMath::RoundToInt32(Arena.X*Arena.Y/10000/1500),1,3);
+    for(int32 G=0;G<Roofs.Num() && Uppers<UpperBudget;++G)
+    {
+        if(Roofs[G].Group!=G)continue;
+        TArray<FBox> Slabs;FBox Bounds(ForceInit);double Area=0;int32 Largest=0;
+        for(const auto& Roof:Roofs)if(Roof.Group==G)
+        {
+            const int32 Index=Slabs.Add(Roof.Box);
+            if(Roof.Box.GetSize().X*Roof.Box.GetSize().Y>Slabs[Largest].GetSize().X*Slabs[Largest].GetSize().Y)Largest=Index;
+            Bounds+=Roof.Box;Area+=Roof.Box.GetSize().X*Roof.Box.GetSize().Y;
+        }
+        const FVector Mid=Bounds.GetCenter();const double Top=Bounds.Max.Z;
+        if(Area<200000 || Mid.Y>-1)continue;
+        // The mate level must exist: the same slabs under the layout's symmetry.
+        bool Paired=true;
+        for(const FBox& Slab:Slabs)Paired&=Roofs.ContainsByPredicate([&](const FRoof& Roof){return Roof.Box.GetCenter().Equals(Sym(Slab.GetCenter()),5) && Roof.Group!=G;});
+        const FBox Reach=Bounds.ExpandBy(FVector(60,60,0));
+        auto Above=[&](FVector P){return P.X>Reach.Min.X && P.X<Reach.Max.X && P.Y>Reach.Min.Y && P.Y<Reach.Max.Y && P.Z>Top-20 && P.Z<Top+220;};
+        bool Reached=false;
+        for(const auto& Ladder:L.Ladders)Reached|=Above(Ladder.Frame.TransformPositionNoScale(FVector(-100,0,Ladder.DeckHeight+10)));
+        for(const auto* Set:{&L.Routes,&L.StairRoutes,&L.RoomAccessRoutes,&L.RooftopRoutes,&L.RoofTransfers,&L.CrossingRoutes,&L.DistrictRoutes})
+            for(const auto& Path:*Set)for(const auto& P:Path)Reached|=Above(P);
+        for(const auto& Step:L.Steps)Reached|=Above(Step.GetLocation()+FVector(0,0,20));
+        const FVector Stand(Slabs[Largest].GetCenter().X,Slabs[Largest].GetCenter().Y,Top+96);
+        if(!Paired || Reached || !Now.PawnClear(Stand,Stand+FVector(0,0,4)))continue;
+        const bool Room=!Now.SightClear(Stand+FVector(0,0,30),Stand+FVector(0,0,1200));
+        // An open roof is a place to stand anywhere on it: none of it may see a start.
+        bool Exposed=false;
+        if(!Room)for(const FBox& Slab:Slabs)for(int32 Corner=0;Corner<5 && !Exposed;++Corner)
+        {
+            const FVector Inset=Slab.GetExtent()-FVector(60,60,0);
+            Exposed=Eye(Now,FVector(Slab.GetCenter().X+(Corner==4 ? 0:Corner&1 ? Inset.X:-Inset.X),Slab.GetCenter().Y+(Corner==4 ? 0:Corner&2 ? Inset.Y:-Inset.Y),Top+160));
+        }
+        if(Exposed)continue;
+        bool Done=false;
+        for(int32 Pass=0;Pass<2 && !Done;++Pass)for(int32 S=0;S<Slabs.Num() && !Done;++S)for(int32 E=0;E<4 && !Done;++E)for(int32 K=0;K<16 && !Done;++K)
+        {
+            const FBox Slab=Slabs[S];const int32 Q=(E+G)%4;
+            const FVector N(Q==0 ? 1:Q==2 ? -1:0,Q==1 ? 1:Q==3 ? -1:0,0),U(-N.Y,N.X,0),C=Slab.GetCenter(),H=Slab.GetExtent();
+            const double Out=FMath::Abs(N.X)*H.X+FMath::Abs(N.Y)*H.Y,Run=FMath::Abs(U.X)*H.X+FMath::Abs(U.Y)*H.Y,T=((K+1)/2)*((K%2)!=0 ? 100.:-100.);
+            if(FMath::Abs(T)>Run-80)break;
+            const FVector Edge=FVector(C.X,C.Y,0)+N*Out+U*T;
+            if(Slabs.ContainsByPredicate([&](const FBox& Other){return Other.IsInsideXY(Edge+N*30);}))continue;
+            FClimb A,B;
+            if(!Climb(Edge,N,Top,A) || (Pass==0 && !A.Hidden) || !Climb(Sym(Edge),SymDir(N),Top,B))continue;
+            const TArray<FERLayoutFixedPiece> Saved=L.FixedPieces;const int32 SavedStart=L.GroundFixedStart;
+            if(A.Door)CarveFixed(L,A.Hole,true);
+            if(B.Door)CarveFixed(L,B.Hole,true);
+            TArray<FVector> Windows;
+            if(Room)
+            {
+                // A glazed plate on a wall of this level is a window: its glass footprint is cut through
+                // the wall and the plate behind it, which leaves the plate as the frame.
+                TArray<FBox> Panes;TArray<FVector> Outward;
+                for(int32 I=0;I<L.GroundFixedStart;++I)
+                {
+                    const auto& P=L.FixedPieces[I];
+                    const FTransform Frame(P.Transform.GetRotation(),P.Transform.GetLocation());
+                    if(P.Material!=M::Glass || P.Mesh || P.MeshCollision || !Aligned(Frame.GetRotation()))continue;
+                    const FVector Half=P.Transform.GetScale3D()*50;
+                    const FBox Pane=FBox(-Half,Half).TransformBy(Frame);
+                    const bool AlongX=Pane.GetSize().X>Pane.GetSize().Y;
+                    if(Pane.Min.Z<Top+30 || Pane.Max.Z>Top+300 || FMath::Min(Pane.GetSize().X,Pane.GetSize().Y)>12)continue;
+                    for(const FBox& Storey:Slabs)if(Storey.ExpandBy(FVector(30,30,400)).Intersect(Pane))
+                    {
+                        const int32 Axis=AlongX ? 1:0;FVector Side=FVector::ZeroVector;Side[Axis]=Pane.GetCenter()[Axis]>Storey.GetCenter()[Axis] ? 1:-1;
+                        Panes.Add(Pane);Outward.Add(Side);break;
+                    }
+                }
+                for(int32 I=0;I<Panes.Num();++I)
+                {
+                    const FBox Hole=Panes[I].ExpandBy(Outward[I].GetAbs()*45),MateHole=SymBox(Hole);
+                    if(Eye(Now,Panes[I].GetCenter()+Outward[I]*30) || !CarveFixed(L,Hole,false) || !CarveFixed(L,MateHole,false))continue;
+                    CarveFixed(L,Hole,true);CarveFixed(L,MateHole,true);
+                    Windows.Add(FVector(Panes[I].GetCenter().X,Panes[I].GetCenter().Y,Top)-Outward[I]*30);
+                }
+            }
+            const ERLayoutQueries::FLayoutSolids After(L);
+            auto Through=[&](const FClimb& Spot){return After.PawnClear(FVector(Spot.At.X,Spot.At.Y,Top+96),FVector(Spot.In.X,Spot.In.Y,Top+96));};
+            if(!Through(A) || !Through(B)){L.FixedPieces=Saved;L.GroundFixedStart=SavedStart;continue;}
+            for(const auto* Spot:{&A,&B})
+            {
+                const FTransform Frame(FRotator(0,FMath::RadiansToDegrees(FMath::Atan2(Spot->N.Y,Spot->N.X)),0),FVector(Spot->Edge.X,Spot->Edge.Y,Spot->Foot)+Spot->N*16);
+                const double Deck=Top-Spot->Foot;
+                auto Metal=[&](FVector Min,FVector Max)
+                {
+                    FERLayoutFixedPiece Piece;Piece.Material=M::Metal;
+                    Piece.Transform=FTransform(Frame.GetRotation(),Frame.TransformPositionNoScale((Min+Max)*.5),(Max-Min)/100);L.FixedPieces.Add(Piece);
+                };
+                for(float Side:{-45.f,45.f})Metal({-4,Side-4,0},{4,Side+4,Deck+110});
+                for(double Z=25;Z<Deck;Z+=25)Metal({-3,-41,Z-3},{3,41,Z+3});
+                L.Ladders.Add({Frame,float(Deck+5),float(Deck)});
+                // Furniture keeps clear of the foot of the ladder.
+                const FVector Foot(Spot->At.X,Spot->At.Y,Spot->Foot);
+                for(auto& Space:L.Interiors)
+                    if(FBox(FVector(-Space.Half-FVector2D(40),-50),FVector(Space.Half+FVector2D(40),200)).IsInsideOrOn(Space.Frame.InverseTransformPositionNoScale(Foot)))Space.Doors.Add(Foot);
+            }
+            if(Room)for(const FBox& Part:Slabs)
+            {
+                const FVector SC=Part.GetCenter(),SH=Part.GetExtent();
+                if(FMath::Min(SH.X,SH.Y)<150)continue;
+                FERLayoutInterior Space;Space.Frame=FTransform(FVector(SC.X,SC.Y,Top));Space.Half=FVector2D(SH.X-15,SH.Y-15);
+                Space.Height=280;Space.Kind=EERInteriorKind::BackRoom;Space.Walls=0;
+                for(int32 W=0;W<4;++W)
+                {
+                    const FVector D(W==1 ? 1:W==3 ? -1:0,W==0 ? -1:W==2 ? 1:0,0);
+                    const double Far=FMath::Abs(D.X)*SH.X+FMath::Abs(D.Y)*SH.Y;
+                    if(!After.PawnClear(FVector(SC.X,SC.Y,Top+96),FVector(SC.X,SC.Y,Top+96)+D*(Far+40)))Space.Walls|=uint8(1<<W);
+                    else Space.Doors.Add(FVector(SC.X,SC.Y,Top)+D*Far);
+                }
+                Space.Doors.Add(FVector(A.In.X,A.In.Y,Top));Space.Doors.Add(FVector(A.Edge.X,A.Edge.Y,Top));
+                for(const auto& Window:Windows)if(Part.ExpandBy(FVector(40,40,400)).IsInsideOrOn(Window))Space.Doors.Add(Window);
+                AddInteriorPair(L,MoveTemp(Space),Mirror);
+            }
+            L.FeatureNames.AddUnique(Room ? TEXT("Ground.UpperRoom"):TEXT("Ground.RoofAccess"));
+            ++L.GroundFeatures;++Uppers;UpperRooms+=Room ? 1:0;Done=true;
+            Now=ERLayoutQueries::FLayoutSolids(L);
+        }
+    }
+    UE_LOG(LogTemp,Display,TEXT("ER_OPEN_GROUND seed=%d grid=%dx%d pairs=%d/%d lookouts=%d compounds=%d terraces=%d boulders=%d breaches=%d uppers=%d rooms=%d spots=%d widest_m=%d crowded=%d steep=%d"),Seed,NX,NY,Pairs,Budget,Lookouts,Compounds,Terraces,Boulders,Breaches,Uppers,UpperRooms,Spots,Widest,Crowded,Steep);
 }
 }

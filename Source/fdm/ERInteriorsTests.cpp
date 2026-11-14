@@ -10,7 +10,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERInteriorsTest,"EclipseRecoil.Maps.Interiors"
 bool FERInteriorsTest::RunTest(const FString&)
 {
     FERBlockRoomConfig B;
-    for(const TCHAR* Id:{TEXT("Town"),TEXT("Rooms"),TEXT("CentralBuilding"),TEXT("Village"),TEXT("FireTraining"),TEXT("MiddleEasternAlleys")})
+    for(const TCHAR* Id:{TEXT("Town"),TEXT("Rooms"),TEXT("CentralBuilding"),TEXT("Village"),TEXT("FireTraining"),TEXT("MiddleEasternAlleys"),TEXT("Rocky")})
     {
         const bool Declares=FString(Id)==TEXT("Town") || FString(Id)==TEXT("Rooms") || FString(Id)==TEXT("CentralBuilding");
         const bool Slow=FString(Id)==TEXT("MiddleEasternAlleys");
@@ -37,6 +37,7 @@ bool FERInteriorsTest::RunTest(const FString&)
             FERProceduralLayout Kit;
             for(int32 P=FMath::Max(0,L.GroundPanelStart);P<L.Panels.Num();++P)Kit.Panels.Add(L.Panels[P]);
             for(int32 P=FMath::Max(0,L.GroundFixedStart);P<L.FixedPieces.Num();++P)Kit.FixedPieces.Add(L.FixedPieces[P]);
+            Kit.Boulders=L.Boulders;
             const ERLayoutQueries::FLayoutSolids Solids(Kit);
             TArray<TArray<FVector>> Paths=L.Routes;
             Paths.Append(L.SpawnExitRoutes);Paths.Append(L.StairRoutes);Paths.Append(L.RoomAccessRoutes);Paths.Append(L.CrossingRoutes);Paths.Append(L.GroundRoutes);
@@ -64,6 +65,42 @@ bool FERInteriorsTest::RunTest(const FString&)
                 const FBox Box=FBox(-Half,Half).TransformBy(FTransform(Piece.Transform.GetRotation(),Piece.Transform.GetLocation()));
                 Built.Add({Box.GetCenter(),Box.GetSize(),Piece.Material});
             }
+            // A boulder is a closed solid facing outward. The box that layout queries see through it lies
+            // inside the rock, and the box that stops a pawn holds all of it.
+            bool Rocks=true;
+            for(const auto& Rock:L.Boulders)
+            {
+                TArray<FVector> Points;ERProcedural::BoulderTriangles(Rock,Points);
+                const FTransform Frame(FRotator(0,Rock.Yaw,0),Rock.Center);
+                TMap<FIntVector,int32> Edges;
+                auto Key=[](FVector Q){return FIntVector(FMath::RoundToInt32(Q.X*10),FMath::RoundToInt32(Q.Y*10),FMath::RoundToInt32(Q.Z*10));};
+                TMap<FIntVector,int32> Ids;
+                auto Vertex=[&](FVector Q){const FIntVector Slot=Key(Q);if(const int32* Known=Ids.Find(Slot))return *Known;const int32 New=Ids.Num();Ids.Add(Slot,New);return New;};
+                Rocks&=Points.Num()==240;
+                for(int32 Tri=0;Tri+2<Points.Num();Tri+=3)
+                {
+                    const FVector V0=Points[Tri],V1=Points[Tri+1],V2=Points[Tri+2],Normal=FVector::CrossProduct(V1-V0,V2-V0).GetSafeNormal();
+                    Rocks&=FVector::DotProduct(Normal,(V0+V1+V2)/3-Rock.Center)>0;
+                    for(int32 Corner=0;Corner<8;++Corner)
+                    {
+                        const FVector Inner=Frame.TransformPositionNoScale(Rock.Radii*.4*FVector(Corner&1 ? 1:-1,Corner&2 ? 1:-1,Corner&4 ? 1:-1));
+                        Rocks&=FVector::DotProduct(Normal,Inner-V0)<0;
+                    }
+                    const int32 Ia=Vertex(V0),Ib=Vertex(V1),Ic=Vertex(V2);
+                    for(const FIntPoint& Edge:{FIntPoint(Ia,Ib),FIntPoint(Ib,Ic),FIntPoint(Ic,Ia)})++Edges.FindOrAdd(FIntVector(Edge.X,Edge.Y,0));
+                    for(const FVector& Point:{V0,V1,V2})
+                    {
+                        const FVector Local=Frame.InverseTransformPositionNoScale(Point);
+                        Rocks&=FMath::Abs(Local.X)<=Rock.Radii.X*1.1+.1 && FMath::Abs(Local.Y)<=Rock.Radii.Y*1.1+.1 &&
+                            Local.Z<=Rock.Radii.Z*ERProcedural::BoulderTop+.1 && Local.Z>=-Rock.Radii.Z*1.1-.1;
+                    }
+                }
+                // Closed and consistently wound: every directed edge once, with its reverse.
+                for(const auto& Edge:Edges)Rocks&=Edge.Value==1 && Edges.Contains(FIntVector(Edge.Key.Y,Edge.Key.X,0));
+            }
+            TestTrue(*(Case+TEXT(": boulders are closed rocks around their sight box and inside their pawn box")),Rocks);
+            // A boulder's mate is the same rock under the layout's symmetry.
+            for(const auto& Rock:L.Boulders)Built.Add({Rock.Center,Rock.Radii,EERBlockMaterial::Stone});
             bool Mated=true;
             for(const auto& A:Built)
                 Mated&=Built.ContainsByPredicate([&](const FBuilt& O){return O.Material==A.Material && O.Size.Equals(A.Size,1) &&

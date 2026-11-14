@@ -55,6 +55,7 @@ does not affect bot vision. Stationary targets keep team, skin and start across 
 | Walk (Shift) / run / sprint | 7.5 / 14 / 25 km/h |
 | Crouch / crawl / posture transition | 150 / 82.5 / 67.5 cm/s |
 | Ladder, light item / heavy weapon stowed | 216 / 270 cm/s |
+| Rock climbing | 144 cm/s, two thirds of the slower ladder speed |
 | Stamina | 15s of sprint, 20s full recovery from empty, also while running |
 | Auto step / vault / climb | 30 / 80 / 150 cm above current feet |
 | Crouch / prone transition | 0.4s / 1.1s |
@@ -83,6 +84,12 @@ weapons stow when their forward reach meets a nearby usable ladder, allowing
 the approach before attachment, and return once clear of the ladder. Walls in front of
 the ladder prevent this approach stow. Rungs must physically survive. On entry,
 the capsule sweeps toward the rung line at a bounded speed before climbing.
+
+Rocky rock climbing uses custom movement mode 4. Hold Space and move towards a
+steep upward-facing rock surface to attach. W/S ascends or descends, and releasing
+Space lets go. Walkable grades use normal movement. Vertical or overhanging
+faces and the arena boundary are excluded. All equipment stays stowed while
+climbing, including pistols, knives and grenades.
 
 Traversal uses `UERMovement` and saved moves. `IA_Look` scalar is 0.18. Camera bob is
 cosmetic. FPS arms, weapon and muzzle flash render as FirstPerson primitives.

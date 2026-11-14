@@ -8,7 +8,7 @@ UENUM(BlueprintType)
 enum class EERTemplateSymmetry : uint8 { None, HalfTurn, Mirror };
 
 UENUM(BlueprintType)
-enum class EERMapArchetype : uint8 { LegacyAssembly, CentralBuilding, MiddleEasternAlleys, FireTraining, Rooms, Village, UrbanTown };
+enum class EERMapArchetype : uint8 { LegacyAssembly, CentralBuilding, MiddleEasternAlleys, FireTraining, Rooms, Village, UrbanTown, Rocky };
 
 // Urban loop and through-buildings; upper storeys are closed shelter volumes.
 USTRUCT(BlueprintType)
@@ -336,7 +336,7 @@ class FDM_API UERMapTemplate : public UDataAsset
 {
     GENERATED_BODY()
 public:
-    UFUNCTION(BlueprintCallable, Category="Template") bool ValidateLayout(int32 Seed=42) const;
+    UFUNCTION(BlueprintCallable, Category="Template") bool ValidateLayout(int32 Seed=42,int32 ExpectedTeamSize=0) const;
     UFUNCTION(BlueprintCallable, Category="Template|Maintenance") static bool PrepareAlleyHouseCollision(class UStaticMesh* Mesh);
     // Warehouse sheets collide exactly as drawn (two-sided, complex as simple).
     UFUNCTION(BlueprintCallable, Category="Template|Maintenance") static bool PrepareWarehouseCollision(class UStaticMesh* Mesh);

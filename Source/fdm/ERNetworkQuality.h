@@ -3,8 +3,8 @@
 
 namespace ERNetworkProtocol
 {
-// Match mode voting, skull actors and replicated skull counts.
-constexpr uint32 Version=2;
+// Rock climbing movement mode on Rocky.
+constexpr uint32 Version=3;
 inline FString BuildSignature(const FString& Build){return FString::Printf(TEXT("%s-net%u"),*Build,Version);}
 }
 

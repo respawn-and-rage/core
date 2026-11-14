@@ -6,14 +6,14 @@ namespace ERLayoutQueries
 {
 struct FLayoutSolids
 {
-    struct FSolid{FTransform Frame;FVector Half;FBox Bounds;bool bPawn,bSight;};
+    struct FSolid{FTransform Frame;FVector Half;FBox Bounds;bool bPawn,bSight,bWalkableTop;};
     TArray<FSolid> Solids;
     TArray<FVector> Triangles;
     int32 Unknown=0;
-    void Add(const FQuat& Rotation,FVector Center,FVector Size,bool Pawn,bool Sight)
+    void Add(const FQuat& Rotation,FVector Center,FVector Size,bool Pawn,bool Sight,bool WalkableTop=true)
     {
         const FTransform Frame(Rotation,Center);const FVector Half=Size*.5;
-        Solids.Add({Frame,Half,FBox(-Half,Half).TransformBy(Frame),Pawn,Sight});
+        Solids.Add({Frame,Half,FBox(-Half,Half).TransformBy(Frame),Pawn,Sight,WalkableTop});
     }
     explicit FLayoutSolids(const FERProceduralLayout& L):FLayoutSolids(L,L.Panels){}
     FLayoutSolids(const FERProceduralLayout& L,const TArray<FERCellPanelDesc>& Panels,bool VisibleOnly=false)
@@ -41,6 +41,23 @@ struct FLayoutSolids
                 if(P.Holes.ContainsByPredicate([&](const FBox2D& H){return H.IsInside(Mid);}))continue;
                 Add(P.Transform.GetRotation(),P.Transform.TransformPosition({Mid.X,P.Size.Y*.5,Mid.Y}),{X[I]-X[I-1],P.Size.Y,Z[J]-Z[J-1]},true,Sight);
             }
+        }
+        // A boulder blocks a pawn over the box around it and a line only through the box inside it,
+        // so a layout query can never count on rock that is not there.
+        for(const auto& B:L.Boulders)
+        {
+            const FQuat Turn(FRotator(0,B.Yaw,0));
+            const double Top=B.Radii.Z*ERProcedural::BoulderTop,Bottom=-B.Radii.Z*1.1;
+            Add(Turn,B.Center+FVector(0,0,(Top+Bottom)*.5),FVector(B.Radii.X*2.2,B.Radii.Y*2.2,Top-Bottom),true,false);
+            Add(Turn,B.Center,B.Radii*.8,true,true);
+        }
+        // A crag stops a pawn over the box that holds its skin and a line through its whole core.
+        for(const auto& C:L.Crags)
+        {
+            const FQuat Turn(FRotator(0,C.Yaw,0));
+            const double Reach=ERProcedural::CragReach(C),Peak=ERProcedural::CragPeak,Drop=ERProcedural::CragArchDrop(C);
+            Add(Turn,C.Center+FVector(0,0,(Peak-Drop)*.5),FVector((C.Half.X+Reach)*2,(C.Half.Y+Reach)*2,C.Half.Z*2+Peak+Drop),true,false,false);
+            Add(Turn,C.Center,ERProcedural::CragSightHalf(C)*2,false,true);
         }
         for(const auto& F:L.RoomShell)
         {

@@ -245,9 +245,10 @@ bool BuildTemplate(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERP
 }
 }
 
-bool UERMapTemplate::ValidateLayout(int32 Seed) const
+bool UERMapTemplate::ValidateLayout(int32 Seed,int32 ExpectedTeamSize) const
 {
-    FERProceduralConfig C;C.Seed=Seed;C.TemplateAsset=const_cast<UERMapTemplate*>(this);
+    if(ExpectedTeamSize<0 || ExpectedTeamSize>16)return false;
+    FERProceduralConfig C;C.Seed=Seed;C.ExpectedTeamSize=ExpectedTeamSize;C.TemplateAsset=const_cast<UERMapTemplate*>(this);
     FERBlockRoomConfig B;FERProceduralLayout L;return ERProcedural::Build(C,B,L);
 }
 

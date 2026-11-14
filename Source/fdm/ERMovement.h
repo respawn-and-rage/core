@@ -91,7 +91,9 @@ public:
     bool FindLedge(FVector& Destination, float& Height, double ApproachReach = 0.0) const;
     bool IsMantling() const { return MovementMode == MOVE_Custom && (CustomMovementMode == 1 || CustomMovementMode == 3); }
     bool IsOnLadder() const { return MovementMode == MOVE_Custom && CustomMovementMode == 2; }
-    bool IsTraversing() const { return IsMantling() || IsOnLadder(); }
+    static constexpr uint8 RockClimbMode=4;
+    bool IsRockClimbing() const { return MovementMode==MOVE_Custom && CustomMovementMode==RockClimbMode; }
+    bool IsTraversing() const { return IsMantling() || IsOnLadder() || IsRockClimbing(); }
     virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
     bool CanClimbLadder() const;
     bool IsWeaponAtLadder() const;
@@ -99,6 +101,7 @@ public:
     class AERLadder* FindLadder(bool Entry=false) const;
     float LadderSpeed() const;
     void PhysLadder(float DeltaTime,int32 Iterations);
+    FVector RockClimbInward=FVector::ZeroVector;
 // Saved moves restore this state when Unreal replays a corrected prediction.
     FVector TraversalStart = FVector::ZeroVector, TraversalEnd = FVector::ZeroVector;
     float TraversalElapsed = 0, TraversalDuration = 0;
@@ -116,6 +119,8 @@ private:
     bool bMeasuringFall=false;
     float FallFrameZ=0,FallFrameVelocityZ=0;
     double ServerTime() const;
+    bool FindRockClimbFace(const FVector& Inward,double Reach,FHitResult& Hit) const;
+    void PhysRockClimb(float DeltaTime,int32 Iterations);
     void UpdatePosture(float DeltaSeconds);
     void UpdateSprint(bool bMovementLocked = false);
 };

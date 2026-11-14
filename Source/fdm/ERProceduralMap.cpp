@@ -128,7 +128,7 @@ static bool BuildLevel(const FERProceduralConfig& C, const FERBlockRoomConfig& B
 bool ERProcedural::BuildGeometry(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERProceduralLayout& Out,const FERCellSettings& Cells)
 {
     if(C.TemplateAsset && C.TemplateAsset->Symmetry==EERTemplateSymmetry::Mirror &&
-       C.TemplateAsset->Archetype!=EERMapArchetype::LegacyAssembly &&
+       C.TemplateAsset->Archetype!=EERMapArchetype::LegacyAssembly && C.TemplateAsset->Archetype!=EERMapArchetype::Rocky &&
        (C.TemplateAsset->Archetype!=EERMapArchetype::CentralBuilding || !C.TemplateAsset->CentralBuilding.CircularTerrain))
     {
         TStrongObjectPtr<UERMapTemplate> Canonical(DuplicateObject<UERMapTemplate>(C.TemplateAsset,GetTransientPackage()));
@@ -142,6 +142,7 @@ bool ERProcedural::BuildGeometry(const FERProceduralConfig& C,const FERBlockRoom
         Out=MoveTemp(Next);return true;
     }
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::UrbanTown) return BuildUrbanTown(C,B,Out,Cells);
+    if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::Rocky) return BuildRocky(C,B,Out,Cells);
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::Village) return BuildVillage(C,B,Out,Cells);
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::Rooms) return BuildRooms(C,B,Out,Cells);
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::FireTraining)
@@ -210,7 +211,9 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
         const double Start=FPlatformTime::Seconds();
         FERProceduralLayout Plain=Layout;
         EnrichOpenGround(C.Seed,Layout,Cells);
-        if(C.ExpectedTeamSize>0 && !ERPlayability::InitialSpawnsOccluded(Layout))
+        const bool BlocksRockyTraversal=Layout.RockyCoverOnly && Layout.Boulders.Num()!=Plain.Boulders.Num() &&
+            !AuditTraversal(Layout).Passed();
+        if(BlocksRockyTraversal || (C.ExpectedTeamSize>0 && !ERPlayability::InitialSpawnsOccluded(Layout)))
         {
             UE_LOG(LogTemp,Warning,TEXT("ER_OPEN_GROUND_REVERTED seed=%d team=%d"),C.Seed,C.ExpectedTeamSize);
             Layout=MoveTemp(Plain);Layout.GroundPanelStart=Layout.Panels.Num();Layout.GroundFixedStart=Layout.FixedPieces.Num();Layout.GroundLadderStart=Layout.Ladders.Num();
@@ -249,22 +252,46 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
                     if(!BuildGeometry(Sized,B,Next,Cells)){Next={};break;}
                 }
             }
-            if(Recipe->Archetype==EERMapArchetype::UrbanTown)
+            if(Recipe->Archetype==EERMapArchetype::UrbanTown || Recipe->Archetype==EERMapArchetype::Rocky)
             {
                 // Fit NET ground area after sampling closed lots and boundary
-                // recesses. Physical door, street and cell widths stay fixed.
+                // recesses, or closed rock. Physical door, street and cell widths stay fixed.
+                const bool Rocky=Recipe->Archetype==EERMapArchetype::Rocky;
+                const double Snap=Rocky ? 200.:50.;
                 for(int32 Fit=0;Fit<12;++Fit)
                 {
                     const double Actual=PlayableAreaM2(Next),Target=TargetAreaM2(C.ExpectedTeamSize,C.TemplateAsset->Archetype);
                     if(Actual<=0 || FMath::Abs(Actual-Target)<=Target*.05)break;
                     const double Growth=FMath::Sqrt(Target/Actual);
-                    Recipe->SizingArena.X=FMath::GridSnap(Recipe->SizingArena.X*Growth,50.);
-                    Recipe->SizingArena.Y=FMath::GridSnap(Recipe->SizingArena.Y*Growth,50.);
-                    if(!BuildGeometry(Sized,B,Next,Cells)){Next={};break;}
+                    const FVector2D Before=Recipe->SizingArena;
+                    Recipe->SizingArena.X=FMath::GridSnap(Recipe->SizingArena.X*Growth,Snap);
+                    Recipe->SizingArena.Y=FMath::GridSnap(Recipe->SizingArena.Y*Growth,Snap);
+                    if(Rocky)
+                    {
+                        const double Diameter=FMath::Max(4800.,Recipe->SizingArena.X);
+                        Recipe->SizingArena={Diameter,Diameter};
+                    }
+                    // A coarse grid may hold the envelope where it is: the fit has nothing left to move.
+                    if(Recipe->SizingArena==Before)break;
+                    FERProceduralLayout Fitted;
+                    if(!BuildGeometry(Sized,B,Fitted,Cells))
+                    {
+                        if(!Rocky)Next={};
+                        break;
+                    }
+                    if(Rocky && FMath::Abs(PlayableAreaM2(Fitted)-Target)>=FMath::Abs(Actual-Target))break;
+                    Next=MoveTemp(Fitted);
                 }
             }
             if(C.TemplateAsset->Archetype!=EERMapArchetype::LegacyAssembly && FMath::Abs(PlayableAreaM2(Next)-TargetAreaM2(C.ExpectedTeamSize,C.TemplateAsset->Archetype))>TargetAreaM2(C.ExpectedTeamSize,C.TemplateAsset->Archetype)*.1+.01)continue;
-            if(!BuildSpawnZones(C.Seed,Next,Cells)){++SpawnRejected;continue;}
+            if(Next.RockyCoverOnly && RequestedZones>1)
+            {
+                FERProceduralLayout Zoned=Next;
+                if(BuildSpawnZones(C.Seed,Zoned,Cells) &&
+                    (Zoned.SpawnZones.Num()==2 || AuditTraversal(Zoned).Passed()))Next=MoveTemp(Zoned);
+                else if(!BuildSpawnZones(0,Next,Cells)){++SpawnRejected;continue;}
+            }
+            else if(!BuildSpawnZones(C.Seed,Next,Cells)){++SpawnRejected;continue;}
             if(!ERPlayability::InitialSpawnsOccluded(Next)){++SpawnRejected;continue;}
             const int32 Zones=Next.SpawnZones.Num()/2;
             if(Zones<RequestedZones && Attempt<7)
@@ -349,6 +376,14 @@ bool ERProcedural::ApplyMapTheme(const FERProceduralConfig& C,FERProceduralLayou
         if(!Panel.Skin.IsEmpty())Panel.InteriorSurface=VillageSkin ? P.Materials[uint8(Panel.Material)].Get():Panel.Surface;
     }
     L.GroundSurface=P.Grounds[Cosmetic.RandRange(0,P.Grounds.Num()-1)];
+    // Boulders show bare rock from the shared catalog: cracked and dry on sand, mossy elsewhere.
+    if(!L.Boulders.IsEmpty() || !L.Crags.IsEmpty())
+    {
+        L.BoulderSurface=P.Materials[uint8(EERBlockMaterial::Stone)].Get();
+        const FString GroundName=L.GroundSurface ? L.GroundSurface->GetName():FString();
+        const TCHAR* Rock=GroundName.Contains(TEXT("Sand")) || GroundName.Contains(TEXT("Cracked")) ? TEXT("GroundCracked01"):TEXT("RocksMossy01");
+        if(Shared && !L.RockyCoverOnly)for(const auto& Surface:Shared->Surfaces)if(Surface && Surface->GetName().Contains(Rock)){L.BoulderSurface=Surface.Get();break;}
+    }
     for(auto& Piece:L.FixedPieces)
     {
         const bool VillageScenery=Village && Piece.VisualOnly && Piece.Mesh &&
@@ -576,6 +611,18 @@ void AERProceduralMap::ConfigureFloors()
         Shell->Rename(*MakeUniqueObjectName(this,UDynamicMeshComponent::StaticClass(),TEXT("DeadRoomsShell")).ToString(),nullptr,REN_DontCreateRedirectors|REN_NonTransactional);
     }
     RoomsShell.Reset();
+    if(RidgeBedrock)
+    {
+        RemoveInstanceComponent(RidgeBedrock);RidgeBedrock->DestroyComponent();
+        RidgeBedrock->Rename(*MakeUniqueObjectName(this,UDynamicMeshComponent::StaticClass(),TEXT("DeadRidgeBedrock")).ToString(),nullptr,REN_DontCreateRedirectors|REN_NonTransactional);
+        RidgeBedrock=nullptr;
+    }
+    if(RockField)
+    {
+        RemoveInstanceComponent(RockField);RockField->DestroyComponent();
+        RockField->Rename(*MakeUniqueObjectName(this,UDynamicMeshComponent::StaticClass(),TEXT("DeadRockField")).ToString(),nullptr,REN_DontCreateRedirectors|REN_NonTransactional);
+        RockField=nullptr;
+    }
     if(AlleyTerrain)
     {
         RemoveInstanceComponent(AlleyTerrain);AlleyTerrain->DestroyComponent();
@@ -655,6 +702,7 @@ SIZE_T AERProceduralMap::GetLayoutBytes() const
         Bytes+=Stream.LowerBank.GetAllocatedSize()+Stream.UpperBank.GetAllocatedSize();
     Bytes+=Layout.VillageRingInner.GetAllocatedSize()+Layout.VillageRingOuter.GetAllocatedSize()+
         Layout.VillageWaterwayTerrainVertices.GetAllocatedSize()+Layout.VillageWaterwayTerrainFaces.GetAllocatedSize();
+    Bytes+=Layout.Crags.GetAllocatedSize()+Layout.Boulders.GetAllocatedSize()+Layout.TerrainHeights.GetAllocatedSize()+Layout.TerrainRockBase.GetAllocatedSize();
     Bytes+=Layout.Houses.GetAllocatedSize()+Layout.TerrainPads.GetAllocatedSize()+Layout.PoolWater.GetAllocatedSize()+Layout.Ladders.GetAllocatedSize()+Layout.DistrictTowers.GetAllocatedSize()+Layout.DistrictTowerHeights.GetAllocatedSize();
     for(const auto& House:Layout.Houses)
     {
@@ -663,7 +711,7 @@ SIZE_T AERProceduralMap::GetLayoutBytes() const
     }
     for(const auto& Route:Layout.RoofTransfers)Bytes+=Route.GetAllocatedSize();
     Bytes+=Layout.UnderpassRamps.GetAllocatedSize()+Layout.UnderpassBreaches.GetAllocatedSize()+Layout.LowCovers.GetAllocatedSize()+Layout.UnderpassRoute.GetAllocatedSize()+Layout.UnderpassApproach.GetAllocatedSize();
-    for(const auto* Routes:{&Layout.RooftopRoutes,&Layout.GroundRoutes,&Layout.DistrictRoutes})
+    for(const auto* Routes:{&Layout.RooftopRoutes,&Layout.GroundRoutes,&Layout.DistrictRoutes,&Layout.RockScrambles})
     {Bytes+=Routes->GetAllocatedSize();for(const auto& Route:*Routes)Bytes+=Route.GetAllocatedSize();}
     Bytes+=Layout.CrossingRoutes.GetAllocatedSize()+Layout.ClimbPoints.GetAllocatedSize();
     Bytes+=Layout.CoverSites.GetAllocatedSize()+Layout.Containers.GetAllocatedSize()+Layout.SecondaryStructures.GetAllocatedSize()+Layout.CoverAngles.GetAllocatedSize()+Layout.WallAccessFlights.GetAllocatedSize()+Layout.WallBridges.GetAllocatedSize();
@@ -681,6 +729,7 @@ void AERProceduralMap::ConfigureTemplateFloors()
     case EERMapArchetype::CentralBuilding:
     case EERMapArchetype::Village:
     case EERMapArchetype::UrbanTown:
+    case EERMapArchetype::Rocky:
     case EERMapArchetype::MiddleEasternAlleys:
     {
         const FString GroundName=GetNameSafe(Layout.GroundSurface);
@@ -693,7 +742,7 @@ void AERProceduralMap::ConfigureTemplateFloors()
             Tint=FLinearColor(.17f,.21f,.11f);
             HorizonSurface=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/EclipseRecoil/Art/OutdoorBackdrop/M_OutdoorGrass.M_OutdoorGrass"));
         }
-        else if(Template->Archetype==EERMapArchetype::MiddleEasternAlleys)Tint=FLinearColor(.39f,.29f,.17f);
+        else if(Template->Archetype==EERMapArchetype::MiddleEasternAlleys || GroundName.Contains(TEXT("Sand")))Tint=FLinearColor(.39f,.29f,.17f);
         OutdoorSky=EROutdoorBackdrop::Apply(*this,uint32(LayoutConfig.Seed),Tint,HorizonSurface,LayoutConfig.OutdoorLightingSeed);
         break;
     }
@@ -711,7 +760,28 @@ void AERProceduralMap::ConfigureTemplateFloors()
         AlleyTerrain->SetCanEverAffectNavigation(false);AlleyTerrain->SetDeferredCollisionUpdatesEnabled(true,false);
         AlleyTerrain->SetComplexAsSimpleCollisionEnabled(true,false);AlleyTerrain->SetCollisionProfileName(TEXT("BlockAll"));
         AlleyTerrain->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
-        AlleyTerrain->SetMaterial(0,Layout.GroundSurface);AlleyTerrain->RegisterComponent();if(Layout.CircularArena)ERProcedural::BuildCentralTerrain(AlleyTerrain,Layout);else if(Template->Archetype==EERMapArchetype::Village)ERProcedural::BuildVillageTerrain(AlleyTerrain,Layout);else ERProcedural::BuildAlleyTerrain(AlleyTerrain,Layout);
+        AlleyTerrain->SetMaterial(0,Layout.GroundSurface);AlleyTerrain->RegisterComponent();if(!Layout.TerrainHeights.IsEmpty())ERProcedural::BuildTerrainField(AlleyTerrain,Layout);else if(Layout.CircularArena)ERProcedural::BuildCentralTerrain(AlleyTerrain,Layout);else if(Template->Archetype==EERMapArchetype::Village)ERProcedural::BuildVillageTerrain(AlleyTerrain,Layout);else ERProcedural::BuildAlleyTerrain(AlleyTerrain,Layout);
+    }
+    if(!Layout.TerrainRockBase.IsEmpty())
+    {
+        RidgeBedrock=NewObject<UDynamicMeshComponent>(this,TEXT("RidgeBedrock"));
+        RidgeBedrock->SetMobility(EComponentMobility::Movable);RidgeBedrock->SetNetAddressable();
+        AddInstanceComponent(RidgeBedrock);RidgeBedrock->SetupAttachment(RootComponent);
+        RidgeBedrock->SetCanEverAffectNavigation(false);RidgeBedrock->SetDeferredCollisionUpdatesEnabled(true,false);
+        RidgeBedrock->SetComplexAsSimpleCollisionEnabled(true,false);RidgeBedrock->SetCollisionProfileName(TEXT("BlockAll"));
+        RidgeBedrock->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
+        RidgeBedrock->RegisterComponent();ERProcedural::BuildTerrainField(RidgeBedrock,Layout,true);
+    }
+    if(!Layout.Boulders.IsEmpty() || !Layout.Crags.IsEmpty())
+    {
+        // One mesh for every boulder and crag: what is seen is what blocks, for pawns and rounds alike.
+        RockField=NewObject<UDynamicMeshComponent>(this,TEXT("RockField"));AddInstanceComponent(RockField);
+        RockField->SetMobility(EComponentMobility::Movable);RockField->SetNetAddressable();RockField->SetupAttachment(RootComponent);
+        RockField->SetCanEverAffectNavigation(false);RockField->SetDeferredCollisionUpdatesEnabled(true,false);
+        RockField->SetComplexAsSimpleCollisionEnabled(true,false);RockField->SetCollisionProfileName(TEXT("BlockAll"));
+        RockField->SetTangentsType(EDynamicMeshComponentTangentsMode::AutoCalculated);
+        if(Layout.BoulderSurface)RockField->SetMaterial(0,Layout.BoulderSurface);
+        RockField->RegisterComponent();ERProcedural::BuildBoulders(RockField,Layout);
     }
     for(auto* Mesh:{TileFloors.Get(),WoodFloors.Get(),Ceilings.Get(),Stairs.Get()}){Mesh->ClearInstances();Mesh->SetStaticMesh(BlockMesh);}
     FixedCollision->SetStaticMesh(BlockMesh);
@@ -849,7 +919,7 @@ void AERProceduralMap::ConfigureTemplateFloors()
         auto* Ladder=GetWorld()->SpawnActor<AERLadder>(AERLadder::StaticClass(),Desc.Frame*GetActorTransform(),Params);
         if(Ladder){Ladder->Height=Desc.Height;Ladder->DeckHeight=Desc.DeckHeight;LadderActors.Add(Ladder);}
     }
-    if(HasAuthority() && Layout.Routes.Num()>1 && (Template->Archetype==EERMapArchetype::CentralBuilding || Template->Archetype==EERMapArchetype::MiddleEasternAlleys || Template->Archetype==EERMapArchetype::FireTraining || Template->Archetype==EERMapArchetype::Village || Template->Archetype==EERMapArchetype::UrbanTown || ClosedRooms))
+    if(HasAuthority() && Layout.Routes.Num()>1 && (Template->Archetype==EERMapArchetype::CentralBuilding || Template->Archetype==EERMapArchetype::MiddleEasternAlleys || Template->Archetype==EERMapArchetype::FireTraining || Template->Archetype==EERMapArchetype::Village || Template->Archetype==EERMapArchetype::UrbanTown || Template->Archetype==EERMapArchetype::Rocky || ClosedRooms))
     {
         // Crossing rules have different route lengths. Never leave saved
         // placeholder points at the origin or feed bots obsolete waypoints.
@@ -943,6 +1013,27 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
         H=HashCombine(H,FCrc::StrCrc32(P.Mesh ? *P.Mesh->GetPathName():TEXT("cube")));
         if(P.Mesh && P.Mesh->GetBodySetup())H=HashCombine(H,GetTypeHash(P.Mesh->GetBodySetup()->BodySetupGuid));
     }
+    for(const auto& B:Layout.Boulders)
+    {MixVector(B.Center);MixVector(B.Radii);H=HashCombine(H,GetTypeHash(B.Yaw));H=HashCombine(H,GetTypeHash(B.Shape));H=HashCombine(H,GetTypeHash(B.Reflected));}
+    for(const auto& Crag:Layout.Crags)
+    {
+        MixVector(Crag.Center);MixVector(Crag.Half);MixVector(FVector(Crag.Yaw,Crag.Skin,0));
+        H=HashCombine(H,GetTypeHash(Crag.Shape));H=HashCombine(H,GetTypeHash(Crag.Reflected));
+        H=HashCombine(H,GetTypeHash(Crag.Arch));
+    }
+    if(!Layout.TerrainHeights.IsEmpty())
+    {
+        H=HashCombine(H,GetTypeHash(Layout.TerrainColumns));MixVector(FVector(Layout.TerrainOrigin,Layout.TerrainCell));
+        H=HashCombine(H,FCrc::MemCrc32(Layout.TerrainHeights.GetData(),Layout.TerrainHeights.Num()*sizeof(int16)));
+        if(!Layout.TerrainRockBase.IsEmpty())
+            H=HashCombine(H,FCrc::MemCrc32(Layout.TerrainRockBase.GetData(),Layout.TerrainRockBase.Num()*sizeof(int16)));
+        for(const auto* Paths:{&Layout.RoomAccessRoutes,&Layout.StairRoutes,&Layout.CrossingRoutes})for(const auto& Route:*Paths)for(const auto& P:Route)MixVector(P);
+        if(Layout.RockyCoverOnly)
+            for(const auto* Paths:{&Layout.RooftopRoutes,&Layout.RockScrambles})for(const auto& Route:*Paths)for(const auto& P:Route)MixVector(P);
+        for(const auto& Ladder:Layout.Ladders){MixVector(Ladder.Frame.GetLocation());MixVector(Ladder.Frame.GetRotation().GetForwardVector());MixVector(FVector(Ladder.Height,Ladder.DeckHeight,0));}
+        for(const auto& Deck:Layout.ElevatedDecks){MixVector(Deck.Min);MixVector(Deck.Max);}
+    }
+    if(Layout.BoulderSurface)H=HashCombine(H,FCrc::StrCrc32(*Layout.BoulderSurface->GetPathName()));
     for(const auto* Starts:{&Layout.AlphaSpawns,&Layout.OmegaSpawns})for(const auto& P:*Starts){MixVector(P.GetLocation());MixVector(P.GetRotation().GetForwardVector());}
     for(const auto& Zone:Layout.SpawnZones)
     {
@@ -1007,6 +1098,17 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
         for(const auto& G:Layout.TownGates){MixVector(G.Frame.GetLocation());MixVector(FVector(G.Gap,G.Width,G.Angle));for(const auto& P:G.Passage)MixVector(P);}
     }
     return H;
+}
+
+bool AERProceduralMap::IsClimbableRock(const UPrimitiveComponent* Surface,const FVector& WorldPoint) const
+{
+    if(!IsMapReady() || !Layout.RockyCoverOnly || !Surface || (Surface!=RockField && Surface!=RidgeBedrock))
+        return false;
+
+    const FVector Local=GetActorTransform().InverseTransformPosition(WorldPoint);
+    // Keep the entire irregular boundary wall outside the climbable area.
+    const double InteriorRadius=Layout.ArenaSize.X*.5-550.;
+    return Local.SizeSquared2D()<FMath::Square(InteriorRadius);
 }
 
 float AERProceduralMap::WaterDepthAt(const FVector& WorldFeet) const

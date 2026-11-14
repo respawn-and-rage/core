@@ -20,7 +20,7 @@ TArray<FString> Templates()
     FString Filter;
     if(FParse::Value(FCommandLine::Get(),TEXT("ERMapPlanTemplates="),Filter,false))
     {TArray<FString> Ids;Filter.ParseIntoArray(Ids,TEXT(","));return Ids;}
-    return {TEXT("CentralBuilding"),TEXT("MiddleEasternAlleys"),TEXT("FireTraining"),TEXT("Rooms"),TEXT("Village"),TEXT("Town")};
+    return {TEXT("CentralBuilding"),TEXT("MiddleEasternAlleys"),TEXT("FireTraining"),TEXT("Rooms"),TEXT("Village"),TEXT("Town"),TEXT("Rocky")};
 }
 double RoomFloorAreaM2(const FERProceduralLayout& L)
 {
@@ -89,6 +89,16 @@ TSharedPtr<FJsonValue> Points(const TArray<FVector>& Path)
 TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralConfig& C,const FString& Id,int32 TeamSize,int32 Seed)
 {
     auto O=MakeShared<FJsonObject>();O->SetStringField(TEXT("template"),Id);O->SetNumberField(TEXT("team_size"),TeamSize);O->SetNumberField(TEXT("seed"),Seed);
+    if(Id==TEXT("Rocky"))
+    {
+        const TCHAR* Landform=L.FeatureNames.Contains(TEXT("RockDiagonalRidge")) ? TEXT("Dorsale diagonale"):
+            L.FeatureNames.Contains(TEXT("RockCentralMassif")) ? TEXT("Massiccio con cavità"):
+            L.FeatureNames.Contains(TEXT("RockBrokenPlateaus")) ? TEXT("Altopiani spezzati"):
+            L.FeatureNames.Contains(TEXT("RockTerracedBasin")) ? TEXT("Conca a gradoni"):
+            L.FeatureNames.Contains(TEXT("RockOffsetHills")) ? TEXT("Colline sfalsate"):
+            L.FeatureNames.Contains(TEXT("RockGully")) ? TEXT("Gola a S"):TEXT("Cresta alta");
+        O->SetStringField(TEXT("rocky_landform"),Landform);
+    }
     O->SetNumberField(TEXT("target_area_m2"),ERProcedural::TargetAreaM2(TeamSize,C.TemplateAsset->Archetype));O->SetNumberField(TEXT("area_m2"),ERProcedural::PlayableAreaM2(L));O->SetNumberField(TEXT("area_tolerance_percent"),10);
     O->SetBoolField(TEXT("circular"),L.CircularArena);O->SetBoolField(TEXT("central_hill"),L.CentralHill);
     O->SetField(TEXT("hill_center"),Vector(L.HillCenter));O->SetNumberField(TEXT("hill_height_m"),L.HillHeight/100);
@@ -134,7 +144,7 @@ TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralCon
             Corners.Add(Frame.TransformPosition({X ? Max.X:Min.X,Y ? Max.Y:Min.Y,Z ? Max.Z:Min.Z}));
         auto S=MakeShared<FJsonObject>();S->SetField(TEXT("corners"),Points(Corners));S->SetNumberField(TEXT("material"),Material);
         const FVector2D XY(Bounds.GetCenter());
-        const float Ground=L.GradedTerrain ? (L.CircularArena ? ERProcedural::CentralGroundHeight(L,XY):ERProcedural::AlleyGroundHeight(L,XY)):0;
+        const float Ground=ERProcedural::GroundHeight(L,XY);
         S->SetNumberField(TEXT("ground_z_m"),Ground/100);Solids.Add(MakeShared<FJsonValueObject>(S));
     };
     for(const auto& P:L.Panels)
@@ -149,6 +159,20 @@ TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralCon
             const FVector2D Mid((X[I-1]+X[I])*.5,(Z[J-1]+Z[J])*.5);bool Hole=false;for(const auto& H:P.Holes)Hole|=H.IsInside(Mid);
             if(!Hole)Box(P.Transform,{X[I-1],0,Z[J-1]},{X[I],P.Size.Y,Z[J]},uint8(P.Material));
         }
+    }
+    for(const auto& B:L.Boulders)Box(FTransform(FRotator(0,B.Yaw,0),B.Center),-B.Radii,FVector(B.Radii.X,B.Radii.Y,B.Radii.Z*ERProcedural::BoulderTop),int32(EERBlockMaterial::Stone));
+    for(const auto& Crag:L.Crags)
+        Box(FTransform(FRotator(0,Crag.Yaw,0),Crag.Center),-Crag.Half,Crag.Half,int32(EERBlockMaterial::Stone));
+    if(!L.TerrainHeights.IsEmpty())
+    {
+        TArray<TSharedPtr<FJsonValue>> Heights;
+        for(const int32 Height:L.TerrainHeights)Heights.Add(MakeShared<FJsonValueNumber>(Height/100.));
+        auto Terrain=MakeShared<FJsonObject>();
+        Terrain->SetField(TEXT("origin"),Vector(FVector(L.TerrainOrigin,0)));
+        Terrain->SetNumberField(TEXT("spacing"),L.TerrainCell/100.);
+        Terrain->SetNumberField(TEXT("columns"),L.TerrainColumns);
+        Terrain->SetArrayField(TEXT("heights"),Heights);
+        O->SetObjectField(TEXT("terrain_grid"),Terrain);
     }
     for(const auto& P:L.FixedPieces)if(!P.VisualOnly && !P.CollisionOnly)
         Box(FTransform(P.Transform.GetRotation(),P.Transform.GetLocation()),-P.Transform.GetScale3D()*50,P.Transform.GetScale3D()*50,uint8(P.Material));
@@ -174,12 +198,16 @@ TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralCon
     for(const auto& Polygon:L.InaccessibleGroundPolygons)Excluded.Add(Points(Polygon));
     for(const auto& B:L.InaccessibleGround)Excluded.Add(Points({{B.Min.X,B.Min.Y,0},{B.Max.X,B.Min.Y,0},{B.Max.X,B.Max.Y,0},{B.Min.X,B.Max.Y,0}}));
     O->SetArrayField(TEXT("inaccessible_ground"),Excluded);
-    O->SetNumberField(TEXT("gross_area_m2"),L.ArenaSize.X*L.ArenaSize.Y/10000.);
+    O->SetNumberField(TEXT("gross_area_m2"),L.ArenaSize.X*L.ArenaSize.Y*(L.CircularArena ? PI*.25:1.)/10000.);
     auto Paths=[&](const TArray<TArray<FVector>>& Set,const TCHAR* Kind)
     {for(const auto& Path:Set)if(Path.Num()>1){auto R=MakeShared<FJsonObject>();R->SetStringField(TEXT("kind"),Kind);R->SetField(TEXT("points"),Points(Path));Routes.Add(MakeShared<FJsonValueObject>(R));}};
-    if(Id==TEXT("Town"))Paths(L.RoomAccessRoutes,TEXT("passage"));
-    Paths(L.CrossingRoutes,TEXT("crossing"));Paths(L.DistrictRoutes,TEXT("crossing"));Paths(L.VillagePassages,TEXT("passage"));Paths(L.VillageSideBypasses,TEXT("flank"));
-    Paths(L.RooftopRoutes,TEXT("upper"));Paths(L.StairRoutes,TEXT("stairs"));
+    if(Id==TEXT("Town") || Id==TEXT("Rocky"))Paths(L.RoomAccessRoutes,TEXT("passage"));
+    Paths(L.CrossingRoutes,Id==TEXT("Rocky") ? TEXT("tunnel"):TEXT("crossing"));Paths(L.DistrictRoutes,TEXT("crossing"));Paths(L.VillagePassages,TEXT("passage"));Paths(L.VillageSideBypasses,TEXT("flank"));
+    Paths(L.RooftopRoutes,TEXT("upper"));Paths(L.StairRoutes,TEXT("stairs"));Paths(L.RockScrambles,TEXT("rock_shelf"));
+    if(L.FeatureNames.Contains(TEXT("RockCentralMassif")))
+        for(int32 Index=L.CrossingRoutes.Num();Index<L.GroundRoutes.Num();++Index)
+            Paths({L.GroundRoutes[Index]},TEXT("cave"));
+    if(L.FeatureNames.Contains(TEXT("RockGully")))Paths({L.GroundRoutes.Last()},TEXT("ford"));
     if(L.Rooms.Num()==4 && L.FeatureNames.Contains(TEXT("HallPassage")))Paths({L.RoomAccessRoutes.Last()},TEXT("connector"));
     if(!L.UnderpassRoute.IsEmpty())Paths({L.UnderpassRoute},TEXT("lower"));
     for(int32 Team=0;Team<2;++Team)for(const auto& S:Team ? L.OmegaSpawns:L.AlphaSpawns)
@@ -294,7 +322,15 @@ bool FERMapSizingTest::RunTest(const FString&)
         UE_LOG(LogTemp,Display,TEXT("ER_MAP_SIZING_VERIFIED template=%s team=%d seeds=%d"),*Id,TeamSize,Cases.Num());
     }
     FString JSON;auto Writer=TJsonWriterFactory<>::Create(&JSON);FJsonSerializer::Serialize(Plans,Writer);
-    const FString Directory=FPaths::ProjectSavedDir()/TEXT("Testing/MapPlans");IFileManager::Get().MakeDirectory(*Directory,true);
+    FString Directory=FPaths::ProjectSavedDir()/TEXT("Testing/MapPlans");
+    FString Filter;
+    if(FParse::Value(FCommandLine::Get(),TEXT("ERMapPlanTemplates="),Filter,false))
+    {
+        TArray<FString> Sorted=Ids;
+        Sorted.Sort();
+        Directory/=FString::Join(Sorted,TEXT("-"));
+    }
+    IFileManager::Get().MakeDirectory(*Directory,true);
     return TestTrue(TEXT("native plan export saved"),FFileHelper::SaveStringToFile(JSON,*(Directory/FString::Printf(TEXT("plans-%dv%d.json"),TeamSize,TeamSize)),FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERMapSizingPhysicsTest,"EclipseRecoil.Maps.TeamSizingPhysics",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
@@ -341,7 +377,7 @@ bool FERMapSizingPhysicsTest::RunTest(const FString&)
                 const bool Blocked=World->SweepSingleByChannel(Hit,A,B,FQuat::Identity,ECC_Pawn,Capsule,Q);
                 // Walking is allowed to contact a walkable terrain slope. A
                 // vertical wall, ceiling or steep face must still fail.
-                const bool WalkableFloor=Blocked && Hit.GetComponent() && Hit.GetComponent()->GetName()==TEXT("AlleyTerrain") && Hit.ImpactNormal.Z>=.72;
+                const bool WalkableFloor=Blocked && Hit.GetComponent() && (Hit.GetComponent()->GetFName()==TEXT("AlleyTerrain") || Hit.GetComponent()->GetFName()==TEXT("RidgeBedrock")) && Hit.ImpactNormal.Z>=.72;
                 if(Blocked && !WalkableFloor)AddError(FString::Printf(TEXT("%s seed%d standing route %s -> %s component=%s normal=%s point=%s"),*Id,Seed,*A.ToString(),*B.ToString(),*GetNameSafe(Hit.GetComponent()),*Hit.ImpactNormal.ToString(),*Hit.ImpactPoint.ToString()));
             }
             UE_LOG(LogTemp,Display,TEXT("ER_MAP_SIZING_PHYSICS template=%s team=%d seed=%d routes=%d"),*Id,TeamSize,Seed,Paths.Num());

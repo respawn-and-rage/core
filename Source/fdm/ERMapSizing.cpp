@@ -32,6 +32,13 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
         T.SizingArena={Width,FMath::Max(5000.,FMath::GridSnap(Gross*10000/Width,50.))};
     }
         break;
+    case EERMapArchetype::Rocky:
+    {
+        // Budget for solid ridges and spawn screens within the disk.
+        const double Diameter=FMath::Max(4800.,FMath::GridSnap(FMath::Sqrt(Area*40000/(PI*.85)),200.));
+        T.SizingArena={Diameter,Diameter};
+    }
+        break;
     case EERMapArchetype::CentralBuilding:
         if(T.CentralBuilding.CircularTerrain)
         {
@@ -134,5 +141,5 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
     }
     default:break;
     }
-    return T.Archetype==EERMapArchetype::UrbanTown || T.Archetype==EERMapArchetype::Rooms || T.Archetype==EERMapArchetype::Village || T.Archetype==EERMapArchetype::FireTraining || T.Archetype==EERMapArchetype::LegacyAssembly || (T.Archetype==EERMapArchetype::CentralBuilding && T.CentralBuilding.CircularTerrain ? FMath::Abs(PI*FMath::Square(T.SizingArena.X*.5)/10000-Area)<=Area*.1:ValidTeamArea(FVector(T.SizingArena,0),TeamSize,T.Archetype));
+    return T.Archetype==EERMapArchetype::UrbanTown || T.Archetype==EERMapArchetype::Rocky || T.Archetype==EERMapArchetype::Rooms || T.Archetype==EERMapArchetype::Village || T.Archetype==EERMapArchetype::FireTraining || T.Archetype==EERMapArchetype::LegacyAssembly || (T.Archetype==EERMapArchetype::CentralBuilding && T.CentralBuilding.CircularTerrain ? FMath::Abs(PI*FMath::Square(T.SizingArena.X*.5)/10000-Area)<=Area*.1:ValidTeamArea(FVector(T.SizingArena,0),TeamSize,T.Archetype));
 }

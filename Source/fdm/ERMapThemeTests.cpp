@@ -8,7 +8,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERMapThemeTest,"EclipseRecoil.Destruction.Shar
 bool FERMapThemeTest::RunTest(const FString& Parameters)
 {
     TSet<FName> SampleNames;TSet<const UERMapThemeLibrary*> Libraries;
-    for(const TCHAR* Name:{TEXT("CentralBuilding"),TEXT("MiddleEasternAlleys"),TEXT("FireTraining"),TEXT("Rooms"),TEXT("Village"),TEXT("Town")})
+    const TCHAR* const Templates[]={TEXT("CentralBuilding"),TEXT("MiddleEasternAlleys"),TEXT("FireTraining"),TEXT("Rooms"),TEXT("Village"),TEXT("Town"),TEXT("Rocky")};
+    for(const TCHAR* Name:Templates)
     {
         auto* Saved=LoadObject<UERMapTemplate>(nullptr,*FString::Printf(TEXT("/Game/EclipseRecoil/Art/MapTemplates/DA_%s"),Name));
         if(!TestNotNull(TEXT("production recipe"),Saved) || !TestNotNull(TEXT("shared library bound"),Saved->ThemeLibrary.Get()))return false;
@@ -33,6 +34,7 @@ bool FERMapThemeTest::RunTest(const FString& Parameters)
             if(!SampleNames.Contains(After.ThemeName)){SampleNames.Add(After.ThemeName);AddInfo(FString::Printf(TEXT("ER_SHARED_THEME_SAMPLE theme=%s seed=%d"),*After.ThemeName.ToString(),Seed));}
             const auto& Palette=Saved->ThemeLibrary->Themes[After.ThemeIndex];
             TestTrue(TEXT("ground is from the shared catalog"),Shared->Contains(After.GroundSurface));
+            if(!After.Crags.IsEmpty())TestTrue(TEXT("rock is from the shared catalog"),Shared->Contains(After.BoulderSurface));
             for(const auto& Face:After.RoomShell)TestTrue(TEXT("room shell is from the shared catalog"),Shared->Contains(Face.Surface));
             if(Palette.ShellSteel)
             {
@@ -136,7 +138,7 @@ bool FERMapThemeTest::RunTest(const FString& Parameters)
         TestFalse(TEXT("finish outside catalog rejected atomically"),ERProcedural::Build(C,B,Prior));
         TestEqual(TEXT("invalid catalog preserves caller output"),Prior.ThemeName,FName(TEXT("unchanged")));
     }
-    TestEqual(TEXT("every template owns its palette library"),Libraries.Num(),6);
-    AddInfo(TEXT("ER_MAP_PALETTES templates=6 seeds=32 geometry=unchanged deterministic=PASS"));return true;
+    TestEqual(TEXT("every template owns its palette library"),Libraries.Num(),int32(UE_ARRAY_COUNT(Templates)));
+    AddInfo(FString::Printf(TEXT("ER_MAP_PALETTES templates=%d seeds=32 geometry=unchanged deterministic=PASS"),Libraries.Num()));return true;
 }
 #endif

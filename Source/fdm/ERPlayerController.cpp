@@ -794,6 +794,12 @@ void AERPlayerController::Move(const FInputActionValue& Value)
     bForwardHeld = IsInputKeyDown(ControlKey(EKeys::W));
     UpdateSprintInput();
     const FVector2D Axis = Value.Get<FVector2D>(); const FRotator Rotation(0, GetControlRotation().Yaw, 0);
+    const auto* Movement=CastChecked<UERMovement>(PlayerCharacter->GetCharacterMovement());
+    if(Movement->IsRockClimbing() && !Movement->RockClimbInward.IsNearlyZero())
+    {
+        PlayerCharacter->AddMovementInput(Movement->RockClimbInward,Axis.Y);
+        return;
+    }
     if(auto* M=Cast<UERMovement>(PlayerCharacter->GetCharacterMovement());M->IsOnLadder())
     {
         if(auto* L=M->FindLadder())PlayerCharacter->AddMovementInput(-L->GetActorForwardVector(),Axis.Y);

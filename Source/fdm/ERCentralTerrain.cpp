@@ -29,6 +29,7 @@ double PlayableAreaM2(const FERProceduralLayout& L)
         }
         return Area/10000.;
     }
+    const double Gross=L.ArenaSize.X*L.ArenaSize.Y*(L.CircularArena ? PI*.25:1.);
     if(!L.InaccessibleGround.IsEmpty() || !L.InaccessibleGroundPolygons.IsEmpty())
     {
         // Exact XY union of rectangles and polygonal exclusions, clipped to
@@ -73,9 +74,9 @@ double PlayableAreaM2(const FERProceduralLayout& L)
             for(const auto& V:Intervals){Span+=FMath::Max(0.,V.Y-FMath::Max(End,V.X));End=FMath::Max(End,V.Y);}
             Excluded+=(Cuts[I]-Cuts[I-1])*Span;
         }
-        return FMath::Max(0.,L.ArenaSize.X*L.ArenaSize.Y-Excluded)/10000.;
+        return FMath::Max(0.,Gross-Excluded)/10000.;
     }
-    return L.CircularArena ? PI*L.ArenaSize.X*L.ArenaSize.Y/40000.:L.ArenaSize.X*L.ArenaSize.Y/10000.;
+    return Gross/10000.;
 }
 namespace
 {

@@ -19,6 +19,21 @@ struct FERLayoutHouse
 };
 struct FERLayoutTownGate { FTransform Frame; float Gap=110,Width=300,Angle=25; TArray<FVector> Passage; };
 struct FERLayoutLadder { FTransform Frame; float Height=430,DeckHeight=320; };
+// A rock rising out of the ground: a faceted ellipsoid around Center with a flat top at
+// Center.Z + Radii.Z*BoulderTop. Shape seeds its facets. Fixed, indestructible, never cubic.
+struct FERLayoutBoulder { FVector Center=FVector::ZeroVector,Radii=FVector(100); float Yaw=0; uint32 Shape=0; bool Reflected=false; };
+// Faceted rock with a conservative inner box for sight and outer box for pawn clearance.
+// Half defines the nominal shape, with Skin adding room for the silhouette.
+struct FERLayoutCrag
+{
+    FVector Center=FVector::ZeroVector,Half=FVector(100);
+    float Yaw=0,Skin=30;
+    uint32 Shape=0;
+    bool Reflected=false,Arch=false;
+};
+// A structure in its own frame, as boxes. Mode 0: destructible cells from the box. 1: one
+// horizontal board. 2: fixed instanced box. 3: destructible cells that hold on a fixed base.
+struct FERKitPart { FBox Box; EERBlockMaterial Material; uint8 Mode; TArray<FBox> Holes; };
 struct FERAlleyRamp { FBox Bounds; FVector Entry,Exit; };
 // Convex interior polygons and graph edges, in map-local centimetres.
 struct FERRoomsNode
@@ -120,6 +135,7 @@ struct FERProceduralLayout
     TArray<FVector> UpperRoute,LowerRoute;
     TArray<FERLayoutHouse> Houses;
     TArray<TArray<FVector>> RooftopRoutes,GroundRoutes;
+    TArray<TArray<FVector>> RockScrambles; // Rocky's walkable bedrock shelves and their approaches.
     TArray<TArray<FVector>> RoofTransfers;
     TArray<FBox> TerrainPads;
     TArray<FBox> PoolWater;
@@ -159,6 +175,18 @@ struct FERProceduralLayout
     TArray<FERLayoutContainer> Containers;
     TArray<FERLayoutCover> CoverSites;
     TArray<FERLayoutLadder> Ladders;
+    TArray<FERLayoutBoulder> Boulders;
+    TArray<FERLayoutCrag> Crags;
+    class UMaterialInterface* BoulderSurface=nullptr;
+    // Graded ground of any shape: heights in centimetres on a square grid, TerrainColumns to a
+    // row, starting at TerrainOrigin. Empty on templates that describe their ground another way.
+    TArray<int16> TerrainHeights;
+    TArray<int16> TerrainRockBase; // Buried height under the exposed Rocky formation.
+    int32 TerrainColumns=0;
+    FVector2D TerrainOrigin=FVector2D::ZeroVector;
+    float TerrainCell=100;
+    // Favor natural cover when enriching an arena that has its own buildings.
+    bool RockyCoverOnly=false;
     TArray<FERLayoutSecondary> SecondaryStructures;
     TArray<int32> WallAccessFlights;
     TArray<float> CoverAngles;
@@ -204,6 +232,26 @@ namespace ERProcedural
 {
     bool SpawnZonesClearInWorld(class UWorld* World,const FTransform& Frame,const FERProceduralLayout& Layout);
     bool BuildSpawnZones(int32 Seed,FERProceduralLayout& Layout,const FERCellSettings& Cells);
+    // Ground under a point on any template: the one height every shared pass builds on.
+    float GroundHeight(const FERProceduralLayout& Layout,FVector2D Position);
+    // The height grid, read through the same triangles as its collision mesh.
+    float TerrainFieldHeight(const FERProceduralLayout& Layout,FVector2D Position);
+    void BuildTerrainField(class UDynamicMeshComponent* Component,const FERProceduralLayout& Layout,bool RockSurface=false);
+    // Lays a path on the ground, Height above it, with a point wherever the slope changes.
+    void DrapeRoute(const FERProceduralLayout& Layout,TArray<FVector>& Path,float Height=100);
+    // Adds the parts of a structure under Frame; Flip mirrors its local Y for a reflected mate.
+    void AddKitParts(FERProceduralLayout& Layout,const TArray<FERKitPart>& Parts,const FTransform& Frame,bool Flip,int32& NextId,const FERCellSettings& Cells);
+    // Where a player can go on foot from the first start: walking, stepping and jumping up to
+    // JumpRise, dropping any height, climbing ladders. Trapped counts the standing places that
+    // can be reached and not left again; Ledges are flat rock tops and raised decks.
+    struct FTraversalAudit
+    {
+        int32 Reached=0,Trapped=0,Ledges=0,LedgesMissed=0,BrokenLadders=0;
+        TArray<FVector> TrapSamples,MissedSamples;
+        bool Passed() const { return Reached>0 && Trapped==0 && LedgesMissed==0 && BrokenLadders==0; }
+    };
+    constexpr float JumpRise=50;
+    FTraversalAudit AuditTraversal(const FERProceduralLayout& Layout);
     bool ConfigureTeamSize(class UERMapTemplate& Template,int32 ExpectedTeamSize,int32 Seed=42);
     // Lookouts, compounds and cover groups on the widest uncovered floor of any unsealed layout.
     void EnrichOpenGround(int32 Seed,FERProceduralLayout& Layout,const FERCellSettings& Cells);
@@ -256,12 +304,24 @@ namespace ERProcedural
     float AlleyGroundHeight(const FERProceduralLayout& Layout,FVector2D Position);
     float AlleyBaseHeight(FVector Arena,FVector2D Position,bool Balanced=false);
     void BuildAlleyTerrain(class UDynamicMeshComponent* Component,const FERProceduralLayout& Layout);
+    constexpr float BoulderTop=.78f;
+    // Flat-shaded triangles of one boulder in map space, three vertices each, identical on every machine.
+    void BoulderTriangles(const FERLayoutBoulder& Boulder,TArray<FVector>& Out);
+    constexpr float CragPeak=70;
+    inline float CragReach(const FERLayoutCrag& Crag) { return Crag.Skin*1.6f; }
+    inline FVector CragSightHalf(const FERLayoutCrag& Crag) { return Crag.Half*FVector(.52,.52,1); }
+    inline double CragArchDrop(const FERLayoutCrag& Crag) { return Crag.Arch ? 85.:0.; }
+    // Flat-shaded triangles of one crag in map space, wound like a boulder's.
+    void CragTriangles(const FERLayoutCrag& Crag,TArray<FVector>& Out);
+    void BuildBoulders(class UDynamicMeshComponent* Component,const FERProceduralLayout& Layout);
     bool FindAlleyInteriorRoute(class UWorld* World,const FERProceduralLayout& Layout,TArray<FVector>& Route);
     bool FindAlleyRoofRimRoute(class UWorld* World,const FERProceduralLayout& Layout,TArray<FVector>& Route);
     bool BuildCentralBuilding(const class UERMapTemplate& Template,int32 Seed,TArray<struct FERMapTemplatePiece>& Pieces,FERProceduralLayout& Layout,TArray<FVector>& Patrol,int32 CrossingOverride=0);
     bool BuildRooms(const FERProceduralConfig& Config,const FERBlockRoomConfig& Blocks,FERProceduralLayout& Out,const FERCellSettings& Cells);
     bool BuildVillage(const FERProceduralConfig& Config,const FERBlockRoomConfig& Blocks,FERProceduralLayout& Out,const FERCellSettings& Cells);
     bool BuildUrbanTown(const FERProceduralConfig& Config,const FERBlockRoomConfig& Blocks,FERProceduralLayout& Out,const FERCellSettings& Cells);
+    constexpr double RockyTunnelMouth=570;
+    bool BuildRocky(const FERProceduralConfig& Config,const FERBlockRoomConfig& Blocks,FERProceduralLayout& Out,const FERCellSettings& Cells);
     float RoomsFloorHeight(const FERProceduralLayout& Layout,FVector2D Position);
     void BuildRoomsShell(class AERProceduralMap* Map,const FERProceduralLayout& Layout,TArray<TObjectPtr<class UDynamicMeshComponent>>& Components);
     // Attempts 0..FireTrainingAttempts-1 sample the seed; the last is the verified reference layout.
@@ -287,6 +347,7 @@ public:
     void ResolveMapCandidate();
     uint32 GetTemplateGeometryDigest() const;
     const FERProceduralLayout& GetLayout() const { return Layout; }
+    bool IsClimbableRock(const UPrimitiveComponent* Surface,const FVector& WorldPoint) const;
     float WaterDepthAt(const FVector& WorldFeet) const;
     bool PlayWaterImpactAt(const FVector& WorldPosition) const;
     bool WaterSurfaceAt(const FVector& WorldPosition,FVector& OutSurface) const;
@@ -321,6 +382,8 @@ private:
     UPROPERTY() TObjectPtr<class UInstancedStaticMeshComponent> FenceCollision;
     UPROPERTY() TArray<TObjectPtr<class UDynamicMeshComponent>> FenceMetal;
     UPROPERTY() TObjectPtr<class UDynamicMeshComponent> AlleyTerrain;
+    UPROPERTY() TObjectPtr<class UDynamicMeshComponent> RockField;
+    UPROPERTY() TObjectPtr<class UDynamicMeshComponent> RidgeBedrock;
     UPROPERTY() TArray<TObjectPtr<class UDynamicMeshComponent>> RoomsShell;
     // Cosmetic warehouse lighting under the roof lamps; never on a dedicated server.
     UPROPERTY(Transient) TArray<TObjectPtr<class ULightComponent>> WarehouseLights;

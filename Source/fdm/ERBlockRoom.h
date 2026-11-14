@@ -31,6 +31,20 @@ struct FERBlockCollapseSettings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0.1",ClampMax="20")) float DebrisSettleAfter=2;
 };
 
+// Protocol 85: deeper terraced basin in Rocky.
+// Protocol 84: diagonal Rocky ridge, cavern and broken plateaus.
+// Protocol 83: Rocky offset hills and terraced basin.
+// Protocol 82: preserve the high Rocky saddle with a rib clear of its climb.
+// Protocol 81: Rocky high saddle, gorge variants and side traverses.
+// Protocol 80: separate Rocky bedrock and longer ridge trails.
+// Protocol 79: higher Rocky perimeter and sharper tunnel bends.
+// Protocol 78: folded Rocky ridge, bedding ledges and winding approaches.
+// Protocol 77: continuous Rocky ridge and walkable bedrock shelves.
+// Protocol 76: high Rocky ridge, angled tunnel legs and staggered spawn courts.
+// Protocol 75: graded Rocky crest, natural tunnel shoulders and irregular crag profiles.
+// Protocol 74: circular Rocky arena, central crest and tunnels.
+// Protocol 73: Rocky template; crags with a solid core and grid terrain shared by outdoor templates.
+// Protocol 72: open-ground terraces and boulders, upper rooms and roof access cut into builder architecture.
 // Protocol 71: open-ground lookouts, compounds and cover groups on every unsealed template.
 // Protocol 70: furnished interiors, Town storefronts and market squares, template area densities.
 // Protocol 64: Central Building secondary roofs and ladders.
@@ -48,7 +62,7 @@ struct FERBlockCollapseSettings
 // Protocol 49: compact Central Building villas and paired pools.
 // Protocol 44: square office ceiling lights and tree-free Village. Protocol 43: connected Town central galleries. Protocol 42: irregular Town parcels and polygonal inaccessible ground. Protocol 41: urban Town loop and ground-floor shops. Protocol 40: circular Central Building ground railing passage. Protocol 39: longitudinal Village terrain. Protocol 38: dense longitudinal Fire Training and bent high routes. Protocol 37: concrete Fire Training shell. Protocol 36: fully procedural closed Fire Training. Protocol 35: rear cover firing steps. Protocol 34: varied circular cover groups. Protocol 33: varied circular Central Building geometry and crossings. Protocol 32: paired seeded spawn zones. Protocol 31: thin brick Alleys towers. Protocol 30: irregular 3v3 Alleys streets and lots. Protocol 29: dense 3v3 Alleys core. Protocol 28: 750m²/player and Rooms primary-floor sizing. Protocol 27: mandatory initial spawn occlusion. Protocol 26: circular graded Central Building and reflected template layouts. Protocol 25: Alleys roof links, lateral wall access and firing slits. Protocol 24: Central Building residential windows, room wings and accessible balconies. Protocol 23: no Village piece stands unsupported on a fresh map. Protocol 22: Village back gallery rail rests on the deck. Protocol 21: authority-chosen map candidate in the descriptor. Protocol 20: optional baked Rooms macro graph in the descriptor. Protocol 19:per-template palettes and Stone alley houses; optional hall passage and varied Rooms hall shapes and diagonal corner bases with four through-rooms, longitudinal Fire Training and distributed Village ground cover and variable Rooms/Village graphs at500m²/player density; expected team size plus material-rule snapshot and bounded compressed skin masks; 5cm cells with complete shard-payload witnesses. BlockCount holds the cell count, PageVersions the
 // versions of the chunk-mask shards (AERCellNetShard).
-namespace ERCellProtocol { inline constexpr uint32 Version=71; }
+namespace ERCellProtocol { inline constexpr uint32 Version=85; }
 USTRUCT()
 struct FERBlockNetworkDescriptor
 {

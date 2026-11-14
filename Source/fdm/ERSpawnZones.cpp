@@ -63,7 +63,11 @@ struct FSpawnSpace
         if(FMath::Abs(P.X)>Layout.ArenaSize.X*.5-80 || FMath::Abs(P.Y)>Layout.ArenaSize.Y*.5-80)return false;
         if(Layout.GradedTerrain)
         {
-            const double Ground=Layout.CircularArena ? ERProcedural::CentralGroundHeight(Layout,XY):ERProcedural::AlleyGroundHeight(Layout,XY);
+            const double Ground=!Layout.TerrainHeights.IsEmpty() ? ERProcedural::TerrainFieldHeight(Layout,XY):
+                Layout.CircularArena ? ERProcedural::CentralGroundHeight(Layout,XY):ERProcedural::AlleyGroundHeight(Layout,XY);
+            // A pocket needs level ground under all of it, which a point between grid heights cannot tell.
+            if(!Layout.TerrainHeights.IsEmpty())for(const FVector2D& Near:{FVector2D(60,0),FVector2D(-60,0),FVector2D(0,60),FVector2D(0,-60)})
+                if(FMath::Abs(ERProcedural::TerrainFieldHeight(Layout,XY+Near)-Ground)>3)return false;
             return FMath::Abs(P.Z-100-Ground)<3;
         }
         // Secondary pockets stay on the primary floor, never on a guessed roof.

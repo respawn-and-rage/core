@@ -22,7 +22,7 @@ class FERSavedMove : public FSavedMove_Character
 public:
     using Super = FSavedMove_Character;
     bool Walk = false, Climb = false, High = false, Sprint = false, Prone = false;
-    FVector Start, End;
+    FVector Start, End, RockInward=FVector::ZeroVector;
     float Elapsed = 0, Duration = 0;
     double Retry = 0;
     FERLocomotionState Posture;
@@ -31,7 +31,7 @@ public:
     bool FireHeld=false;
     FERFireWeaponBinding FireWeapon;
     double SprintRequest = 0;
-    virtual void Clear() override { Super::Clear(); Walk = Climb = High = Sprint = Prone = false; Elapsed = Duration = 0; Retry = 0; Start = End = FVector::ZeroVector; Posture = FERLocomotionState(); PreviousSprint = LadderNeedsRelease = false; SprintRequest = 0; FireSequence=0;FireHeld=false;FireWeapon=FERFireWeaponBinding(); }
+    virtual void Clear() override { Super::Clear(); Walk = Climb = High = Sprint = Prone = false; Elapsed = Duration = 0; Retry = 0; Start = End = RockInward = FVector::ZeroVector; Posture = FERLocomotionState(); PreviousSprint = LadderNeedsRelease = false; SprintRequest = 0; FireSequence=0;FireHeld=false;FireWeapon=FERFireWeaponBinding(); }
     virtual uint8 GetCompressedFlags() const override
     {
         return Super::GetCompressedFlags() | (Walk ? FLAG_Custom_0 : 0) | (Climb ? FLAG_Custom_1 : 0) | (Sprint ? FLAG_Custom_2 : 0) | (Prone ? FLAG_Custom_3 : 0);
@@ -55,6 +55,7 @@ public:
         Posture = Move->Locomotion; PreviousSprint = Move->bPreviousSprintHeld; SprintRequest = Move->SprintRequestUntil;
         Walk = Move->bWalkHeld; Climb = Move->bClimbHeld; Sprint = Move->bSprintHeld; Prone = Move->bProneWanted;
         bForceNoCombine |= Move->IsTraversing() || Move->IsChangingPosture() || Sprint || Move->GetRecoveryRemaining() > 0;
+        RockInward=Move->RockClimbInward;
         Start=Move->TraversalStart; End=Move->TraversalEnd; Elapsed=Move->TraversalElapsed; Duration=Move->TraversalDuration; Retry=Move->RetryAfter; High=Move->bHighClimb;
     }
     virtual void PrepMoveFor(ACharacter* Character) override
@@ -67,6 +68,7 @@ public:
             Character->GetCapsuleComponent()->SetCapsuleHalfHeight(Posture.HalfHeight, true);
         Move->ApplyPosturePresentation();
         Move->bWalkHeld = Walk; Move->bClimbHeld = Climb; Move->bSprintHeld = Sprint; Move->bProneWanted = Prone;
+        Move->RockClimbInward=RockInward;
         Move->TraversalStart=Start; Move->TraversalEnd=End; Move->TraversalElapsed=Elapsed; Move->TraversalDuration=Duration; Move->RetryAfter=Retry; Move->bHighClimb=High;
     }
 };
@@ -173,6 +175,12 @@ float UERMovement::GetMaxSpeed() const
     const auto* C=Cast<AERCharacter>(CharacterOwner);
     if(C && C->Weapon && C->Weapon->bPlacingClaymore)return 0;
     if(IsPreMatchFrozen())return 0;
+    if(IsRockClimbing())
+    {
+        const float Light=ERServer::Get(GetWorld(),"Move.LadderLight");
+        const float Heavy=ERServer::Get(GetWorld(),"Move.LadderHeavy");
+        return FMath::Min(Light,Heavy)*(2.f/3.f)/.036f;
+    }
     if (IsOnLadder()) return LadderSpeed();
     if (IsMantling()) return 0;
     if (IsChangingPosture()) return ERServer::Get(GetWorld(),"Move.Posture")/.036f;
@@ -282,6 +290,18 @@ void UERMovement::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
         }
     if (IsTraversing() || (!IsMovingOnGround() && !IsFalling()) || Acceleration.IsNearlyZero() || GetWorld()->GetTimeSeconds() < RetryAfter) return;
     if (FVector::DotProduct(Acceleration.GetSafeNormal2D(), CharacterOwner->GetActorForwardVector()) < .5f) return;
+    if(bClimbHeld && CanClimbLadder() && !(Placer && Placer->Weapon && Placer->Weapon->bCookingGrenade))
+    {
+        FHitResult Rock;
+        if(FindRockClimbFace(Acceleration.GetSafeNormal2D(),90.,Rock) && !IsWalkable(Rock))
+        {
+            RockClimbInward=-Rock.ImpactNormal.GetSafeNormal2D();
+            Velocity=FVector::ZeroVector;
+            SetMovementMode(MOVE_Custom,RockClimbMode);
+            UpdateSprint();
+            return;
+        }
+    }
     FVector Destination; float Height;
     if (!FindLedge(Destination, Height)) return;
     TraversalStart = UpdatedComponent->GetComponentLocation(); TraversalEnd = Destination;
@@ -293,6 +313,7 @@ void UERMovement::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
 void UERMovement::PhysCustom(float DeltaTime, int32 Iterations)
 {
     if(IsOnLadder()){PhysLadder(DeltaTime,Iterations);return;}
+    if(IsRockClimbing()){PhysRockClimb(DeltaTime,Iterations);return;}
     if (!IsMantling()) { Super::PhysCustom(DeltaTime, Iterations); return; }
     // Simulated proxies use the server's replicated position and smoothing.
     if (CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy) return;
@@ -719,6 +740,63 @@ void UERMovement::PhysLadder(float DeltaTime,int32 Iterations)
     SafeMoveUpdatedComponent(Target-Before,UpdatedComponent->GetComponentQuat(),true,Hit);
     Velocity=(UpdatedComponent->GetComponentLocation()-Before)/FMath::Max(DeltaTime,SMALL_NUMBER);
     if(Next<=0 && Input<0){bLadderNeedsRelease=true;SetMovementMode(MOVE_Falling);Velocity=FVector::ZeroVector;RetryAfter=GetWorld()->GetTimeSeconds()+.5;}
+}
+
+bool UERMovement::FindRockClimbFace(const FVector& Inward,double Reach,FHitResult& Hit) const
+{
+    if(Inward.IsNearlyZero() || !CharacterOwner || !UpdatedComponent)return false;
+
+    const auto* Capsule=CharacterOwner->GetCapsuleComponent();
+    const double Radius=Capsule->GetScaledCapsuleRadius();
+    const FVector Lower=UpdatedComponent->GetComponentLocation()-
+        FVector::UpVector*(Capsule->GetScaledCapsuleHalfHeight()-Radius);
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(ERRockClimb),false,CharacterOwner);
+    for(double Offset:{0.,32.})
+    {
+        const FVector Start=Lower+FVector::UpVector*Offset;
+        if(!GetWorld()->SweepSingleByChannel(Hit,Start,Start+Inward*Reach,FQuat::Identity,ECC_Pawn,
+            FCollisionShape::MakeSphere(FMath::Max(1.,Radius-3.)),Query) || Hit.bStartPenetrating)continue;
+        const auto* Map=Cast<AERProceduralMap>(Hit.GetActor());
+        if(Map && Map->IsClimbableRock(Hit.GetComponent(),Hit.ImpactPoint) &&
+            Hit.ImpactNormal.Z>UE_KINDA_SMALL_NUMBER &&
+            FVector::DotProduct(Inward,-Hit.ImpactNormal.GetSafeNormal2D())>.45)
+            return true;
+    }
+    return false;
+}
+
+void UERMovement::PhysRockClimb(float DeltaTime,int32 Iterations)
+{
+    if(CharacterOwner->GetLocalRole()==ROLE_SimulatedProxy)return;
+    const FVector Inward=RockClimbInward.IsNearlyZero()
+        ? CharacterOwner->GetActorForwardVector().GetSafeNormal2D():RockClimbInward;
+    const double Input=FMath::Clamp(FVector::DotProduct(Acceleration,Inward)/GetMaxAcceleration(),-1.,1.);
+    FHitResult Face;
+    const bool Holding=bClimbHeld && !IsPreMatchFrozen() && CanClimbLadder();
+    const bool Contact=Holding && FindRockClimbFace(Inward,90.,Face);
+    if(!Contact || IsWalkable(Face))
+    {
+        const FVector ExitVelocity=Holding && Input>0
+            ? Inward*FMath::Max(90.,Velocity.Size2D()):FVector::ZeroVector;
+        RetryAfter=GetWorld()->GetTimeSeconds()+.25;
+        SetMovementMode(MOVE_Falling);
+        Velocity=ExitVelocity;
+        StartNewPhysics(DeltaTime,Iterations);
+        return;
+    }
+
+    RockClimbInward=-Face.ImpactNormal.GetSafeNormal2D();
+    const FVector UpSlope=FVector::VectorPlaneProject(FVector::UpVector,Face.ImpactNormal).GetSafeNormal();
+    const double MaxTravel=GetMaxSpeed()*DeltaTime;
+    const double Approach=FMath::Clamp(Face.Distance-5.,0.,MaxTravel);
+    const FVector AlongFace=Face.Distance>12. ? FVector::ZeroVector:UpSlope*(Input*MaxTravel);
+    const FVector Delta=(AlongFace+Inward*Approach).GetClampedToMaxSize(MaxTravel);
+    const FVector Before=UpdatedComponent->GetComponentLocation();
+    FHitResult Hit;
+    SafeMoveUpdatedComponent(Delta,UpdatedComponent->GetComponentQuat(),true,Hit);
+    if(Hit.IsValidBlockingHit() && IsWalkable(Hit))
+        SlideAlongSurface(Delta,1.-Hit.Time,Hit.Normal,Hit,true);
+    Velocity=(UpdatedComponent->GetComponentLocation()-Before)/FMath::Max(DeltaTime,SMALL_NUMBER);
 }
 
 void UERMovement::PhysFalling(float DeltaTime,int32 Iterations)
