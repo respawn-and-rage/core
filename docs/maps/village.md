@@ -2,7 +2,7 @@
 
 Shared rules are in [MAPS.md](../MAPS.md).
 
-**Code:** `ERVillage.cpp`, `ERVillageTerrain.cpp`, `ERVillageWatercourses.cpp`, `ERVillageRing.cpp`, `EROutdoorBackdrop.cpp`.
+**Code:** `ERVillage.cpp`, `ERVillageTerrain.cpp`, `ERVillageWatercourses.cpp`, `ERVillageGeography.cpp`, `ERVillageRing.cpp`, `EROutdoorBackdrop.cpp`.
 
 Inspired by the owner's Shoots references; no Shoots geometry imported. Recipe in `Village` struct:
 1–5 central blocks, paired or one self-symmetric origin block, 1–3 platform storeys from
@@ -11,12 +11,18 @@ two-block 2v2 layouts use 21–23m wide blocks and retain their recipe depths. T
 have flat sheet-metal roofs.
 
 - Seeded terrain is flat, raised in the centre or lower in the centre. Away from streams, elevation changes only along the base-to-base axis; both bases have equal elevation. Level foundations carry central blocks, spawn structures and stairs; gentle ramps and level side-wall landings connect them. Ground shelters stay on level terrain.
-- The Village recipe's `Watercourses` option lets suitable seeds place streams from one
-  side of the arena to the other, bending between bridges and continuing beneath the
-  palisade at each outlet, or one continuous ring enclosing the central building
-  blocks, with rounded corners and bends between the crossings. The channels use sloping earth banks and the shared pool water surface 10cm
-  below grade. The water is about 1.6–2m wide and 50–60cm deep at the bed. Fixed timber
-  bridges rise 22cm above grade and have a ramp on both ends.
+- With `Watercourses` enabled, the match seed selects one of five equally likely
+  geography profiles at any supported team size: dry ground, a transverse river
+  with a shallow centre, an island basin, a longitudinal winding canal, or paired
+  flood basins. The dimensions and placement adapt to the arena. Disabling
+  `Watercourses` makes every seed dry. Retries keep the selected profile.
+- The transverse river reserves its corridor before buildings and spawn pockets
+  are placed. It uses one block per bank, two timber bridges and a central ford.
+  A candidate missing a crossing is rejected. Other wet profiles fit a pair of
+  timber crossings where landings and decks are clear. The same height field
+  drives water depth, terrain collision and route draping. Main basins reach
+  1m below the water surface. Fords retain a 33cm bed and banks slope up to grade. Narrow channels and
+  rings are available only to unsized editor studies.
 - Ground blocks enclose three timber bays around two dogleg passages; bays are breachable.
   Passages are 3m wide with a 4m diagonal bend; one straight line across a block stays blocked.
 - Huts have 220cm doors and keep 1.8m of deck in front of each long wall; balcony cover has no
@@ -35,6 +41,7 @@ have flat sheet-metal roofs.
   Imported timber shells use two-sided RoughPlanks so their walls are visible from both sides.
 - 3v3+ uses at least two blocks; paired 4.8×2.4m L shelters meet a ground-cover quota that upper
   floors cannot satisfy.
+- River crossings can be exercised with the real player using `-ERVillageProbe -ERVillageWaterWalk` in standalone 3v3.
 - Perimeter: tapered 3.8–4.4m logs with real shot gaps, plus a hidden locomotion-only wall.
 - The horizon uses the shared grass finish. No exterior trees. Village uses the shared
   outdoor lighting draw.
@@ -43,5 +50,5 @@ have flat sheet-metal roofs.
 
 `test-village.py` (`--offscreen`, `--network`). Native: `EclipseRecoil.Destruction.Village*`.
 Run standalone with `-ERVillageProbe -ERVillageLightingGallery` for first-person Metal captures
-on the deck and under cover in `Saved/Testing`. In development, use
+on the deck and under cover in `Saved/Testing`. Use `-ERVillageProbe -ERVillageCaptureOnly -ERVillagePlanOnly` for an orthographic plan. In development, use
 `-EROutdoorLightingSeed=1` for sunset and `-EROutdoorLightingSeed=2` for standard lighting.

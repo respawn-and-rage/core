@@ -109,6 +109,13 @@ TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralCon
     TArray<TSharedPtr<FJsonValue>> TerrainProfile;
     for(const auto& Knot:L.VillageTerrainProfile)TerrainProfile.Add(MakeShared<FJsonValueArray>(TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueNumber>(Knot.X/100),MakeShared<FJsonValueNumber>(Knot.Y/100)}));
     O->SetArrayField(TEXT("village_terrain_profile"),TerrainProfile);
+    if(L.VillageGeography)
+    {
+        O->SetNumberField(TEXT("village_geography"),L.VillageGeography);
+        TArray<TSharedPtr<FJsonValue>> Water;
+        for(const auto& Box:L.PoolWater)Water.Add(Points({Box.Min,Box.Max}));
+        O->SetArrayField(TEXT("village_water"),Water);
+    }
     O->SetNumberField(TEXT("ground_rooms"),L.FeatureNames.FilterByPredicate([](FName Feature){return Feature==TEXT("GroundRoom");}).Num()*2);
     O->SetNumberField(TEXT("ground_covers"),L.CentralLowCovers*2);
     TArray<TSharedPtr<FJsonValue>> FiringPositions;
@@ -203,6 +210,8 @@ TSharedPtr<FJsonObject> Plan(const FERProceduralLayout& L,const FERProceduralCon
     {for(const auto& Path:Set)if(Path.Num()>1){auto R=MakeShared<FJsonObject>();R->SetStringField(TEXT("kind"),Kind);R->SetField(TEXT("points"),Points(Path));Routes.Add(MakeShared<FJsonValueObject>(R));}};
     if(Id==TEXT("Town") || Id==TEXT("Rocky"))Paths(L.RoomAccessRoutes,TEXT("passage"));
     Paths(L.CrossingRoutes,Id==TEXT("Rocky") ? TEXT("tunnel"):TEXT("crossing"));Paths(L.DistrictRoutes,TEXT("crossing"));Paths(L.VillagePassages,TEXT("passage"));Paths(L.VillageSideBypasses,TEXT("flank"));
+    Paths(L.VillageWaterCrossings,TEXT("bridge"));
+    if(!L.VillageFord.IsEmpty())Paths({L.VillageFord},TEXT("ford"));
     Paths(L.RooftopRoutes,TEXT("upper"));Paths(L.StairRoutes,TEXT("stairs"));Paths(L.RockScrambles,TEXT("rock_shelf"));
     if(L.FeatureNames.Contains(TEXT("RockCentralMassif")))
         for(int32 Index=L.CrossingRoutes.Num();Index<L.GroundRoutes.Num();++Index)
@@ -292,7 +301,7 @@ bool FERMapSizingTest::RunTest(const FString&)
             if(Id==TEXT("Rooms"))TestTrue(TEXT("bases have separate mouths and no single-corridor choke"),IndependentRoomBaseAccess(L));
             if(Id==TEXT("Village") && TeamSize>=2)
             {
-                if(TeamSize>=3)TestTrue(TEXT("village block count grows with ground area"),L.VillageBlocks.Num()>=FMath::Clamp((TeamSize+1)/2,2,5));
+                if(TeamSize>=3 && L.VillageGeography!=1)TestTrue(TEXT("village block count grows with ground area"),L.VillageBlocks.Num()>=FMath::Clamp((TeamSize+1)/2,2,5));
                 TestTrue(TEXT("village has distributed paired ground shelters"),L.LowCovers.Num()>=2*FMath::CeilToInt(L.ArenaSize.X*L.ArenaSize.Y/15000000));
                 for(int32 I=0;I<L.LowCovers.Num();I+=2)TestTrue(TEXT("ground shelter bounds are half-turn pairs"),L.LowCovers[I].TransformBy(FTransform(FRotator(0,180,0))).GetCenter().Equals(L.LowCovers[I+1].GetCenter(),.02));
             }
@@ -302,12 +311,31 @@ bool FERMapSizingTest::RunTest(const FString&)
                 TestTrue(TEXT("compact alleys have two approaches"),Id!=TEXT("MiddleEasternAlleys") || L.DistrictAccesses==2);
                 TestTrue(TEXT("compact training hall has no nave grid"),Id!=TEXT("FireTraining") || L.WarehouseNaves==0);
                 TestTrue(TEXT("compact rooms have four, six or eight rooms"),Id!=TEXT("Rooms") || L.Rooms.Num()==6 || (TeamSize==2 && (L.Rooms.Num()==4 || L.Rooms.Num()==8)));
-                TestTrue(TEXT("compact village has one or two central blocks"),Id!=TEXT("Village") || L.VillageBlocks.Num()==1 || (TeamSize==2 && L.VillageBlocks.Num()==2));
+                TestTrue(TEXT("compact village has one or two central blocks"),Id!=TEXT("Village") || L.VillageGeography==1 || L.VillageBlocks.Num()==1 || (TeamSize==2 && L.VillageBlocks.Num()==2));
+            }
+            if(Id==TEXT("Village") && T->Village.Watercourses)
+            {
+                const FString Case=FString::Printf(TEXT("Village seed%d"),Seed);
+                TestEqual(*(Case+TEXT(" selects its geography from the match seed")),L.VillageGeography,ERProcedural::VillageProfile(Seed));
+                TestEqual(*(Case+TEXT(" water footprint matches profile")),!L.PoolWater.IsEmpty(),L.VillageGeography!=0);
+                if(L.VillageGeography==1)
+                {
+                    TestEqual(*(Case+TEXT(" river has both bridges")),L.VillageWaterCrossings.Num(),2);
+                    TestTrue(*(Case+TEXT(" river has a ford")),L.VillageFord.Num()>2);
+                }
+                TestTrue(*(Case+TEXT(" bridge count is paired")),L.VillageWaterCrossings.Num()==0 || L.VillageWaterCrossings.Num()==2);
+                for(const auto* Starts:{&L.AlphaSpawns,&L.OmegaSpawns})for(const auto& Start:*Starts)
+                    if(L.VillageGeography)TestTrue(*(Case+TEXT(" keeps spawn terrain dry")),ERProcedural::VillageGeographyWaterDepth(L,FVector2D(Start.GetLocation()))<=0);
             }
             if(Seeds.Contains(Seed))
             {
                 TestTrue(TEXT("repeat seed accepted"),ERProcedural::Build(C,B,Again));
                 TestEqual(TEXT("deterministic bounds"),L.ArenaSize,Again.ArenaSize);TestEqual(TEXT("deterministic panel count"),L.Panels.Num(),Again.Panels.Num());
+                if(L.VillageGeography)
+                {
+                    TestTrue(TEXT("deterministic Village geography heights"),L.TerrainHeights==Again.TerrainHeights);
+                    TestTrue(TEXT("deterministic Village bridges"),L.VillageWaterCrossings==Again.VillageWaterCrossings);
+                }
                 Plans.Add(MakeShared<FJsonValueObject>(Plan(L,C,Id,TeamSize,Seed)));
                 UE_LOG(LogTemp,Display,TEXT("ER_MAP_PLAN template=%s team=%d seed=%d dimensions_m=%.2fx%.2f spawn_zones=%d"),*Id,TeamSize,Seed,L.ArenaSize.X/100,L.ArenaSize.Y/100,L.SpawnZones.Num()/2);
             }
@@ -369,7 +397,8 @@ bool FERMapSizingPhysicsTest::RunTest(const FString&)
                     TestTrue(TEXT("ground shelter stops standing sight"),World->LineTraceSingleByChannel(Hit,Site.SightFrom+Raise,Site.SightTo+Raise,ECC_GameTraceChannel1,Q));
                 }
             }
-            TArray<TArray<FVector>> Paths=L.CrossingRoutes;Paths.Append(L.RoomAccessRoutes);Paths.Append(L.VillagePassages);Paths.Append(L.VillageSideBypasses);
+            TArray<TArray<FVector>> Paths=L.CrossingRoutes;Paths.Append(L.RoomAccessRoutes);Paths.Append(L.VillagePassages);Paths.Append(L.VillageSideBypasses);Paths.Append(L.VillageWaterCrossings);
+            if(!L.VillageFord.IsEmpty())Paths.Add(L.VillageFord);
             if(Id==TEXT("Rooms"))Paths.Append(L.Routes);
             for(const auto& Path:Paths)for(int32 I=1;I<Path.Num();++I)
             {

@@ -41,7 +41,7 @@ with host_log.open('w') as host_out, (logs / 'round-rotation-client.log').open('
         assert len(client_themes) >= len(pool), (host_themes, client_themes)
         assert client_themes <= host_themes, (host_themes, client_themes)
         assert 'ER_BLOCK_NET_INCOMPATIBLE' not in client_text, str(logs/'round-rotation-client.log')
-        print('PASS: shared themes match on host/client across all four templates: ' + str(sorted(client_themes)))
+        print('PASS: shared themes match on host/client across the rotation pool: ' + str(sorted(client_themes)))
         print('PASS: two full cycles, no repeated templates within a cycle; teams/capacity retained: ' + ' -> '.join(rounds))
     finally:
         settle_clients(processes, [host_out, client_out])

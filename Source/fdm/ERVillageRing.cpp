@@ -146,6 +146,46 @@ void BuildVillageWaterwaySurface(UDynamicMeshComponent* Component,const FERProce
 {
     TArray<FVector> Vertices;
     TArray<FIntVector> Faces;
+    if(L.VillageGeography)
+    {
+        const int32 NX=L.TerrainColumns,NY=L.TerrainHeights.Num()/NX;
+        auto At=[&](int32 X,int32 Y)
+        {
+            const FVector2D P=L.TerrainOrigin+FVector2D(X,Y)*L.TerrainCell;
+            return FVector(P,VillageGroundHeight(L,P)-10);
+        };
+        auto Clip=[&](FIntVector Indices,const FVector& A,const FVector& B,const FVector& C)
+        {
+            const FVector Corner[]{A,B,C};
+            const double Depth[]{A.Z-L.TerrainHeights[Indices.X],B.Z-L.TerrainHeights[Indices.Y],C.Z-L.TerrainHeights[Indices.Z]};
+            const int32 First=Vertices.Num();
+            for(int32 I=0;I<3;++I)
+            {
+                const int32 J=(I+1)%3;
+                if(Depth[I]>0)Vertices.Add(Corner[I]);
+                if((Depth[I]>0)!=(Depth[J]>0))
+                    Vertices.Add(FMath::Lerp(Corner[I],Corner[J],Depth[I]/(Depth[I]-Depth[J])));
+            }
+            for(int32 I=First+2;I<Vertices.Num();++I)Faces.Emplace(First,I-1,I);
+        };
+        for(int32 Y=0;Y+1<NY;++Y)for(int32 X=0;X+1<NX;++X)
+        {
+            const int32 A=Y*NX+X,B=A+1,C=A+NX,D=C+1;
+            const FVector PA=At(X,Y),PB=At(X+1,Y),PC=At(X,Y+1),PD=At(X+1,Y+1);
+            if(L.LayoutSymmetry==EERTemplateSymmetry::Mirror && PA.Y>=0)
+            {
+                Clip({A,C,D},PA,PC,PD);
+                Clip({A,D,B},PA,PD,PB);
+            }
+            else
+            {
+                Clip({A,C,B},PA,PC,PB);
+                Clip({B,C,D},PB,PC,PD);
+            }
+        }
+        SetWaterwayMesh(Component,Vertices,Faces);
+        return;
+    }
     auto AddChannel=[&](const TArray<FVector2D>& Lower,const TArray<FVector2D>& Upper,double Z,bool Closed)
     {
         const int32 First=Vertices.Num(),Count=Lower.Num();

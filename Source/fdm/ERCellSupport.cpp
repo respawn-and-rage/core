@@ -53,6 +53,8 @@ bool FERCellSupport::Build(const FERCellWorld& World, bool GroundAnchors, float 
                 {
                     if (B == A || !Face.Intersect(Panels[B].Bounds)) continue;
                     const auto& PB = Panels[B];
+                    // A contact between two fixed endpoints cannot support a third panel.
+                    if ((PA.bAnchored || PA.bIndestructible) && (PB.bAnchored || PB.bIndestructible)) continue;
                     // B's box in A's frame bounds the face cells worth sampling.
                     const FBox Local = FBox(FVector::ZeroVector, PB.Size).TransformBy(PB.Transform * PA.Transform.Inverse());
                     const int32 U = (Axis + 1) % 3, V = (Axis + 2) % 3;
@@ -71,6 +73,9 @@ bool FERCellSupport::Build(const FERCellWorld& World, bool GroundAnchors, float 
                             const int32 ChunkA = World.GetChunkIndex(A, CA.X, CA.Z), ChunkB = World.GetChunkIndex(B, CB.X, CB.Z);
                             const auto& KA = World.GetChunks()[ChunkA]; const auto& KB = World.GetChunks()[ChunkB];
                             const int32 IA = FERCellWorld::CellIndex(KA, CA.X - KA.X0, CA.Y, CA.Z - KA.Z0), IB = FERCellWorld::CellIndex(KB, CB.X - KB.X0, CB.Y, CB.Z - KB.Z0);
+                            // A skinned panel never grows into a void in its authored shape.
+                            if ((!KA.InitialAlive.IsEmpty() && !(KA.InitialAlive[IA >> 6] & (1ull << (IA & 63)))) ||
+                                (!KB.InitialAlive.IsEmpty() && !(KB.InitialAlive[IB >> 6] & (1ull << (IB & 63))))) continue;
                             const FIntPoint Key(FMath::Min(ChunkA, ChunkB), FMath::Max(ChunkA, ChunkB));
                             int32* Index = ContactPair.Find(Key);
                             if (!Index) { Index = &ContactPair.Add(Key, Pairs.Num()); auto& New = Pairs.AddDefaulted_GetRef(); New.A = Key.X; New.B = Key.Y; New.Axis = 3; }
@@ -82,6 +87,8 @@ bool FERCellSupport::Build(const FERCellWorld& World, bool GroundAnchors, float 
     }
     // Grid neighbours inside each panel: +X and +Z.
     for (const auto& P : Panels)
+    {
+        if (P.bAnchored || P.bIndestructible) continue;
         for (int32 CZ = 0; CZ < P.ChunksZ; ++CZ)
             for (int32 CX = 0; CX < P.ChunksX; ++CX)
             {
@@ -89,6 +96,7 @@ bool FERCellSupport::Build(const FERCellWorld& World, bool GroundAnchors, float 
                 if (CX + 1 < P.ChunksX) { auto& New = Pairs.AddDefaulted_GetRef(); New.A = C; New.B = C + 1; New.Axis = 0; }
                 if (CZ + 1 < P.ChunksZ) { auto& New = Pairs.AddDefaulted_GetRef(); New.A = C; New.B = C + P.ChunksX; New.Axis = 2; }
             }
+    }
     Labels.SetNum(World.GetChunks().Num());
     for (int32 C = 0; C < Labels.Num(); ++C) Relabel(World, C);
     for (auto& Pair : Pairs) RefreshEdges(World, Pair);
@@ -103,7 +111,9 @@ void FERCellSupport::Relabel(const FERCellWorld& World, int32 Index)
     const auto& P = World.GetPanels()[C.Panel];
     auto& L = Labels[Index];
     const int32 NY = P.Dims.Y, Bits = C.SX * C.SZ * NY;
-    L.Revision=C.Revision;L.Count=0;L.Uniform=C.AliveCount==Bits;L.Label.Reset();L.Sparse.Reset();L.Anchored.Reset();
+    L.Revision=C.Revision;L.Count=0;L.Uniform=C.AliveCount>0 && (C.AliveCount==Bits || P.bAnchored || P.bIndestructible);L.Label.Reset();L.Sparse.Reset();L.Anchored.Reset();
+    // Every surviving cell of a fully anchored panel already has support.
+    // Contacts still check the alive bits before using this common label.
     if(L.Uniform)
     {
         L.Count=1;L.Anchored.Add(P.bAnchored || P.bIndestructible || ((P.bAnchorBottom || GroundPanel[C.Panel]) && C.Z0==0) || (P.bAnchorBottom && C.Z0*P.Cell.Z<P.AnchorHeight));++LastRelabelled;return;
@@ -144,8 +154,13 @@ void FERCellSupport::RefreshEdges(const FERCellWorld& World, FPair& Pair)
 {
     const auto& LA = Labels[Pair.A], &LB = Labels[Pair.B];
     TSet<FIntPoint> Unique;
-    auto Add = [&](int32 IA, int32 IB) { const int32 A = LA.At(IA), B = LB.At(IB); if (A != INDEX_NONE && B != INDEX_NONE) Unique.Add(FIntPoint(A, B)); };
     const auto& KA = World.GetChunks()[Pair.A], &KB = World.GetChunks()[Pair.B];
+    auto Add = [&](int32 IA, int32 IB)
+    {
+        if ((LA.Uniform && !Bit(KA, IA)) || (LB.Uniform && !Bit(KB, IB))) return;
+        const int32 A = LA.At(IA), B = LB.At(IB);
+        if (A != INDEX_NONE && B != INDEX_NONE) Unique.Add(FIntPoint(A, B));
+    };
     const int32 NY = World.GetPanels()[KA.Panel].Dims.Y;
     if (Pair.Axis == 0) for (int32 Z = 0; Z < KA.SZ; ++Z) for (int32 Y = 0; Y < NY; ++Y) Add(FERCellWorld::CellIndex(KA, KA.SX - 1, Y, Z), FERCellWorld::CellIndex(KB, 0, Y, Z));
     else if (Pair.Axis == 2) for (int32 X = 0; X < KA.SX; ++X) for (int32 Y = 0; Y < NY; ++Y) Add(FERCellWorld::CellIndex(KA, X, Y, KA.SZ - 1), FERCellWorld::CellIndex(KB, X, Y, 0));
@@ -266,7 +281,7 @@ bool FERCellSupport::StepEvaluation(TArray<TArray<FERCellId>>& Unsupported,int32
             if(!W.Active)
             {
                 if(L.Revision==C.Revision){++W.Chunk;break;}
-                L.Revision=MAX_uint32;L.Count=0;L.Uniform=C.AliveCount==Bits;L.Label.Reset();L.Sparse.Reset();L.Anchored.Reset();++LastRelabelled;
+                L.Revision=MAX_uint32;L.Count=0;L.Uniform=C.AliveCount>0 && (C.AliveCount==Bits || P.bAnchored || P.bIndestructible);L.Label.Reset();L.Sparse.Reset();L.Anchored.Reset();++LastRelabelled;
                 if(L.Uniform)
                 {
                     L.Count=1;L.Anchored.Add(P.bAnchored || P.bIndestructible || ((P.bAnchorBottom || GroundPanel[C.Panel]) && C.Z0==0) || (P.bAnchorBottom && C.Z0*P.Cell.Z<P.AnchorHeight));
@@ -336,7 +351,8 @@ bool FERCellSupport::StepEvaluation(TArray<TArray<FERCellId>>& Unsupported,int32
                 else if(Pair.Axis==0)Contact={FERCellWorld::CellIndex(KA,KA.SX-1,I%NY,I/NY),FERCellWorld::CellIndex(KB,0,I%NY,I/NY)};
                 else Contact={FERCellWorld::CellIndex(KA,I/NY,I%NY,KA.SZ-1),FERCellWorld::CellIndex(KB,I/NY,I%NY,0)};
                 const int32 A=LA.At(Contact.X),B=LB.At(Contact.Y);
-                if(A!=INDEX_NONE && B!=INDEX_NONE)W.UniqueEdges.Add({A,B});
+                if(A!=INDEX_NONE && B!=INDEX_NONE && (!LA.Uniform || Bit(KA,Contact.X)) && (!LB.Uniform || Bit(KB,Contact.Y)))
+                    W.UniqueEdges.Add({A,B});
                 ++LastWork;break;
             }
             // Union always picks the smaller root, so edge iteration order cannot

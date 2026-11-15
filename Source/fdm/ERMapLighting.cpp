@@ -92,28 +92,32 @@ struct FLampBuilder
         }
     }
 
-    void Perimeter(const FVector& Arena, bool Circular, UMaterialInterface* Steel, TArray<FERMapLightZone>& Zones)
+    void Perimeter(const FVector& Arena, bool Circular, UMaterialInterface* Steel, TArray<FERMapLightZone>& Zones,
+        double Top = 1400., double EdgeOffset = 65., float BeamCandelas = 0.f)
     {
-        constexpr double Top = 1400;
         constexpr double PoleBottom = -500;
-        constexpr double PoleHeight = Top - PoleBottom;
+        const double PoleHeight = Top - PoleBottom;
         for (int32 Index = 0; Index < 6; ++Index)
         {
             const double Angle = Index * UE_DOUBLE_PI / 3.;
             FVector Unit(FMath::Cos(Angle), FMath::Sin(Angle), 0);
             if (!Circular) Unit /= FMath::Max(FMath::Abs(Unit.X), FMath::Abs(Unit.Y));
-            const FVector Head(Unit.X * (Arena.X*.5+65), Unit.Y * (Arena.Y*.5+65), Top);
+            const FVector Head(Unit.X * (Arena.X*.5+EdgeOffset), Unit.Y * (Arena.Y*.5+EdgeOffset), Top);
             auto& Lamp = Lamps.AddDefaulted_GetRef();
             Lamp.Pole = AddPanel(Head - FVector(0,0,PoleHeight*.5), FQuat::Identity, {30,30,PoleHeight}, false, Steel);
             const FRotator Aim = (FVector(0,0,30) - (Head + FVector(0,0,66))).Rotation();
             const FQuat Frame = FRotator(FMath::Clamp(Aim.Pitch, -24., -12.), Aim.Yaw, 0).Quaternion();
             // Tilt around the bottom edge, embedded slightly in the steel post for a structural joint.
             const FVector PanelCenter = Head + Frame.GetUpVector() * 62.;
-            Lamp.Candelas = 0.f;
-            const double SectorDepth = Head.Size2D() * .44;
+            Lamp.Position = PanelCenter + Frame.GetForwardVector() * 24.;
+            Lamp.Direction = Frame.Rotator();
+            Lamp.Radius = float(Head.Size2D() * 1.65);
+            Lamp.Candelas = BeamCandelas;
+            const FVector SectorEdge(Unit.X * (Arena.X*.5+65), Unit.Y * (Arena.Y*.5+65), 910.);
+            const double SectorDepth = SectorEdge.Size2D() * .44;
             auto& Zone = Zones.AddDefaulted_GetRef();
             Zone.Lamps.Add(Lamps.Num() - 1);
-            Zone.FillPositions.Add(FVector(Head.X, Head.Y, Top * .65) - Head.GetSafeNormal2D() * SectorDepth);
+            Zone.FillPositions.Add(SectorEdge - SectorEdge.GetSafeNormal2D() * SectorDepth);
             Zone.Radius = float(FMath::Max(1800., SectorDepth * 1.85));
             Zone.Intensity = 1.15f;
             Zone.Color = FLinearColor(.76f, .85f, 1.f);
@@ -255,7 +259,11 @@ void ERMapLighting::Build(FERProceduralLayout& Layout, const UERMapTemplate& Rec
         if (!Steel && Layout.ThemeMaterials.IsValidIndex(int32(EERBlockMaterial::Metal)))
             Steel = Layout.ThemeMaterials[int32(EERBlockMaterial::Metal)];
         if (!Steel) Steel = Recipe.CentralBuilding.SteelSurface.Get();
-        Builder.Perimeter(Layout.ArenaSize, Layout.CircularArena, Steel, Zones);
+        if (Recipe.Archetype == EERMapArchetype::Rocky)
+            // Keep the poles outside the rock ring and expose their lenses above its tallest crags.
+            Builder.Perimeter(Layout.ArenaSize, Layout.CircularArena, Steel, Zones, 2200., 850., 2500.f);
+        else
+            Builder.Perimeter(Layout.ArenaSize, Layout.CircularArena, Steel, Zones);
     }
     const int32 FirstCeilingLamp = Lamps.Num();
     for (const FVector& Mount : Layout.CentralCeilingMounts) Builder.Ceiling(Mount);

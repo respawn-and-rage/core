@@ -9,6 +9,7 @@ import time
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--industrial', action='store_true', help='Vote for the generated Central Building instead of Middle Eastern Alleys')
 parser.add_argument('--village', action='store_true', help='Vote for Village and verify its generated geometry on every peer')
+parser.add_argument('--rocky', action='store_true', help='Vote for Rocky and verify its generated geometry on every peer')
 parser.add_argument('--rooms', action='store_true', help='Vote for Rooms and verify its generated bases on every peer')
 parser.add_argument('--map-sizing', action='store_true', help='Creation-time sizing, frozen lobby snapshot, independent capacity and travel descriptor')
 parser.add_argument('--skull-hunt', action='store_true', help='Verify the mode vote and Skull Hunt scoring over LAN')
@@ -18,9 +19,9 @@ parser.add_argument('--settings', action='store_true', help='Check fullscreen de
 parser.add_argument('--focus', action='store_true', help='Graphical foreground fullscreen/menu/game mouse capture recovery probe')
 parser.add_argument('--gallery', action='store_true', help='Capture the menu pages using Metal')
 args = parser.parse_args()
-if sum((args.industrial, args.village, args.rooms)) > 1:
-    parser.error('Choose one of --industrial, --village or --rooms')
-voted_map = 4 if args.rooms else 5 if args.village else 0 if args.industrial else 2
+if sum((args.industrial, args.village, args.rocky, args.rooms)) > 1:
+    parser.error('Choose one of --industrial, --village, --rocky or --rooms')
+voted_map = 7 if args.rocky else 4 if args.rooms else 5 if args.village else 0 if args.industrial else 2
 root = Path(__file__).resolve().parents[1]
 exe = Path(os.environ.get('UE_ROOT', '/Users/Shared/Epic Games/UE_5.8')) / 'Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor'
 out = root / 'Saved/Testing' / ('SkullHunt' if args.skull_hunt else 'LobbyDirect' if args.direct else 'Lobby')

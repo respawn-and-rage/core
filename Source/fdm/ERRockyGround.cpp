@@ -382,14 +382,14 @@ bool ERProcedural::BuildRocky(const FERProceduralConfig& C,const FERBlockRoomCon
     auto Ground=[&](FVector2D P){return double(TerrainFieldHeight(L,P));};
     auto Path=[&](TArray<FVector> Knots){DrapeRoute(L,Knots);return Knots;};
 
-    auto AddRock=[&](FVector2D Start,FVector2D End,double Width,double Bottom,double Top,double Skin,bool Closed,bool Arch=false)
+    auto AddRock=[&](FVector2D Start,FVector2D End,double Width,double Bottom,double Top,double Skin,bool Closed,bool Arch=false,bool Perimeter=false)
     {
         const FVector2D Along=(End-Start).GetSafeNormal(),Across(-Along.Y,Along.X);
         const double Yaw=FMath::RadiansToDegrees(FMath::Atan2(Along.Y,Along.X));
         FERLayoutCrag Rock;
         Rock.Center=FVector((Start+End)*.5,(Top+Bottom)*.5);
         Rock.Half={FVector2D::Distance(Start,End)*.5,Width,(Top-Bottom)*.5};
-        Rock.Yaw=float(Yaw);Rock.Skin=float(Skin);Rock.Shape=Random.GetUnsignedInt();Rock.Arch=Arch;
+        Rock.Yaw=float(Yaw);Rock.Skin=float(Skin);Rock.Shape=Random.GetUnsignedInt();Rock.Arch=Arch;Rock.Perimeter=Perimeter;
         L.Crags.Add(Rock);
         Rock.Center=Mate(Rock.Center);Rock.Yaw=float(MateYaw(Yaw));Rock.Reflected=Mirror;
         L.Crags.Add(Rock);
@@ -424,7 +424,7 @@ bool ERProcedural::BuildRocky(const FERProceduralConfig& C,const FERBlockRoomCon
         const double Width=Random.RandRange(235,260)+SideBank*65;
         const double Top=Court+Random.RandRange(1460,1570)+115*FMath::Cos(6*Angle)+72*FMath::Sin(10*Angle);
         const double Skin=Random.RandRange(70,100);
-        AddRock(Start-Overlap,End+Overlap,Width,-150,Top,Skin,false);
+        AddRock(Start-Overlap,End+Overlap,Width,-150,Top,Skin,false,false,true);
     }
 
     // Each covered leg follows the diagonal from the mouth to the inside bend.

@@ -4,6 +4,7 @@
 #include "ERCharacter.h"
 #include "ERMovement.h"
 #include "ERWeapon.h"
+#include "Algo/Count.h"
 #include "Components/DynamicMeshComponent.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "Misc/AutomationTest.h"
@@ -342,7 +343,7 @@ bool FERRockyPhysicsTest::RunTest(const FString&)
             const FVector Inside(0,0,ERProcedural::GroundHeight(L,FVector2D::ZeroVector)+100.);
             TestTrue(*(Case+TEXT(": the walkable cavern is roofed by solid rock")),
                 World->LineTraceSingleByChannel(Hit,Inside,Inside+FVector(0,0,800),ECC_Visibility,Q) &&
-                Hit.GetComponent() && Hit.GetComponent()->GetFName()==TEXT("RockField"));
+                Hit.GetComponent() && Hit.GetComponent()->ComponentHasTag(TEXT("ERRockyStone")));
         }
         if(L.FeatureNames.Contains(TEXT("RockGully")))
         {
@@ -367,12 +368,12 @@ bool FERRockyPhysicsTest::RunTest(const FString&)
                 const FVector UnderArch=FMath::Lerp(*Center,*Portal,.45);
                 TestTrue(*(Case+TEXT(": tunnel ceiling is solid rock")),
                     World->LineTraceSingleByChannel(Hit,UnderArch,UnderArch+FVector(0,0,900),ECC_Visibility,Q) &&
-                    Hit.GetComponent() && Hit.GetComponent()->GetFName()==TEXT("RockField"));
+                    Hit.GetComponent() && Hit.GetComponent()->ComponentHasTag(TEXT("ERRockyStone")));
             }
             for(const ECollisionChannel Channel:{ECC_Visibility,ECC_GameTraceChannel1})
                 TestTrue(*(Case+TEXT(": rock screens the two tunnel mouths")),
                     World->LineTraceSingleByChannel(Hit,*Entry+FVector(0,0,60),*Exit+FVector(0,0,60),Channel,Q) &&
-                    Hit.GetComponent() && Hit.GetComponent()->GetFName()==TEXT("RockField"));
+                    Hit.GetComponent() && Hit.GetComponent()->ComponentHasTag(TEXT("ERRockyStone")));
         }
         // The ground mesh is the height grid, and a walking route only ever touches walkable ground.
         int32 Ground=0,Routes=0,Rocks=0,Climbs=0,MeasuredTops=0;
@@ -406,7 +407,7 @@ bool FERRockyPhysicsTest::RunTest(const FString&)
             // and let the traversal audit find standing space on each ledge.
             const FVector Above(Crag.Center.X,Crag.Center.Y,Top+400);
             const bool Struck=World->LineTraceSingleByChannel(Hit,Above,Above-FVector(0,0,500),ECC_Visibility,Q);
-            if(Struck && Hit.GetComponent() && Hit.GetComponent()->GetName()==TEXT("RockField") &&
+            if(Struck && Hit.GetComponent() && (Hit.GetComponent()->ComponentHasTag(TEXT("ERRockyStone")) || Hit.GetComponent()->GetFName()==TEXT("RockField")) &&
                 Hit.ImpactPoint.Z<=Top+ERProcedural::CragPeak+.5)
             {
                 ++MeasuredTops;
@@ -432,6 +433,29 @@ bool FERRockyPhysicsTest::RunTest(const FString&)
         }
         TestTrue(*(Case+TEXT(": ground, rock and routes were measured")),Ground>20 && Rocks>4 && MeasuredTops>4 && Routes>4);
         const uint32 Digest=Map->GetStateDigest(),Geometry=Map->GetTemplateGeometryDigest();
+        if(Team==3 && Seed==4)
+        {
+            const auto& Cells=Map->GetCellWorld();
+            const SIZE_T StonePanels=Algo::CountIf(Cells.GetPanels(), [](const auto& Panel)
+            {
+                return Panel.SkinName==TEXT("ERRockyStone") && Panel.Material==EERBlockMaterial::Stone &&
+                    Panel.Strength==1.f && !Panel.bIndestructible;
+            });
+            const SIZE_T InteriorCrags=Algo::CountIf(L.Crags, [](const auto& Crag){return !Crag.Perimeter;});
+            TestEqual(TEXT("every interior crag and boulder uses unreinforced stone"),StonePanels,InteriorCrags+SIZE_T(L.Boulders.Num()));
+            bool Damaged=false;
+            for(const auto& Crag:L.Crags)
+            {
+                if(Crag.Perimeter)continue;
+                FERCellId Cell;
+                const FVector Start=Crag.Center+FVector(0,0,Crag.Half.Z+160.);
+                if(!World->LineTraceSingleByChannel(Hit,Start,Crag.Center,ECC_Visibility,Q) ||
+                    !Hit.GetComponent()->ComponentHasTag(TEXT("ERRockyStone")) || !Map->ResolveCell(Hit,Cell))continue;
+                Damaged=Map->ApplyHitDamage(Hit,Cells.GetHealth(Cell)*2.f) && !Cells.IsAlive(Cell);
+                break;
+            }
+            TestTrue(TEXT("a hit on a generated rock removes its stone cell"),Damaged);
+        }
         TestTrue(*(Case+TEXT(": regeneration restores the map")),Map->Regenerate());
         TestEqual(*(Case+TEXT(": regeneration restores the state digest")),Map->GetStateDigest(),Digest);
         TestEqual(*(Case+TEXT(": regeneration restores the geometry digest")),Map->GetTemplateGeometryDigest(),Geometry);

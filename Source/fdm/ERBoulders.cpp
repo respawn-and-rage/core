@@ -118,14 +118,67 @@ void CragTriangles(const FERLayoutCrag& Crag,TArray<FVector>& Out)
     }
 }
 
+void BuildRockDamagePanels(FERProceduralLayout& Layout, float CellSize)
+{
+    int32 NextId=0;
+    for(const auto& Panel:Layout.Panels)NextId=FMath::Max(NextId,Panel.Id+1);
+
+    TArray<FVector> Points;
+    auto AddRock=[&](const FVector& Center, float Yaw, uint32 Shape)
+    {
+        const FQuat Rotation(FRotator(0,Yaw,0));
+        FBox Bounds(ForceInit);
+        for(const FVector& Point:Points)Bounds+=Rotation.UnrotateVector(Point-Center);
+        Bounds=Bounds.ExpandBy(1.);
+        auto& Panel=Layout.Panels.AddDefaulted_GetRef();
+        Panel.Id=NextId++;
+        Panel.Material=EERBlockMaterial::Stone;
+        Panel.Surface=Panel.InteriorSurface=Layout.BoulderSurface;
+        Panel.Transform=FTransform(Rotation, Center+Rotation.RotateVector(Bounds.Min));
+        Panel.Size=Bounds.GetSize();
+        Panel.Cell={FERCellWorld::FitCell(Panel.Size.X,CellSize),FERCellWorld::FitCell(Panel.Size.Y,CellSize),
+            FERCellWorld::FitCell(Panel.Size.Z,CellSize)};
+        // Damage removes the local stone cells. Remaining faces stay attached to the rock formation.
+        Panel.bAnchored=true;
+        Panel.SkinName=TEXT("ERRockyStone");
+        Panel.SkinCRC=Shape ? Shape:1;
+        Panel.Skin.Reserve(Points.Num());
+        for(int32 Index=0;Index<Points.Num();Index+=3)
+        {
+            const FVector Normal=Rotation.UnrotateVector(
+                FVector::CrossProduct(Points[Index+1]-Points[Index],Points[Index+2]-Points[Index]).GetSafeNormal());
+            for(int32 Corner:{0,2,1})
+            {
+                const FVector& P=Points[Index+Corner];
+                Panel.Skin.Add({Panel.Transform.InverseTransformPositionNoScale(P),Normal,{P.X/250.,(P.Y+P.Z)/250.}});
+            }
+        }
+        Points.Reset();
+    };
+
+    for(const auto& Boulder:Layout.Boulders)
+    {
+        BoulderTriangles(Boulder,Points);
+        AddRock(Boulder.Center,Boulder.Yaw,Boulder.Shape);
+    }
+    for(const auto& Crag:Layout.Crags)
+    {
+        if(Crag.Perimeter)continue;
+        CragTriangles(Crag,Points);
+        AddRock(Crag.Center,Crag.Yaw,Crag.Shape);
+    }
+}
+
 void BuildBoulders(UDynamicMeshComponent* Component,const FERProceduralLayout& L)
 {
     using UE::Geometry::FIndex3i;
     UE::Geometry::FDynamicMesh3 Mesh;Mesh.EnableAttributes();
     auto* Normals=Mesh.Attributes()->PrimaryNormals();auto* UVs=Mesh.Attributes()->PrimaryUV();
     TArray<FVector> Points;
-    for(const auto& Boulder:L.Boulders)BoulderTriangles(Boulder,Points);
-    for(const auto& Crag:L.Crags)CragTriangles(Crag,Points);
+    if(!L.RockyCoverOnly)
+        for(const auto& Boulder:L.Boulders)BoulderTriangles(Boulder,Points);
+    for(const auto& Crag:L.Crags)
+        if(!L.RockyCoverOnly || Crag.Perimeter)CragTriangles(Crag,Points);
     for(int32 I=0;I+2<Points.Num();I+=3)
     {
         // Front faces wind clockwise seen from outside, as the terrain's do: the outward order is reversed.

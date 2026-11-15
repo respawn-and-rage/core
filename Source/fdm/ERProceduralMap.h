@@ -20,7 +20,7 @@ struct FERLayoutHouse
 struct FERLayoutTownGate { FTransform Frame; float Gap=110,Width=300,Angle=25; TArray<FVector> Passage; };
 struct FERLayoutLadder { FTransform Frame; float Height=430,DeckHeight=320; };
 // A rock rising out of the ground: a faceted ellipsoid around Center with a flat top at
-// Center.Z + Radii.Z*BoulderTop. Shape seeds its facets. Fixed, indestructible, never cubic.
+// Center.Z + Radii.Z*BoulderTop. Shape seeds its facets.
 struct FERLayoutBoulder { FVector Center=FVector::ZeroVector,Radii=FVector(100); float Yaw=0; uint32 Shape=0; bool Reflected=false; };
 // Faceted rock with a conservative inner box for sight and outer box for pawn clearance.
 // Half defines the nominal shape, with Skin adding room for the silhouette.
@@ -29,7 +29,7 @@ struct FERLayoutCrag
     FVector Center=FVector::ZeroVector,Half=FVector(100);
     float Yaw=0,Skin=30;
     uint32 Shape=0;
-    bool Reflected=false,Arch=false;
+    bool Reflected=false,Arch=false,Perimeter=false;
 };
 // A structure in its own frame, as boxes. Mode 0: destructible cells from the box. 1: one
 // horizontal board. 2: fixed instanced box. 3: destructible cells that hold on a fixed base.
@@ -139,6 +139,9 @@ struct FERProceduralLayout
     TArray<TArray<FVector>> RoofTransfers;
     TArray<FBox> TerrainPads;
     TArray<FBox> PoolWater;
+    int32 VillageGeography=0;
+    TArray<TArray<FVector>> VillageWaterCrossings;
+    TArray<FVector> VillageFord;
     TArray<FVector2D> VillageRingInner,VillageRingOuter;
     TArray<FERVillageStream> VillageStreams;
     TArray<FVector> VillageWaterwayTerrainVertices;
@@ -252,7 +255,7 @@ namespace ERProcedural
     };
     constexpr float JumpRise=50;
     FTraversalAudit AuditTraversal(const FERProceduralLayout& Layout);
-    bool ConfigureTeamSize(class UERMapTemplate& Template,int32 ExpectedTeamSize,int32 Seed=42);
+    bool ConfigureTeamSize(class UERMapTemplate& Template,int32 ExpectedTeamSize,int32 Seed=42,TOptional<int32> MatchSeed={});
     // Lookouts, compounds and cover groups on the widest uncovered floor of any unsealed layout.
     void EnrichOpenGround(int32 Seed,FERProceduralLayout& Layout,const FERCellSettings& Cells);
     // Recognisable rooms from the shared furniture kit; never moves walls, routes or starts.
@@ -294,6 +297,9 @@ namespace ERProcedural
     float VillageGroundHeight(const FERProceduralLayout& Layout,FVector2D Position);
     void PlanVillageTerrain(FERProceduralLayout& Layout,int32 Seed,float Envelope,const TArray<float>& WallYs);
     void ApplyVillageTerrain(FERProceduralLayout& Layout);
+    inline int32 VillageProfile(int32 Seed){return (int32(uint32(Seed)%5)+2)%5;}
+    void PlanVillageGeography(FERProceduralLayout& Layout,int32 Seed,int32 ForcedProfile=0);
+    double VillageGeographyWaterDepth(const FERProceduralLayout& Layout,FVector2D Position);
     void PlanVillageWatercourses(FERProceduralLayout& Layout,int32 Seed,bool Mirror);
     bool TriangulateVillageWaterways(FERProceduralLayout& Layout,double BedHeight);
     const FERVillageStream* VillageStreamAt(const FERProceduralLayout& Layout,FVector2D Point);
@@ -313,6 +319,7 @@ namespace ERProcedural
     inline double CragArchDrop(const FERLayoutCrag& Crag) { return Crag.Arch ? 85.:0.; }
     // Flat-shaded triangles of one crag in map space, wound like a boulder's.
     void CragTriangles(const FERLayoutCrag& Crag,TArray<FVector>& Out);
+    void BuildRockDamagePanels(FERProceduralLayout& Layout, float CellSize);
     void BuildBoulders(class UDynamicMeshComponent* Component,const FERProceduralLayout& Layout);
     bool FindAlleyInteriorRoute(class UWorld* World,const FERProceduralLayout& Layout,TArray<FVector>& Route);
     bool FindAlleyRoofRimRoute(class UWorld* World,const FERProceduralLayout& Layout,TArray<FVector>& Route);

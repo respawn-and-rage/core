@@ -43,6 +43,51 @@ void AERVillageProbe::Tick(float Delta)
     }
     auto* PC=Cast<AERPlayerController>(UGameplayStatics::GetPlayerController(GetWorld(),0));auto* Pawn=PC ? Cast<AERCharacter>(PC->GetPawn()):nullptr;
     if(!Pawn || L.StairRoutes.IsEmpty()){if(Elapsed>60)FPlatformMisc::RequestExitWithStatus(false,1);return;}
+    if(GetNetMode()==NM_Standalone && FParse::Param(FCommandLine::Get(),TEXT("ERVillageWaterWalk")))
+    {
+        if(Elapsed<6 || Phase==99)return;
+        const auto FinishWater=[&](bool Good)
+        {
+            UE_LOG(LogTemp,Display,TEXT("ER_VILLAGE_WATER_WALK seed=%d result=%s"),
+                Map->LayoutConfig.Seed,Good ? TEXT("PASS"):TEXT("FAIL"));
+            Phase=99;
+            FPlatformMisc::RequestExitWithStatus(false,Good ? 0:1);
+        };
+        if(L.VillageWaterCrossings.Num()!=2 || L.VillageFord.IsEmpty()){FinishWater(false);return;}
+        if(Flight==3){FinishWater(SawFordDepth);return;}
+        const auto& Path=Flight<2 ? L.VillageWaterCrossings[Flight]:L.VillageFord;
+        if(!Walking)
+        {
+            if(!Pawn->TeleportTo(Path[0],(Path[1]-Path[0]).Rotation(),false,true)){FinishWater(false);return;}
+            Pawn->GetCharacterMovement()->StopMovementImmediately();
+            Point=1;FlightTime=Elapsed;Walking=true;
+        }
+        const FVector Feet=Pawn->GetActorLocation()-FVector(0,0,Pawn->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+        if(Flight==2)SawFordDepth|=Map->WaterDepthAt(Feet)>=25;
+        if(Point<Path.Num())
+        {
+            const FVector D=Path[Point]-Pawn->GetActorLocation();
+            if(D.Size2D()<24 && FMath::Abs(D.Z)<38)++Point;
+            else
+            {
+                PC->SetControlRotation(FRotator(0,D.Rotation().Yaw,0));
+                Pawn->AddMovementInput(D.GetSafeNormal2D(),1);
+            }
+        }
+        if(Point==Path.Num())
+        {
+            UE_LOG(LogTemp,Display,TEXT("ER_VILLAGE_WATER_CROSSING seed=%d crossing=%d PASS"),
+                Map->LayoutConfig.Seed,Flight);
+            ++Flight;Walking=false;
+        }
+        else if(Elapsed-FlightTime>15)
+        {
+            UE_LOG(LogTemp,Warning,TEXT("ER_VILLAGE_WATER_STALLED crossing=%d point=%d at=%s target=%s"),
+                Flight,Point,*Pawn->GetActorLocation().ToString(),*Path[Point].ToString());
+            FinishWater(false);
+        }
+        return;
+    }
     if (GetNetMode() == NM_Standalone && FParse::Param(FCommandLine::Get(), TEXT("ERVillageLightingGallery")))
     {
         if (!Pawn->bNetworkReady || !Pawn->Weapon || Elapsed < FMath::Max(8.f, Stage + 2.f)) return;
@@ -104,7 +149,7 @@ void AERVillageProbe::Tick(float Delta)
                 {
                     // Face the walk like a player: the ready weapon reserves space ahead.
                     PC->SetControlRotation(FRotator(0,D.Rotation().Yaw,0));
-                    Pawn->AddMovementInput(D.GetSafeNormal2D(),1);
+                    Pawn->AddMovementInput(D.GetSafeNormal2D(),Flight==4 ? FMath::Clamp(D.Size2D()/100.,.15,1.):1.);
                 }
             }
             Finished=Point==Path.Num();
@@ -129,6 +174,9 @@ void AERVillageProbe::Tick(float Delta)
         }
         if((Finished && (GetNetMode()==NM_Standalone || Elapsed-Stage>35)) || (!Finished && Elapsed-FlightTime>20))
         {
+            if(!Finished && Flight==4)
+                UE_LOG(LogTemp,Warning,TEXT("ER_VILLAGE_BYPASS_STALLED point=%d at=%s target=%s"),Point,
+                    *Pawn->GetActorLocation().ToString(),*L.VillageSideBypasses[0][Point].ToString());
             Check(Finished && (Flight<5 || SawUpperLadder),Labels[Flight]);
             Pawn->ConsumeMovementInputVector();
             Pawn->GetCharacterMovement()->StopMovementImmediately();
@@ -181,7 +229,8 @@ void AERVillageProbe::Tick(float Delta)
     if(Phase>=4 && Phase<=6)
     {
         static const TCHAR* Names[]={TEXT("Plan"),TEXT("Aerial"),TEXT("Deck"),TEXT("Underpass"),TEXT("Spawn"),TEXT("SideCover")};
-        if(Shot==6){UE_LOG(LogTemp,Display,TEXT("ER_VILLAGE_COMPLETE result=%s"),Failed ? TEXT("FAIL"):TEXT("PASS"));FPlatformMisc::RequestExitWithStatus(false,Failed ? 1:0);Phase=99;return;}
+        const bool PlanOnly=FParse::Param(FCommandLine::Get(),TEXT("ERVillagePlanOnly"));
+        if(Shot==(PlanOnly ? 1:6)){UE_LOG(LogTemp,Display,TEXT("ER_VILLAGE_COMPLETE result=%s"),Failed ? TEXT("FAIL"):TEXT("PASS"));FPlatformMisc::RequestExitWithStatus(false,Failed ? 1:0);Phase=99;return;}
         if(Phase==4)
         {
             FVector Eye,Target;
@@ -203,7 +252,13 @@ void AERVillageProbe::Tick(float Delta)
             if(Shot==0){Camera->GetCameraComponent()->SetProjectionMode(ECameraProjectionMode::Orthographic);Camera->GetCameraComponent()->OrthoWidth=FMath::Max(L.ArenaSize.X+1000,(L.ArenaSize.Y+1000)*16/9);}
             PC->SetViewTarget(Camera);Phase=5;Stage=Elapsed;
         }
-        else if(Phase==5 && Elapsed-Stage>3){FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir()/FString::Printf(TEXT("Testing/Village-%s.png"),Names[Shot]),false,false);Phase=6;Stage=Elapsed;}
+        else if(Phase==5 && Elapsed-Stage>3)
+        {
+            const FString Capture=PlanOnly ? FString::Printf(TEXT("Village-Plan-seed%d.png"),Map->LayoutConfig.Seed):
+                FString::Printf(TEXT("Village-%s.png"),Names[Shot]);
+            FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir()/TEXT("Testing")/Capture,false,false);
+            Phase=6;Stage=Elapsed;
+        }
         else if(Phase==6 && Elapsed-Stage>1){++Shot;Phase=4;}
     }
 }

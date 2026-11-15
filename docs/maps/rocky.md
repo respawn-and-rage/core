@@ -29,14 +29,17 @@ A small angled lunar outpost overlooks each team's approach. It has a firing
 aperture and a ladder to a lookout with cover on three sides. The walls and parapets use
 destructible cells. The shared open-ground pass adds boulders to the natural cover.
 
-The ground height field and solid crags are native geometry. The crag mesh supplies
-physical collision. Layout queries use an opaque inner solid for sight and an outer
+The height field and perimeter stay fixed. Interior crags and boulders retain their
+faceted collision and use the shared Stone damage rules. Hits remove surface cells
+and leave the remaining faces attached. Layout queries use an opaque inner solid for sight and an outer
 bound for standing clearance. The builder pairs starts, rock, routes and outposts with
 the recipe's half-turn symmetry. Staggered spawn positions face overlapping rocks
 with angled paths around either end. Closed rock is deducted from the disk's area.
 
 Rocky uses fractured stone and matte metal from the shared surface catalog.
-It is selectable in Play Offline.
+It is selectable in Play Offline and enabled by default for the server lobby vote
+and round rotation. At night, six floodlight banks rise above the rock
+ring and illuminate sectors inside the arena.
 
 **Verify** — Run `python3 scripts/test-rocky.py` and `python3 scripts/test-rocky.py --network`.
 Use `python3 scripts/test-rocky.py --render --team-size 3` for Metal captures of the

@@ -38,7 +38,7 @@ struct FSpawnSpace
         for(const auto& Ramp:L.UnderpassRamps)Excluded.Add(FBox(FVector(Ramp.Bounds.Min.X,Ramp.Bounds.Min.Y,-10000),FVector(Ramp.Bounds.Max.X,Ramp.Bounds.Max.Y,10000)));
         for(const auto& Hole:L.UnderpassBreaches)Excluded.Add(FBox(FVector(Hole.Min.X,Hole.Min.Y,-10000),FVector(Hole.Max.X,Hole.Max.Y,10000)));
         Excluded.Append(L.VillageFloorHoles);
-        if(L.FeatureNames.Contains(TEXT("VillageWatercourses")))
+        if(L.VillageGeography || L.FeatureNames.Contains(TEXT("VillageWatercourses")))
             for(const auto& Water:L.PoolWater)
                 Excluded.Add(FBox(FVector(Water.Min.X,Water.Min.Y,-10000),FVector(Water.Max.X,Water.Max.Y,10000)));
     }
@@ -132,6 +132,8 @@ bool ERProcedural::BuildSpawnZones(int32 Seed,FERProceduralLayout& L,const FERCe
     const FQuat Facing=FRotator(0,Forward.Rotation().Yaw-90,0).Quaternion();
     TArray<TArray<FVector>> Paths=L.RoomAccessRoutes;Paths.Append(L.CrossingRoutes);Paths.Append(L.DistrictRoutes);Paths.Append(L.VillagePassages);Paths.Append(L.VillageSideBypasses);Paths.Append(L.Routes);
     TArray<TArray<FVector>> ProtectedPaths=Paths;
+    ProtectedPaths.Append(L.VillageWaterCrossings);
+    if(!L.VillageFord.IsEmpty())ProtectedPaths.Add(L.VillageFord);
     for(const auto& Cover:L.CoverSites)if(!Cover.Entry.Equals(Cover.Hide,.01))ProtectedPaths.Add({Cover.Entry,Cover.Hide});
     // Sample candidate sites along existing standing routes; a short, checked
     // rear entrance joins each new pocket to the same circulation network.

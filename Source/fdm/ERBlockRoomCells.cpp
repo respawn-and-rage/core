@@ -615,7 +615,8 @@ bool AERBlockRoom::OnRepCellDescriptor()
     // alley architecture. Multiple storeys can exceed the ordinary 8M limit;
     // the regenerated cell world still validates occupied/storage budgets.
     const bool SkinnedVillage=Template && Template->Archetype==EERMapArchetype::Village && (Template->Village.BridgeStructure || Template->Village.StorageStructure);
-    if (Network.Protocol != ERCellProtocol::Version || !Network.Cells || Network.BlockCount <= 0 || Network.BlockCount > (Architecture || SkinnedVillage ? 96000000:8000000) || Network.Procedural != (Map != nullptr))
+    const bool RockyStone=Template && Template->Archetype==EERMapArchetype::Rocky;
+    if (Network.Protocol != ERCellProtocol::Version || !Network.Cells || Network.BlockCount <= 0 || Network.BlockCount > (Architecture || SkinnedVillage || RockyStone ? 96000000:8000000) || Network.Procedural != (Map != nullptr))
     { FailCellSynchronization(TEXT("ER_BLOCK_NET_INCOMPATIBLE descriptor")); return false; }
     MaterialRules=Network.Rules; Config = Network.Blocks; CellSettings = Network.CellSettings;
     if (Map) { Map->LayoutConfig = Network.Layout; Map->bCeilings = Network.Ceilings; }

@@ -3,10 +3,10 @@
 //750m² per expected player on open ground, both teams included, scaled by AreaDensity for
 //streets and sealed rooms. Dimensions are physical plan dimensions; upper floors never add
 //to the area and player admission is separate.
-bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed)
+bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed,TOptional<int32> MatchSeed)
 {
     if(TeamSize<1 || TeamSize>16)return false;
-    T.SizingTeamSize=TeamSize;T.CompositionSeed=Seed;
+    T.SizingTeamSize=TeamSize;T.CompositionSeed=MatchSeed.Get(Seed);
     T.SizingRoomsGroundOnly=TeamSize==1;
     FRandomStream Composition(int32(HashCombine(uint32(Seed),0x56415259u)));
     const float Area=TargetAreaM2(TeamSize,T.Archetype);
@@ -120,7 +120,9 @@ bool ERProcedural::ConfigureTeamSize(UERMapTemplate& T,int32 TeamSize,int32 Seed
     {
         if(TeamSize==1)
         {
-            Envelope(1.3f,2800,3600);
+            if(T.Village.Watercourses && VillageProfile(T.CompositionSeed)==1)
+                T.SizingArena={2800,5400};
+            else Envelope(1.3f,2800,3600);
             T.Village.ArenaMin=T.Village.ArenaMax=T.SizingArena;
         }
         else

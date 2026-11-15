@@ -12,7 +12,7 @@ entries expose rotation toggles; a Town-only pool remains Town-only. All maps co
 | `rooms` | `L_Rooms` | `DA_Rooms` | offline only |
 | `village` | `L_Village` | `DA_Village` | yes |
 | `town` | `L_Town` | `DA_Town` | yes |
-| `rocky` | `L_Rocky` | `DA_Rocky` | offline only |
+| `rocky` | `L_Rocky` | `DA_Rocky` | yes |
 | `depot` | `L_Depot` | fixed reference | offline only |
 
 Recipes live in `Art/MapTemplates`. Reproduce a layout with

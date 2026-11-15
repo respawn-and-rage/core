@@ -137,13 +137,28 @@ bool ERProcedural::BuildGeometry(const FERProceduralConfig& C,const FERBlockRoom
         Canonical->CompositionSeed=C.TemplateAsset->CompositionSeed;Canonical->SizingTeamSize=C.TemplateAsset->SizingTeamSize;Canonical->SizingRoomsGroundOnly=C.TemplateAsset->SizingRoomsGroundOnly;Canonical->SizingArena=C.TemplateAsset->SizingArena;
         FERProceduralConfig Paired=C;Paired.TemplateAsset=Canonical.Get();FERProceduralLayout Next;
         if(!BuildGeometry(Paired,B,Next,Cells) || !FoldLayoutToMirror(Next,Cells))return false;
-        if(C.TemplateAsset->Archetype==EERMapArchetype::Village && C.TemplateAsset->Village.Watercourses)
+        if(Next.FeatureNames.Contains(TEXT("VillageRiverCorridor")))
+        {
+            PlanVillageGeography(Next,Canonical->CompositionSeed,1);
+            if(Next.VillageWaterCrossings.Num()!=2 || Next.VillageFord.IsEmpty())return false;
+        }
+        else if(C.ExpectedTeamSize==0 && C.TemplateAsset->Archetype==EERMapArchetype::Village && C.TemplateAsset->Village.Watercourses)
             PlanVillageWatercourses(Next,C.Seed,true);
         Out=MoveTemp(Next);return true;
     }
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::UrbanTown) return BuildUrbanTown(C,B,Out,Cells);
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::Rocky) return BuildRocky(C,B,Out,Cells);
-    if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::Village) return BuildVillage(C,B,Out,Cells);
+    if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::Village)
+    {
+        FERProceduralLayout Next;
+        if(!BuildVillage(C,B,Next,Cells))return false;
+        if(!C.TemplateAsset->ReflectionBuild && Next.FeatureNames.Contains(TEXT("VillageRiverCorridor")))
+        {
+            PlanVillageGeography(Next,C.TemplateAsset->CompositionSeed,1);
+            if(Next.VillageWaterCrossings.Num()!=2 || Next.VillageFord.IsEmpty())return false;
+        }
+        Out=MoveTemp(Next);return true;
+    }
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::Rooms) return BuildRooms(C,B,Out,Cells);
     if(C.TemplateAsset && C.TemplateAsset->Archetype==EERMapArchetype::FireTraining)
     {
@@ -235,8 +250,7 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
         {
             FERProceduralConfig Sized=C;
             Sized.Seed=Attempt ? int32(HashCombine(Plan,uint32(Attempt)*0x9e3779b9u)):int32(Plan);
-            if(!ConfigureTeamSize(*Recipe,C.ExpectedTeamSize,Sized.Seed))return false;
-            Recipe->CompositionSeed=C.Seed;
+            if(!ConfigureTeamSize(*Recipe,C.ExpectedTeamSize,Sized.Seed,C.Seed))return false;
             Sized.TemplateAsset=Recipe.Get();FERProceduralLayout Next;
             if(!BuildGeometry(Sized,B,Next,Cells)){++GeometryRejected;continue;}
             if(Recipe->Archetype==EERMapArchetype::Rooms)
@@ -293,6 +307,11 @@ bool ERProcedural::Build(const FERProceduralConfig& C,const FERBlockRoomConfig& 
             }
             else if(!BuildSpawnZones(C.Seed,Next,Cells)){++SpawnRejected;continue;}
             if(!ERPlayability::InitialSpawnsOccluded(Next)){++SpawnRejected;continue;}
+            if(Recipe->Archetype==EERMapArchetype::Village && Recipe->Village.Watercourses && VillageProfile(C.Seed)!=0)
+            {
+                if(!Next.VillageGeography)PlanVillageGeography(Next,C.Seed);
+                if(!Next.VillageGeography){++GeometryRejected;continue;}
+            }
             const int32 Zones=Next.SpawnZones.Num()/2;
             if(Zones<RequestedZones && Attempt<7)
             {
@@ -509,6 +528,7 @@ bool AERProceduralMap::GenerateLogicalWorld()
     if (const auto* Recipe = LayoutConfig.TemplateAsset.Get())
         ERMapLighting::Build(Next, *Recipe, CellSettings.CellSize, MapLampSurface,
             EROutdoorBackdrop::IsNight(*GetWorld()), NextLamps, NextLightZones);
+    if (Next.RockyCoverOnly) ERProcedural::BuildRockDamagePanels(Next, CellSettings.CellSize);
     if (!BuildCellWorld(Next.Panels)) return false;
     MapLamps = MoveTemp(NextLamps);
     MapLightZones = MoveTemp(NextLightZones);
@@ -884,7 +904,7 @@ void AERProceduralMap::ConfigureTemplateFloors()
     FlushMetal();
     if(!Layout.PoolWater.IsEmpty() && PoolWaterSurface && GetNetMode()!=NM_DedicatedServer)
     {
-        if(!Layout.VillageWaterwayTerrainFaces.IsEmpty() || Layout.FeatureNames.Contains(TEXT("VillaWaterfront")))
+        if(Layout.VillageGeography || !Layout.VillageWaterwayTerrainFaces.IsEmpty() || Layout.FeatureNames.Contains(TEXT("VillaWaterfront")))
         {
             auto* Water=NewObject<UDynamicMeshComponent>(this);
             AddInstanceComponent(Water);Water->SetupAttachment(RootComponent);
@@ -892,7 +912,7 @@ void AERProceduralMap::ConfigureTemplateFloors()
             Water->SetCanEverAffectNavigation(false);Water->SetCastShadow(false);
             Water->SetMaterial(0,PoolWaterSurface);
             Water->ComponentTags.Add(TEXT("ERTemplateVisual"));
-            if(!Layout.VillageWaterwayTerrainFaces.IsEmpty())ERProcedural::BuildVillageWaterwaySurface(Water,Layout);
+            if(Layout.VillageGeography || !Layout.VillageWaterwayTerrainFaces.IsEmpty())ERProcedural::BuildVillageWaterwaySurface(Water,Layout);
             else ERProcedural::BuildWaterfrontSurface(Water,Layout);
             Water->RegisterComponent();PoolSurfaces.Add(Water);
         }
@@ -1102,7 +1122,7 @@ uint32 AERProceduralMap::GetTemplateGeometryDigest() const
 
 bool AERProceduralMap::IsClimbableRock(const UPrimitiveComponent* Surface,const FVector& WorldPoint) const
 {
-    if(!IsMapReady() || !Layout.RockyCoverOnly || !Surface || (Surface!=RockField && Surface!=RidgeBedrock))
+    if(!IsMapReady() || !Layout.RockyCoverOnly || !Surface || (Surface!=RockField && Surface!=RidgeBedrock && !Surface->ComponentHasTag(TEXT("ERRockyStone"))))
         return false;
 
     const FVector Local=GetActorTransform().InverseTransformPosition(WorldPoint);
@@ -1117,6 +1137,13 @@ float AERProceduralMap::WaterDepthAt(const FVector& WorldFeet) const
     if(Layout.FeatureNames.Contains(TEXT("VillaWaterfront")) &&
         FMath::Square(P.X/(Layout.ArenaSize.X*.5-20))+FMath::Square(P.Y/(Layout.ArenaSize.Y*.5-20))>1)
         return 0.f;
+    if(Layout.VillageGeography)
+    {
+        const FVector2D XY(P);
+        if(ERProcedural::VillageGeographyWaterDepth(Layout,XY)<=0)return 0.f;
+        const double Depth=ERProcedural::VillageGroundHeight(Layout,XY)-10-P.Z;
+        return Depth>=0 && Depth<=105 ? float(Depth):0.f;
+    }
     if(!Layout.VillageStreams.IsEmpty())
     {
         const auto* Stream=ERProcedural::VillageStreamAt(Layout,FVector2D(P));
@@ -1154,6 +1181,14 @@ bool AERProceduralMap::WaterSurfaceAt(const FVector& WorldPosition,FVector& OutS
     if(Layout.FeatureNames.Contains(TEXT("VillaWaterfront")) &&
         FMath::Square(P.X/(Layout.ArenaSize.X*.5-20))+FMath::Square(P.Y/(Layout.ArenaSize.Y*.5-20))>1)
         return false;
+    if(Layout.VillageGeography)
+    {
+        const FVector2D XY(P);
+        const double Z=ERProcedural::VillageGroundHeight(Layout,XY)-10;
+        if(ERProcedural::VillageGeographyWaterDepth(Layout,XY)<=0 || P.Z>Z-1 || P.Z<Z-105)return false;
+        OutSurface=GetActorTransform().TransformPosition(FVector(XY,Z));
+        return true;
+    }
     if(!Layout.VillageStreams.IsEmpty())
     {
         const auto* Stream=ERProcedural::VillageStreamAt(Layout,FVector2D(P));

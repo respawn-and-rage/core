@@ -26,9 +26,10 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     FERProceduralLayout L;
     auto Sample=[&](double A,double D){return float(Geometry.RandRange(FMath::CeilToInt(A/100),FMath::FloorToInt(D/100))*100);};
     const FTransform HalfTurn(FRotator(0,180,0));
-    const int32 Count=Geometry.RandRange(R.MinCentralBlocks,R.MaxCentralBlocks);
+    int32 Count=Geometry.RandRange(R.MinCentralBlocks,R.MaxCentralBlocks);
     TArray<FERVillageBlock> Plans;
-    const bool Odd=Count%2!=0;
+    bool Odd=Count%2!=0;
+    const bool River=T->SizingTeamSize>0 && R.Watercourses && VillageProfile(T->CompositionSeed)==1;
     float Envelope=0,RequiredWidth=0;const float CenterGap=Sample(300,500);
     // Keep the compact layouts' approach lengths and widen their blocks by one metre.
     const bool Compact=T->SizingTeamSize==1 || (T->SizingTeamSize==2 && Count==2);
@@ -79,6 +80,16 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     int32 Tallest=1;for(const auto& P:Plans)Tallest=FMath::Max(Tallest,P.Storeys);
     L.ArenaSize.Z=FMath::Max(R.PerimeterHeight,R.DeckHeight+(Tallest-1)*300+600);
     const float HX=L.ArenaSize.X*.5f,HY=L.ArenaSize.Y*.5f,Z=R.DeckHeight;
+    if(River)
+    {
+        // Size the palisade from the original roll, then give the river
+        // its full crossing corridor before building either bank.
+        FERVillageBlock Bank=Plans[Odd && Plans.Num()>1 ? 1:0];
+        const float Shore=T->SizingTeamSize==1 ? 800.f:1050.f;
+        Bank.SelfSymmetric=false;
+        Bank.Frame.SetLocation({T->SizingTeamSize==1 ? 0.:Bank.Frame.GetLocation().X,-Shore-Bank.Size.Y*.5,0});
+        Plans={Bank};Count=2;Odd=false;Envelope=Shore+Bank.Size.Y;
+    }
     bool MirrorConstruction=true;
     int32 Id=0;
     // A timber member is a filled volume of calibrated 2cm-deep wood cells.
@@ -427,9 +438,15 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
         const float CenterFront=-Plans[0].Size.Y*.5f;
         LaneY=Count==1 ? CenterFront-520:Plans[1].Frame.GetLocation().Y+Plans[1].Size.Y*.5f+160;
     }
-    const float SideWidth=T->SizingTeamSize==1 ? 300.f:Count==1 ? 700.f:Count==2 ? 580.f:260.f,SideHeight=240,Flank=HX-60;
+    // A ready rifle extends ahead of the capsule when the player turns
+    // back toward the flank. Keep the exit inside that swept clearance.
+    const bool WideBypass=T->SizingTeamSize==3 || River;
+    const float BypassClearance=WideBypass ? 135.f:100.f;
+    const float BypassExit=WideBypass ? 100.f:55.f;
+    const float SideWidth=T->SizingTeamSize==1 ? 300.f:Count==1 ? 700.f:Count==2 ? 580.f:260.f,SideHeight=240,Flank=HX-(WideBypass ? 175:60);
     TArray<float> WallYs;
-    if(Count==1)
+    if(River)WallYs.Add(-Envelope-480);
+    else if(Count==1)
     {
         const float Run=FMath::CeilToInt(Z/20)*30;
         const float ApproachEnd=-Plans[0].Size.Y*.5f-Run-140;
@@ -449,13 +466,13 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     TArray<TArray<FVector>> LeftBypasses;
     for(float Y:WallYs)
     {
-        const float X=-HX+SideWidth*.5f,Inner=-HX+SideWidth+100;
+        const float X=-HX+SideWidth*.5f,Inner=-HX+SideWidth+BypassClearance;
         Wood({X,Y,SideHeight*.5f},{SideWidth,24,SideHeight});
         GraySheet({X,Y+12.1f,SideHeight*.5f},{SideWidth,.2f,SideHeight});
         GraySheet({X,Y,SideHeight+.1f},{SideWidth,26,.2f});
         const FBox Wall(FVector(-HX,Y-12,0),FVector(-HX+SideWidth,Y+12,SideHeight));
         L.VillageSideWalls.Add(Wall);L.VillageSideWalls.Add(Wall.TransformBy(HalfTurn));
-        TArray<FVector> Bypass{{-Flank,Y-80,100},{Inner,Y-80,100},{Inner,Y+55,100},{-Flank,Y+55,100}};
+        TArray<FVector> Bypass{{-Flank,Y-80,100},{Inner,Y-80,100},{Inner,Y+BypassExit,100},{-Flank,Y+BypassExit,100}};
         LeftBypasses.Add(Bypass);L.VillageSideBypasses.Add(Bypass);
         for(auto& P:Bypass)P=HalfTurn.TransformPosition(P);L.VillageSideBypasses.Add(Bypass);
     }
@@ -466,7 +483,7 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     for(const auto& Bypass:LeftBypasses)L.CrossingRoutes[0].Append(Bypass);
     L.CrossingRoutes[0].Add({-Flank,FMath::Max(HY-1300,float(LeftBypasses.Last().Last().Y)+100),100});
     L.CrossingRoutes[1]=L.CrossingRoutes[0];for(auto& P:L.CrossingRoutes[1])P=HalfTurn.TransformPosition(P);
-    const float LaneStart=WallYs[0]-80,Inner=-HX+SideWidth+100;
+    const float LaneStart=WallYs[0]-80,Inner=-HX+SideWidth+BypassClearance;
     L.LowerRoute={{-Flank,LaneStart,100},{Inner,LaneStart,100},{0,LaneStart,100},{-Inner,Odd ? LaneStart:-LaneStart,100},{Flank,Odd ? LaneStart:-LaneStart,100}};
     const auto& First=Plans[0];const FVector FP=First.Frame.GetLocation();
     L.UpperRoute={{FP.X-First.Size.X*.45,FP.Y-First.Size.Y*.5+65,Z+100},{FP.X,FP.Y-First.Size.Y*.5+65,Z+100},{FP.X+First.Size.X*.45,FP.Y-First.Size.Y*.5+65,Z+100}};
@@ -478,7 +495,8 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
     L.Spawn=L.AlphaSpawns[0].GetLocation();
     PlanVillageTerrain(L,C.Seed,Envelope,WallYs);
     L.FeatureNames={TEXT("Jungle"),TEXT("VariableSymmetricBlocks"),TEXT("OneToThreeStoreys"),TEXT("VariableSpawnBases"),TEXT("RearSpawnGalleries"),TEXT("CornerLookouts"),TEXT("SideShacks"),TEXT("GrayCoverPockets"),TEXT("AdaptiveStandingSideWalls"),TEXT("LogPalisade"),TEXT("SealedPerimeter"),TEXT("OnlyHatchedGroundPassages")};
-    if(!T->ReflectionBuild && R.Watercourses)PlanVillageWatercourses(L,C.Seed,false);
+    if(River)L.FeatureNames.Add(TEXT("VillageRiverCorridor"));
+    if(C.ExpectedTeamSize==0 && !T->ReflectionBuild && R.Watercourses)PlanVillageWatercourses(L,C.Seed,false);
     if(T->SizingTeamSize>=2)
     {
         // Distribute native ground-level timber/metal L shelters across the
@@ -499,6 +517,7 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
         TArray<TArray<FVector>> Reserved=L.Routes;Reserved.Append(L.GroundRoutes);Reserved.Append(L.StairRoutes);Reserved.Append(L.VillageSideBypasses);
         auto Clear=[&](const FBox& Bounds)
         {
+            if(River && Bounds.Min.Y<950 && Bounds.Max.Y>-950)return false;
             if(Bounds.Min.X<-HX+90 || Bounds.Max.X>HX-90 || Bounds.Min.Y<-HY+1000 || Bounds.Max.Y>HY-1000)return false;
             if(!L.VillageTerrainProfile.IsEmpty() && !FMath::IsNearlyEqual(VillageGroundHeight(L,{0,Bounds.Min.Y-300}),VillageGroundHeight(L,{0,Bounds.Max.Y+300}),.01f))return false;
             const auto Margin=Bounds.ExpandBy(FVector(80,80,5));
@@ -539,6 +558,7 @@ bool BuildVillage(const FERProceduralConfig& C,const FERBlockRoomConfig& B,FERPr
                         auto EntryClear=[&](const FTransform& At,const FBox& Partner)
                         {
                             const FVector A=At.TransformPosition({0,260,100}),D=At.TransformPosition({0,0,100});
+                            if(River && FMath::Abs(A.Y)<780)return false;
                             const FVector CapsuleMargin(35,35,93);
                             if(FMath::Abs(A.X)>HX-60 || FMath::Abs(A.Y)>HY-60)return false;
                             if(FMath::LineBoxIntersection(Partner.ExpandBy(CapsuleMargin),A,D,D-A))return false;

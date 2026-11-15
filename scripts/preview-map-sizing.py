@@ -124,7 +124,10 @@ def rocky_elevation_legend(d, x, y):
 
 def card(d, plan, x, y, w, h, scale):
     ident=plan['template']; tw,th,_=plan['dimensions_m']; n=plan['team_size']
-    d.text(x+24,y+14,plan.get('rocky_landform',NAMES[ident]),26,bold=True)
+    geography = plan.get('village_geography', 0)
+    village_names = ('Village', 'Borgo sulle due rive', 'Isola del mulino', 'Canale sinuoso', 'Borgo allagato')
+    name = village_names[geography] if geography else plan.get('rocky_landform', NAMES[ident])
+    d.text(x+24,y+14,name,26,bold=True)
     area=plan['area_m2']
     d.text(x+24,y+49,f'{tw:g} × {th:g} m  |  {area:,.0f} m²'.replace(',', ' '),23,bold=True)
     zone_count=len(plan.get("spawn_zones",[]))//2
@@ -136,7 +139,7 @@ def card(d, plan, x, y, w, h, scale):
     outline=([p((tw*.5*math.cos(i*math.tau/128),th*.5*math.sin(i*math.tau/128),0)) for i in range(128)]
              if plan.get('circular') else [(ox,oy),(ox+tw*scale,oy),(ox+tw*scale,oy+th*scale),(ox,oy+th*scale)])
     d.polygon(outline,'#e9e8e0','#697a83',1.3)
-    terrain=plan.get('terrain_grid')
+    terrain=plan.get('terrain_grid') if not geography else None
     rocky=ident=='Rocky' and terrain is not None
     # The exported spawn point is one metre above its supporting surface.
     datum=plan['spawns'][0]['point'][2]-1 if rocky and plan['spawns'] else 0
@@ -175,6 +178,8 @@ def card(d, plan, x, y, w, h, scale):
     for at in range(0,math.ceil(th),5):
         span=tw/2*math.sqrt(max(0,1-(2*at/th-1)**2)) if plan.get('circular') else tw/2
         d.line([p((-span,at-th/2)),p((span,at-th/2))],'#d9ded8',.6)
+    for a,b in plan.get('village_water', []):
+        d.polygon([p(a),p((b[0],a[1])),p(b),p((a[0],b[1]))],'#81b6c5')
     for f in plan['floors']:
         d.polygon([p(v) for v in f], '#f5f1e4','#b3ae9d',.7)
     if ident=='CentralBuilding' and plan.get('circular') and not plan.get('central_hill'):
@@ -211,7 +216,7 @@ def card(d, plan, x, y, w, h, scale):
         if kind=='stairs':
             continue
         color={'connector':'#2b817b','lower':'#7043a2','tunnel':'#7043a2','upper':'#186d84',
-               'rock_shelf':'#a96a35','ford':'#26798c','cave':'#9c2f84'}.get(kind,'#6d9462')
+               'rock_shelf':'#a96a35','ford':'#26798c','bridge':'#875424','cave':'#9c2f84'}.get(kind,'#6d9462')
         d.line([p(v) for v in route['points']],color,3 if kind in ('connector','tunnel','upper') else 1.8,kind in ('lower','tunnel','cave'))
         if kind=='connector':
             cx,cy=p((0,0,0));d.text(cx,cy-20,'PASSAGGIO',11,color=color,bold=True,center=True)

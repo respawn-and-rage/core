@@ -168,18 +168,28 @@ bool FERVillageLayoutTest::RunTest(const FString& Parameters)
         FERProceduralConfig Gameplay=C;
         Gameplay.TemplateAsset=Saved;
         Gameplay.ExpectedTeamSize=3;
-        int32 RingSeed=INDEX_NONE,StreamSeed=INDEX_NONE;
-        for(int32 Seed=0;Seed<128 && (RingSeed==INDEX_NONE || StreamSeed==INDEX_NONE);++Seed)
+        for(int32 Team:{1,2,3,4,8,16})for(int32 Seed:{44,45,46,47,48})
         {
+            Gameplay.ExpectedTeamSize=Team;
             Gameplay.Seed=Seed;
             FERProceduralLayout Sized;
-            if(!ERProcedural::Build(Gameplay,B,Sized))continue;
-            if(Sized.FeatureNames.Contains(TEXT("VillageLoopStreams")))RingSeed=Seed;
-            if(Sized.FeatureNames.Contains(TEXT("VillageTransverseStreams")))StreamSeed=Seed;
+            if(!TestTrue(TEXT("sized Village generates"),ERProcedural::Build(Gameplay,B,Sized)))continue;
+            TestTrue(TEXT("gameplay has no legacy streams or rings"),Sized.VillageStreams.IsEmpty() && Sized.VillageRingOuter.IsEmpty());
+            TestEqual(TEXT("profile is independent of size"),Sized.VillageGeography,ERProcedural::VillageProfile(Seed));
+            TestEqual(TEXT("dry seed has no water"),!Sized.PoolWater.IsEmpty(),ERProcedural::VillageProfile(Seed)!=0);
+            if(Sized.VillageGeography)
+            {
+                double Deepest=0;
+                for(int32 I=0;I<Sized.TerrainHeights.Num();++I)
+                {
+                    const FVector2D P=Sized.TerrainOrigin+Sized.TerrainCell*
+                        FVector2D(I%Sized.TerrainColumns,I/Sized.TerrainColumns);
+                    Deepest=FMath::Max(Deepest,ERProcedural::VillageGeographyWaterDepth(Sized,P));
+                }
+                AddInfo(FString::Printf(TEXT("ER_VILLAGE_DEPTH team=%d seed=%d max_cm=%.1f"),Team,Seed,Deepest));
+                TestTrue(TEXT("main basin reaches a metre below the surface"),Deepest>=99);
+            }
         }
-        TestTrue(TEXT("sized Village builds a central ring"),RingSeed!=INDEX_NONE);
-        TestTrue(TEXT("sized Village builds edge-to-edge streams"),StreamSeed!=INDEX_NONE);
-        AddInfo(FString::Printf(TEXT("ER_VILLAGE_WATERCOURSE_EXAMPLES team=3 ring=%d transverse=%d"),RingSeed,StreamSeed));
     }
     const auto Previous=L.Panels.Num();T->Village.DeckHeight=NAN;
     TestFalse(TEXT("invalid recipe rejected atomically"),ERProcedural::Build(C,B,L));TestEqual(TEXT("previous output retained"),L.Panels.Num(),Previous);
@@ -363,24 +373,16 @@ bool FERVillagePhysicsTest::RunTest(const FString& Parameters)
             TestTrue(TEXT("ground plan exported"),FFileHelper::SaveStringToFile(SVG,*(FPaths::ProjectSavedDir()/(Seed==73 ? TEXT("Testing/Village-GroundPlan.svg"):FString::Printf(TEXT("Testing/Village-GroundPlan-seed%d.svg"),Seed)))));
         }
     }
-    Map->LayoutConfig.Seed=12;
+    Map->LayoutConfig.Seed=44;
     Map->LayoutConfig.ExpectedTeamSize=3;
     Asset->Village.DeckHeight=240;
-    if(TestTrue(TEXT("3v3 transverse stream generates in world"),Map->Regenerate()))
+    if(TestTrue(TEXT("3v3 river generates in world"),Map->Regenerate()))
     {
         const auto& L=Map->GetLayout();
-        TestEqual(TEXT("3v3 seed 12 builds both transverse streams"),L.VillageStreams.Num(),2);
-        for(const auto& Stream:L.VillageStreams)for(double Sign:{-1.,1.})
-        {
-            const double HX=L.ArenaSize.X*.5;
-            const double Y=(Stream.LowerBank[0].Y+Stream.UpperBank[0].Y)*.5;
-            const FVector Outside(Sign*(HX+85),Y,Stream.Surface-25);
-            TestTrue(TEXT("water remains past the palisade"),Map->WaterDepthAt(Outside)>20);
-            TestTrue(TEXT("palisade blocks the mouth below water level"),
-                World->SweepSingleByChannel(Hit,{Sign*(HX-60),Y,Outside.Z},Outside,FQuat::Identity,
-                    ECC_Pawn,FCollisionShape::MakeSphere(8),Q) &&
-                Hit.GetComponent() && Hit.GetComponent()->GetName()==TEXT("FixedFenceCollision"));
-        }
+        TestEqual(TEXT("3v3 seed 44 builds two bridges"),L.VillageWaterCrossings.Num(),2);
+        TestTrue(TEXT("3v3 seed 44 builds a ford"),!L.VillageFord.IsEmpty());
+        const double Bed=ERProcedural::TerrainFieldHeight(L,{0,0});
+        TestTrue(TEXT("the central ford has shallow water"),Map->WaterDepthAt({0,0,Bed})>=25);
     }
     World->DestroyWorld(false);
     GEngine->DestroyWorldContext(World);
