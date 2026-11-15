@@ -50,12 +50,16 @@ def is_link(path):
 
 
 def validate(root, require_mounts=False):
-    entries = layout(root)
+    entries = []
     problems = []
-    for _, source, destination in entries:
+    for name, source, destination in layout(root):
         if not source.is_dir():
+            optional_source = destination.relative_to(root).parts[0] == 'SourceAssets'
+            if optional_source and not source.exists() and not source.is_symlink():
+                continue
             problems.append('Missing submodule content: ' + str(source))
             continue
+        entries.append((name, source, destination))
         for file in source.rglob('*'):
             if file.is_file():
                 with file.open('rb') as stream:

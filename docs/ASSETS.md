@@ -6,13 +6,14 @@
 | --- | --- | --- |
 | respawn-and-rage/core (public) | here | Code, config, scripts, docs |
 | respawn-and-rage/assets-characters | `Assets/characters` | Skins, FPS rig and poses, character animation |
-| respawn-and-rage/assets-weapons | `Assets/weapons` | Arsenal, data, audio, effects, import sources |
-| respawn-and-rage/assets-maps | `Assets/maps` | Maps, Core Blueprints, input, template UI, map art, sources |
+| respawn-and-rage/assets-weapons | `Assets/weapons` | Arsenal, data, audio, effects |
+| respawn-and-rage/assets-maps | `Assets/maps` | Maps, Core Blueprints, input, template UI, map art |
 
 The bundles work together: Core Blueprint defaults reference characters and weapons.
 `scripts/setup-assets.py` follows `assets.json` to create directory links below the ignored
-`Content/` and `SourceAssets/` (symlinks on Mac/Linux, junctions on Windows), preserving every
-`/Game` path. It never overwrites existing data and rejects unresolved LFS pointers.
+`Content/` (symlinks on Mac/Linux, junctions on Windows), preserving every `/Game` path.
+It also mounts the configured `SourceAssets/` paths when the sources are restored locally.
+It never overwrites existing data and rejects unresolved LFS pointers.
 
 ```sh
 git lfs install
@@ -21,6 +22,10 @@ python3 scripts/setup-assets.py --check
 ```
 
 A public clone alone cannot run. LFS objects live in the sibling `_cache/lfs-*`.
+
+For re-imports, copy the required `SourceAssets/` tree from the private project archive
+into its asset submodule and run `python3 scripts/setup-assets.py`. Local sources are
+ignored by Git. Regular setup and builds use the imported Unreal packages.
 
 ## Editing assets
 

@@ -68,6 +68,27 @@ class AssetSetupTests(unittest.TestCase):
                 module.mount(root)
             self.assertFalse((root / 'Content/Characters').exists())
 
+    def test_archived_sources_are_optional_and_mount_after_restore(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.fixture(root)
+            manifest = root / 'assets.json'
+            data = json.loads(manifest.read_text())
+            data['repositories']['maps']['mounts'].append('SourceAssets/Textures')
+            manifest.write_text(json.dumps(data))
+            self.assertEqual(module.mount(root), 2)
+            self.assertEqual(len(module.validate(root, require_mounts=True)), 2)
+
+            source = root / 'Assets/maps/SourceAssets/Textures'
+            source.mkdir(parents=True)
+            (source / 'original.png').write_bytes(b'original texture')
+            self.assertEqual(module.mount(root), 3)
+            self.assertEqual((root / 'SourceAssets/Textures/original.png').read_bytes(), b'original texture')
+
+            (source / 'original.png').unlink()
+            source.rmdir()
+            self.assertEqual(len(module.validate(root, require_mounts=True)), 2)
+
     def test_conflicting_symlink_is_preserved(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
