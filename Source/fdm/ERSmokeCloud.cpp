@@ -24,9 +24,9 @@
 
 namespace
 {
-constexpr int32 NX=16, NY=16, NZ=8;
-constexpr int32 SmokeCellCount=NX*NY*NZ;
-int32 Index(int32 X,int32 Y,int32 Z) { return X+NX*(Y+NY*Z); }
+constexpr int32 SmokeGridX=16, SmokeGridY=16, SmokeGridZ=8;
+constexpr int32 SmokeCellCount=SmokeGridX*SmokeGridY*SmokeGridZ;
+int32 Index(int32 X,int32 Y,int32 Z) { return X+SmokeGridX*(Y+SmokeGridY*Z); }
 }
 
 AERSmokeCloud::AERSmokeCloud()
@@ -124,7 +124,7 @@ void AERSmokeCloud::RebuildContainment()
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(ERSmoke_Containment);
     ++ContainmentBuildCount;
-    const FVector Cell=SimSize/FVector(NX,NY,NZ);
+    const FVector Cell=SimSize/FVector(SmokeGridX,SmokeGridY,SmokeGridZ);
     const FVector Min=VolumeOrigin-FVector(SimSize.X*.5f,SimSize.Y*.5f,0);
     TArray<uint8> Free; Free.Init(0,SmokeCellCount); Occupancy.Init(0,SmokeCellCount);
     TArray<FVector> Centers; Centers.SetNum(SmokeCellCount);
@@ -135,7 +135,7 @@ void AERSmokeCloud::RebuildContainment()
     const auto Shape=FCollisionShape::MakeBox(Cell*.48f);
     int32 Seed=INDEX_NONE; float Nearest=MAX_flt;
     const FVector Source=GetActorLocation()+FVector(0,0,Cell.Z*.5f);
-    for(int32 Z=0;Z<NZ;++Z) for(int32 Y=0;Y<NY;++Y) for(int32 X=0;X<NX;++X)
+    for(int32 Z=0;Z<SmokeGridZ;++Z) for(int32 Y=0;Y<SmokeGridY;++Y) for(int32 X=0;X<SmokeGridX;++X)
     {
         const int32 I=Index(X,Y,Z);
         Centers[I]=Min+Cell*FVector(X+.5f,Y+.5f,Z+.5f);
@@ -153,11 +153,11 @@ void AERSmokeCloud::RebuildContainment()
     constexpr int32 DX[]={1,-1,0,0,0,0}, DY[]={0,0,1,-1,0,0}, DZ[]={0,0,0,0,1,-1};
     for(int32 Head=0;Head<Queue.Num();++Head)
     {
-        const int32 I=Queue[Head], X=I%NX, Y=(I/NX)%NY, Z=I/(NX*NY);
+        const int32 I=Queue[Head], X=I%SmokeGridX, Y=(I/SmokeGridX)%SmokeGridY, Z=I/(SmokeGridX*SmokeGridY);
         for(int32 D=0;D<6;++D)
         {
             const int32 XX=X+DX[D],YY=Y+DY[D],ZZ=Z+DZ[D];
-            if(XX<0 || XX>=NX || YY<0 || YY>=NY || ZZ<0 || ZZ>=NZ) continue;
+            if(XX<0 || XX>=SmokeGridX || YY<0 || YY>=SmokeGridY || ZZ<0 || ZZ>=SmokeGridZ) continue;
             const int32 J=Index(XX,YY,ZZ);
             if(!Free[J] || Occupancy[J]) continue;
             FHitResult Hit;
@@ -210,7 +210,7 @@ bool AERSmokeCloud::ContainsSmokeAt(const FVector& Position) const
 {
     const FVector Unit=(Position-VolumeOrigin+FVector(SimSize.X*.5f,SimSize.Y*.5f,0))/SimSize;
     if(Unit.X<0 || Unit.X>=1 || Unit.Y<0 || Unit.Y>=1 || Unit.Z<0 || Unit.Z>=1) return false;
-    const int32 I=Index(int32(Unit.X*NX),int32(Unit.Y*NY),int32(Unit.Z*NZ));
+    const int32 I=Index(int32(Unit.X*SmokeGridX),int32(Unit.Y*SmokeGridY),int32(Unit.Z*SmokeGridZ));
     return Occupancy.IsValidIndex(I) && Occupancy[I]!=0;
 }
 
@@ -221,9 +221,9 @@ float AERSmokeCloud::ReconDensity(const FVector& Position, float Age) const
     if (Unit.X<0 || Unit.X>=1 || Unit.Y<0 || Unit.Y>=1 || Unit.Z<0 || Unit.Z>=1) return 0;
     // Match the material's trilinear atlas sampling, rather than treating the
     // whole enclosing box as opaque (which would seal empty/occluded pockets).
-    const FVector Grid=(Unit*FVector(NX,NY,NZ)-FVector(.5)).BoundToBox(FVector::ZeroVector,FVector(NX-1,NY-1,NZ-1));
+    const FVector Grid=(Unit*FVector(SmokeGridX,SmokeGridY,SmokeGridZ)-FVector(.5)).BoundToBox(FVector::ZeroVector,FVector(SmokeGridX-1,SmokeGridY-1,SmokeGridZ-1));
     const FIntVector Lo(FMath::FloorToInt(Grid.X),FMath::FloorToInt(Grid.Y),FMath::FloorToInt(Grid.Z));
-    const FIntVector Hi(FMath::Min(Lo.X+1,NX-1),FMath::Min(Lo.Y+1,NY-1),FMath::Min(Lo.Z+1,NZ-1));
+    const FIntVector Hi(FMath::Min(Lo.X+1,SmokeGridX-1),FMath::Min(Lo.Y+1,SmokeGridY-1),FMath::Min(Lo.Z+1,SmokeGridZ-1));
     float Occupied=0;
     for (int32 Z=0;Z<2;++Z) for (int32 Y=0;Y<2;++Y) for (int32 X=0;X<2;++X)
     {
@@ -284,7 +284,7 @@ float AERSmokeCloud::ReconOpticalDepth(const FVector& Start, const FVector& End)
 void AERSmokeCloud::UploadDensity()
 {
     if(!VolumeInstance) return;
-    constexpr int32 W=NX*NZ,H=NY;
+    constexpr int32 W=SmokeGridX*SmokeGridZ,H=SmokeGridY;
     if(!DensityAtlas)
     {
         DensityAtlas=UTexture2D::CreateTransient(W,H,PF_B8G8R8A8,TEXT("ERSmokeContainment"));
@@ -295,9 +295,9 @@ void AERSmokeCloud::UploadDensity()
         VolumeInstance->SetTextureParameterValue(TEXT("DensityAtlas"),DensityAtlas);
     }
     auto* Pixels=new uint8[W*H*4];
-    for(int32 Z=0;Z<NZ;++Z) for(int32 Y=0;Y<NY;++Y) for(int32 X=0;X<NX;++X)
+    for(int32 Z=0;Z<SmokeGridZ;++Z) for(int32 Y=0;Y<SmokeGridY;++Y) for(int32 X=0;X<SmokeGridX;++X)
     {
-        const int32 P=(X+Z*NX+Y*W)*4;
+        const int32 P=(X+Z*SmokeGridX+Y*W)*4;
         Pixels[P]=Pixels[P+1]=Pixels[P+2]=Occupancy[Index(X,Y,Z)]; Pixels[P+3]=255;
     }
     auto* Region=new FUpdateTextureRegion2D(0,0,0,0,W,H);
