@@ -4,6 +4,7 @@ import importlib.util
 import io
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -67,6 +68,26 @@ class CleanupTests(unittest.TestCase):
         with patch.object(cleanup, 'tracked_paths', return_value=set()), patch.object(cleanup.subprocess, 'run', return_value=process):
             with self.assertRaisesRegex(RuntimeError, 'Close Unreal'):
                 self.run_cleanup('--apply')
+        self.assertTrue((self.root / 'Saved/Testing/test.log').exists())
+
+    def test_build_space_cleanup_preserves_test_evidence_and_plugin_sources(self):
+        plugin = self.root / 'Plugins/OnlineSubsystemEOS'
+        generated = plugin / 'Intermediate/object.o'
+        generated.parent.mkdir(parents=True)
+        generated.touch()
+        (plugin / '.rr-guest-generated.json').write_text('{}')
+        (plugin / 'source.cpp').touch()
+        project_object = self.root / 'Intermediate/Build/generated.o'
+        with patch.object(cleanup, 'ensure_idle'), contextlib.redirect_stdout(io.StringIO()):
+            with patch.object(cleanup.shutil, 'disk_usage', return_value=SimpleNamespace(free=50)):
+                self.assertEqual(cleanup.reclaim_build_space(self.root, self.root, 40), 50)
+            self.assertTrue(project_object.exists())
+            with patch.object(cleanup.shutil, 'disk_usage',
+                              side_effect=[SimpleNamespace(free=30), SimpleNamespace(free=50)]):
+                self.assertEqual(cleanup.reclaim_build_space(self.root, self.root, 40), 50)
+        self.assertFalse(project_object.exists())
+        self.assertFalse(generated.exists())
+        self.assertTrue((plugin / 'source.cpp').exists())
         self.assertTrue((self.root / 'Saved/Testing/test.log').exists())
 
     def test_finder_editor_service_does_not_block_cleanup(self):

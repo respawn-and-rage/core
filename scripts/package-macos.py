@@ -61,7 +61,6 @@ subprocess.run(['xcrun', '--find', 'clang'], check=True)
 nearest = workspace
 while not nearest.exists():
     nearest = nearest.parent
-free = shutil.disk_usage(nearest).free
 from apfs_snapshot import clone_supported, copy_file
 use_clones = clone_supported(project / 'RespawnAndRage.uproject', nearest)
 # The earlier 40 GiB included a complete second content tree. APFS clones
@@ -70,13 +69,16 @@ minimum_gib = (25 if a.architecture == 'universal' else 20) if use_clones else 4
 if a.resume:
     minimum_gib = 8  # Existing snapshot and compiled objects are reused.
 minimum = minimum_gib * 1024**3
+free = shutil.disk_usage(nearest).free
+if not a.check and not a.resume and free < minimum:
+    free = idle_module.reclaim_build_space(project, nearest, minimum)
 print(json.dumps({'engine': str(engine), 'workspace': str(workspace),
                   'architecture': a.architecture, 'xcode_stdin_workaround': a.xcode_stdin_workaround, 'free_gib': round(free / 1024**3, 1),
                   'minimum_free_gib': minimum_gib, 'apfs_clones': use_clones, 'space_ok': free >= minimum}), flush=True)
 if a.check:
     raise SystemExit(0 if free >= minimum else 2)
 if free < minimum:
-    raise RuntimeError(f'Need at least {minimum_gib} GiB free before starting; actual cook may need more')
+    raise RuntimeError(f'Need at least {minimum_gib} GiB free before starting; found {free / 1024**3:.1f} GiB. Choose another volume with --workspace.')
 if not a.resume:
     subprocess.run([sys.executable, str(project / 'scripts/stamp-build-version.py'), '--check-clean'], check=True)
 if a.resume:

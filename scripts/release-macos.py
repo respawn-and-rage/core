@@ -164,7 +164,13 @@ def check_build(args, test):
     def space():
         if not reports:
             raise RuntimeError('Fix the UE/Xcode check first to measure the APFS/build space requirement')
-        disk_space(args.workspace, (reports[-1]['minimum_free_gib'] + 5) * GIB)
+        minimum = (reports[-1]['minimum_free_gib'] + 5) * GIB
+        if not args.check:
+            nearest = args.workspace
+            while not nearest.exists():
+                nearest = nearest.parent
+            helper('clean-project').reclaim_build_space(PROJECT, nearest, minimum)
+        disk_space(args.workspace, minimum)
         # Global DDC and SDK tools can still write to the startup volume.
         disk_space(PROJECT, 5 * GIB)
         disk_space(Path.home(), 5 * GIB)

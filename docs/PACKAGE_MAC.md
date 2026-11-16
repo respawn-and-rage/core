@@ -23,8 +23,13 @@ and `receipt.json`. The app contains licensed assets: keep it out of public comm
 | `--xcode-stdin-workaround` | Force the `ApplePostBuildSync` route, automatic on macOS 27 / Xcode 27. |
 
 Free space guards: 25 GiB universal, 20 GiB one architecture with APFS clones, 40 GiB
-ordinary copies; a watchdog stops the build under 5 GiB. Follow progress with
-`tail -f ../builds/macos/<timestamp>/build.log`.
+ordinary copies. If a new package or release is short on space and its workspace
+shares the checkout's volume, preflight removes regenerable project build files
+and caches, including binaries and intermediates for the generated EOS plugin,
+then measures free space again. This may trigger a full local Editor rebuild
+next time. `--check` only reports current space. Asset bundles, test results,
+and shared Unreal caches are outside this cleanup. If space is still short,
+choose another volume with `--workspace`. A watchdog stops the build under 5 GiB.
 
 Development packages boot every configured map offline and as a listen server with six
 bots, then render SM5 and SM6 offscreen; receipts are in `runtime-smoke/`. This needs

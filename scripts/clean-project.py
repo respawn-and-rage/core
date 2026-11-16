@@ -8,6 +8,7 @@ import argparse
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 import time
 import re
@@ -65,6 +66,44 @@ def ensure_idle():
     if active:
         raise RuntimeError('Close Unreal Editor/game and Unreal build/shader processes before --apply.')
 
+def remove_generated_files(root, paths):
+    conflicts = set(paths) & tracked_paths(root)
+    if conflicts:
+        raise RuntimeError('Refusing to touch tracked/indexed files: ' +
+                           ', '.join(str(p.relative_to(root)) for p in sorted(conflicts)))
+    for path in paths:
+        path.resolve().relative_to(root)
+        if path.is_symlink() or any(p.is_symlink() for p in path.parents if p != root):
+            raise RuntimeError('Path became a symlink: ' + str(path))
+        path.unlink()
+
+
+def reclaim_build_space(root, volume_path, minimum):
+    """Drop only generated files in this checkout, and only on the short volume."""
+    free = shutil.disk_usage(volume_path).free
+    if free >= minimum or root.stat().st_dev != volume_path.stat().st_dev:
+        return free
+    ensure_idle()
+    paths = generated_files(root, ('build', 'cache'))
+    # The project helper generates this plugin from the installed engine.
+    plugin = root / 'Plugins/OnlineSubsystemEOS'
+    marker = plugin / '.rr-guest-generated.json'
+    if not plugin.is_symlink() and marker.is_file() and not marker.is_symlink():
+        for directory in ('Intermediate', 'Binaries'):
+            base = plugin / directory
+            if not base.is_symlink():
+                paths.extend(p for p in base.rglob('*') if p.is_file() and not p.is_symlink()
+                             and not any(parent.is_symlink() for parent in p.parents if parent != root))
+    paths = [p for p in paths if p.stat().st_dev == volume_path.stat().st_dev]
+    if paths:
+        remove_generated_files(root, paths)
+        remaining = shutil.disk_usage(volume_path).free
+        print(f'Reclaimed project build files ({len(paths)} files); '
+              f'{remaining / 1024**3:.1f} GiB free after cleanup.', flush=True)
+        return remaining
+    return free
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', nargs='+', choices=tuple(DIRECTORIES), default=['logs'],
@@ -87,12 +126,7 @@ def main():
         print(f'{path.stat().st_size:>12}  {path.relative_to(PROJECT)}')
     if args.apply:
         ensure_idle()
-        for path in paths:
-            # Recheck containment and symlinks immediately before removal.
-            path.resolve().relative_to(PROJECT)
-            if path.is_symlink() or any(p.is_symlink() for p in path.parents if p != PROJECT):
-                raise RuntimeError('Path became a symlink: ' + str(path))
-            path.unlink()
+        remove_generated_files(PROJECT, paths)
         print('Removed generated files. Settings, autosaves, assets and Git/LFS untouched.')
     else:
         print('Nothing removed. Repeat with --apply after closing Unreal to execute.')
