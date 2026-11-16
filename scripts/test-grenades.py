@@ -23,7 +23,7 @@ try:
     started=time.time();hostlog=logs/(tag+'-host.log');clientlog=logs/(tag+'-client.log')
     render=['-windowed','-ResX=1280','-ResY=720','-ERGrenadeRender'] if args.render else ['-nullrhi']
     handles.append(hostlog.open('w'))
-    host=subprocess.Popen(common+render+['/Game/EclipseRecoil/Maps/L_Depot?listen?Name=GrenadeHost','-port='+port,'-ERGrenadeProbe'],stdout=handles[-1],stderr=subprocess.STDOUT)
+    host=subprocess.Popen(common+render+['/Game/EclipseRecoil/Maps/L_Depot?listen?ERFullArsenalTest=1?Name=GrenadeHost','-port='+port,'-ERGrenadeProbe'],stdout=handles[-1],stderr=subprocess.STDOUT)
     processes.append(host);deadline=time.monotonic()+90
     while 'listening on port '+port not in hostlog.read_text(errors='replace'):
         if host.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Grenade host failed to listen')

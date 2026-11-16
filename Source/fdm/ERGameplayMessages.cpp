@@ -169,6 +169,7 @@ void UERGameplayMessages::Damage(AERCharacter* Victim, AController* Killer, cons
     if (Reloading) VictimEvents.Add(TEXT("death_while_reloading"));
     if (Cooking) VictimEvents.Add(TEXT("death_with_grenade_ready"));
     if (Facts.Fall) VictimEvents.Add(TEXT("fall_death"));
+    if (Facts.Drowning) VictimEvents.Add(TEXT("drowning_death"));
     if (K == V && Facts.Grenade) VictimEvents.Add(TEXT("self_grenade_death"));
     if (K == V && Facts.Explosion && !Facts.Grenade) VictimEvents.Add(TEXT("self_explosion_death"));
     if (Friendly)

@@ -33,9 +33,12 @@ catalog, and Apply affects the next spawn only. `?ERLegacyArsenal=1` and
   tumble (server bounce .18–.25, friction .4). Cooking can detonate in hand; death drops
   live ordnance. Launcher fires `AERWeapon::LauncherLobDegrees` (12°) above aim, 1750cm/s; scope multiplies horizontal
   speed ×1.5. Contact with a pawn: launched HE deals 25% base damage once per target.
-- Hand throw (`ERGrenadeBallistics`): `normalize(aim+Z*.35)*ProjectileSpeed` (880cm/s)
+- Hand throw (`ERGrenadeBallistics`): `normalize(aim+Z*.35)*ProjectileSpeed`
   with horizontal ×1.2, scaled by `1+.2*clamp(pitch/45,-1,1)`, then character velocity
   added. Origin is yaw-relative `(-14,24,-4)` from the eye, swept against cover.
+  Set the base speed in m/s for HE and smoke under their respective categories in
+  **Gameplay settings → Show advanced settings → Launch speed**, or use the
+  [server rules](GAMEPLAY.md#server-settings).
 - Armed fuse projectiles have a query-only `ShotTarget` (6cm thrown, 12cm held). Only
   positive server bullet damage detonates them. Blasts chain through an explicit
   server path with each hop's intact-cover snapshot.

@@ -19,7 +19,7 @@ public class fdm : ModuleRules
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDependencyModuleNames.AddRange(new [] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "UMG", "Slate", "SlateCore", "AIModule", "Niagara" });
         PrivateDependencyModuleNames.AddRange(new [] { "RenderCore", "RHI", "Sockets", "Networking", "OnlineSubsystemEOS", "OnlineSubsystem", "OnlineSubsystemUtils", "SocketSubsystemEOS" });
-        PrivateDependencyModuleNames.Add("ApplicationCore");
+        PrivateDependencyModuleNames.AddRange(new [] { "ApplicationCore", "AudioMixer" });
         PrivateDependencyModuleNames.Add("PhysicsCore");
         PrivateDependencyModuleNames.AddRange(new [] { "ClothingSystemRuntimeCommon", "ClothingSystemRuntimeInterface", "ChaosCloth" });
         PrivateDependencyModuleNames.AddRange(new [] { "PCG", "PCGExCore" });

@@ -12,8 +12,8 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
 {
     auto* T=NewObject<UERMapTemplate>();T->TemplateId=TEXT("test.circular");T->Archetype=EERMapArchetype::CentralBuilding;
     FERProceduralConfig C;C.TemplateAsset=T;FERBlockRoomConfig B;TSet<bool> Modes;TSet<int32> Shapes,Rules;TSet<FIntPoint> Dimensions;TSet<FName> CoverKinds;TSet<FIntVector> CoverDimensions;int32 FiringSites=0,GroundOnlySites=0;
-    int32 PoolLayouts=0,SinglePoolLayouts=0,PairedPoolLayouts=0,WaterfrontLayouts=0,RoofPoolLayouts=0,SmallRoofPoolLayouts=0;
-    int32 PhysicalRoofSeed=INDEX_NONE,PhysicalSingleSeed=INDEX_NONE,PhysicalPairSeed=INDEX_NONE,PhysicalWaterfrontSeed=INDEX_NONE;
+    int32 SinglePoolLayouts=0,WaterfrontLayouts=0,RoofPoolLayouts=0,SmallRoofPoolLayouts=0;
+    int32 PhysicalRoofSeed=INDEX_NONE,PhysicalSingleSeed=INDEX_NONE,PhysicalWallPoolSeed=INDEX_NONE,PhysicalRailingPoolSeed=INDEX_NONE,PhysicalWaterfrontSeed=INDEX_NONE;
     int32 PhysicalAlphaStairSeed=INDEX_NONE,PhysicalOmegaStairSeed=INDEX_NONE;
     int32 SmallCoverSites=0,LargeCoverSites=0;
     bool TimberAnnex=false;
@@ -65,7 +65,7 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
             {AddError(TEXT("single central ramp must face the same team on every floor"));return false;}
         if(!L.PoolWater.IsEmpty())
         {
-            ++PoolLayouts;
+            if(!TestEqual(TEXT("a layout has only one body of water"),L.PoolWater.Num(),1))return false;
             const bool RoofPool=L.FeatureNames.Contains(FName(TEXT("RooftopPool")));
             if(RoofPool)
             {
@@ -96,13 +96,18 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
             }
             const bool Single=!Waterfront && GroundPoolCount==1 && L.PoolWater[0].Max.Z<600 &&
                 FMath::IsNearlyZero(L.PoolWater[0].GetCenter().Y,.001);
-            const bool Pair= GroundPoolCount==2 && L.PoolWater[0].Max.Z<600 &&
-                L.PoolWater[0].GetCenter().Equals(L.PoolWater[1].GetCenter()*FVector(1,-1,1),.001) &&
-                L.PoolWater[0].GetSize().Equals(L.PoolWater[1].GetSize(),.001);
-            if((GroundPoolCount==0 && !RoofPool) || (GroundPoolCount>0 && !Single && !Pair && !Waterfront))
-            {AddError(TEXT("courtyard pool must be central or mirrored"));return false;}
-            if(Single){++SinglePoolLayouts;if(TeamSize==3 && PhysicalSingleSeed==INDEX_NONE)PhysicalSingleSeed=Seed;}
-            if(Pair){++PairedPoolLayouts;if(TeamSize==2 && PhysicalPairSeed==INDEX_NONE)PhysicalPairSeed=Seed;}
+            if(GroundPoolCount>0 && !Single && !Waterfront)
+            {AddError(TEXT("courtyard pool must be continuous across the seam"));return false;}
+            if(Single)
+            {
+                ++SinglePoolLayouts;
+                if(TeamSize==3)
+                {
+                    int32& PhysicalSeed=L.CrossingRule==EERCrossingRule::ClimbableWall ? PhysicalWallPoolSeed:
+                        L.CrossingRule==EERCrossingRule::FencedCrossings ? PhysicalRailingPoolSeed:PhysicalSingleSeed;
+                    if(PhysicalSeed==INDEX_NONE)PhysicalSeed=Seed;
+                }
+            }
         }
         for(const auto& Name:L.FeatureNames)if(Name.ToString().StartsWith(TEXT("Cover.")) && Name!=FName(TEXT("Cover.FiringSteps")))CoverKinds.Add(Name);
         for(const auto& Site:L.CoverSites)CoverDimensions.Add(FIntVector(FMath::RoundToInt32(Site.Size.X),FMath::RoundToInt32(Site.Size.Y),FMath::RoundToInt32(Site.Size.Z)));
@@ -139,9 +144,9 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
                 (L.FeatureNames.Contains(FName(TEXT("VillaWaterfront"))) ? 120.f:100.f))>.001)return false;
     }
     TestTrue(TEXT("seeded secondary buildings include timber"),TimberAnnex);
-    TestTrue(TEXT("some layouts have courtyard pools"),PoolLayouts>0);
     TestTrue(TEXT("some layouts have one central pool"),SinglePoolLayouts>0);
-    TestTrue(TEXT("some layouts retain mirrored courtyard pools"),PairedPoolLayouts>0);
+    TestTrue(TEXT("wall and railing pool crossings have physical probes"),
+        PhysicalWallPoolSeed!=INDEX_NONE && PhysicalRailingPoolSeed!=INDEX_NONE);
     TestTrue(TEXT("some layouts have a perimeter waterfront"),WaterfrontLayouts>0);
     TestTrue(TEXT("some 2v2 layouts have a physical waterfront probe"),PhysicalWaterfrontSeed!=INDEX_NONE);
     TestTrue(TEXT("some open layouts have rooftop pools"),RoofPoolLayouts>0);
@@ -167,7 +172,8 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
     if(PhysicalOmegaStairSeed!=INDEX_NONE)PhysicalCases.AddUnique({2,PhysicalOmegaStairSeed});
     if(PhysicalRoofSeed!=INDEX_NONE)PhysicalCases.AddUnique({2,PhysicalRoofSeed});
     if(PhysicalSingleSeed!=INDEX_NONE)PhysicalCases.AddUnique({3,PhysicalSingleSeed});
-    if(PhysicalPairSeed!=INDEX_NONE)PhysicalCases.AddUnique({2,PhysicalPairSeed});
+    if(PhysicalWallPoolSeed!=INDEX_NONE)PhysicalCases.AddUnique({3,PhysicalWallPoolSeed});
+    if(PhysicalRailingPoolSeed!=INDEX_NONE)PhysicalCases.AddUnique({3,PhysicalRailingPoolSeed});
     if(PhysicalWaterfrontSeed!=INDEX_NONE)PhysicalCases.AddUnique({2,PhysicalWaterfrontSeed});
     for(const FIntPoint& Case:PhysicalCases)
     {
@@ -246,7 +252,7 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
         }
         for(const auto& Bounds:L.PoolWater)
         {
-            const FVector Surface=Bounds.GetCenter();
+            const FVector Surface(Bounds.GetCenter().X,Bounds.GetCenter().Y,Bounds.Max.Z);
             if(Surface.Z>600)
             {
                 TestEqual(TEXT("roof pool does not wet the living floor below"),
@@ -282,18 +288,30 @@ bool FERCircularCentralTest::RunTest(const FString& Parameters)
                 TestTrue(TEXT("waterfront entry is 20cm below water"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-20,.1));
                 continue;
             }
-            TestEqual(TEXT("space below the ground basin is dry"),
-                Map->WaterDepthAt(Surface-FVector(0,0,120)),0.f);
-            TestTrue(TEXT("pool has a solid floor"),World->LineTraceSingleByChannel(
-                Hit,Surface+FVector(0,0,50),Surface-FVector(0,0,120),ECC_WorldStatic,Q));
-            TestTrue(TEXT("deep pool floor is 90cm below water"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-90,.1));
-            const float ShallowY=L.FeatureNames.Contains(FName(TEXT("VillaPoolSingle"))) ? 600.f:300.f;
+            const FVector Bed(Surface.X,0,Bounds.Min.Z);
+            TestEqual(TEXT("the water reaches the crossing floor"),Map->WaterDepthAt(Bed),210.f);
+            TestEqual(TEXT("space below the floor is dry"),Map->WaterDepthAt(Bed-FVector(0,0,10)),0.f);
+            TestTrue(TEXT("the submerged crossing has a solid floor"),World->LineTraceSingleByChannel(
+                Hit,Bed+FVector(0,0,100),Bed-FVector(0,0,10),ECC_WorldStatic,Q) &&
+                FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Bed.Z,.1));
+            const FVector AlongPool(0,200,0),PawnAtBed=Bed+FVector(0,0,95);
+            TestFalse(TEXT("standing capsule can cross the seam fully submerged"),
+                World->SweepSingleByChannel(Hit,PawnAtBed-AlongPool,PawnAtBed+AlongPool,FQuat::Identity,ECC_Pawn,Capsule,Q));
+            if(L.CrossingRule!=EERCrossingRule::OpenYard)
+            {
+                const FVector AboveWater=Surface+FVector(0,0,95);
+                TestTrue(TEXT("the separator still blocks crossing above water"),
+                    World->SweepSingleByChannel(Hit,AboveWater-AlongPool,AboveWater+AlongPool,FQuat::Identity,ECC_Pawn,Capsule,Q));
+            }
             for(float Side:{-1.f,1.f})
             {
-                const FVector Shallow=Surface+FVector(0,Side*ShallowY,0);
-                TestTrue(TEXT("shallow pool floor supports a pawn"),World->LineTraceSingleByChannel(
-                    Hit,Shallow+FVector(0,0,50),Shallow-FVector(0,0,120),ECC_WorldStatic,Q));
-                TestTrue(TEXT("shallow pool floor is 20cm below water"),FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-20,.1));
+                const FVector TopStep=Surface+FVector(0,Side*(Bounds.Max.Y-15),0);
+                const FVector Approach=Surface+FVector(0,Side*(Bounds.Max.Y+215),0);
+                TestTrue(TEXT("dry ground meets the pool rim"),World->LineTraceSingleByChannel(
+                    Hit,Approach+FVector(0,0,20),Approach-FVector(0,0,15),ECC_WorldStatic,Q));
+                TestTrue(TEXT("the pool has a shallow exit stair on each side"),World->LineTraceSingleByChannel(
+                    Hit,TopStep+FVector(0,0,20),TopStep-FVector(0,0,30),ECC_WorldStatic,Q) &&
+                    FMath::IsNearlyEqual(Hit.ImpactPoint.Z,Surface.Z-10,.1));
             }
         }
         UDynamicMeshComponent* TerrainComponent=nullptr;

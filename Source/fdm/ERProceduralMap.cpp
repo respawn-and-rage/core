@@ -925,7 +925,8 @@ void AERProceduralMap::ConfigureTemplateFloors()
             Water->SetCollisionProfileName(TEXT("NoCollision"));
             Water->ComponentTags.Add(TEXT("ERTemplateVisual"));
             Water->SetCanEverAffectNavigation(false);Water->SetCastShadow(false);
-            Water->SetRelativeLocation(Bounds.GetCenter()-FVector(0,0,.5));
+            const double WaterZ=Layout.FeatureNames.Contains(TEXT("VillaPoolSingle")) ? Bounds.Max.Z:Bounds.GetCenter().Z;
+            Water->SetRelativeLocation(FVector(Bounds.GetCenter().X,Bounds.GetCenter().Y,WaterZ-.5));
             Water->SetRelativeScale3D(FVector(Bounds.GetSize().X,Bounds.GetSize().Y,1)/100);
             Water->RegisterComponent();PoolSurfaces.Add(Water);
         }
@@ -1160,7 +1161,8 @@ float AERProceduralMap::WaterDepthAt(const FVector& WorldFeet) const
         if(P.X>=Water.Min.X && P.X<=Water.Max.X && P.Y>=Water.Min.Y && P.Y<=Water.Max.Y)
         {
             const float Depth=float(Water.Max.Z-P.Z);
-            if(Depth>=0.f && Depth<=105.f)return Depth;
+            const double MaxDepth=Layout.FeatureNames.Contains(TEXT("VillaPoolSingle")) ? Water.GetSize().Z+5:105;
+            if(Depth>=0.f && Depth<=MaxDepth)return Depth;
         }
     return 0.f;
 }
@@ -1205,7 +1207,7 @@ bool AERProceduralMap::WaterSurfaceAt(const FVector& WorldPosition,FVector& OutS
     }
     for(const FBox& Water:Layout.PoolWater)
         if(P.X>=Water.Min.X && P.X<=Water.Max.X && P.Y>=Water.Min.Y && P.Y<=Water.Max.Y &&
-           P.Z<=Water.Max.Z-1 && P.Z>=Water.Max.Z-105)
+           P.Z<=Water.Max.Z-1 && P.Z>=(Layout.FeatureNames.Contains(TEXT("VillaPoolSingle")) ? Water.Min.Z-5:Water.Max.Z-105))
         {OutSurface=GetActorTransform().TransformPosition(FVector(P.X,P.Y,Water.Max.Z));return true;}
     return false;
 }

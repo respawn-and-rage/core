@@ -3769,6 +3769,48 @@
       }
     },
     {
+      "id": "drowning_death",
+      "category": "misadventures",
+      "label": "Drowned",
+      "enabled_by_default": true,
+      "trigger": "The player runs out of air underwater and dies.",
+      "requires": [],
+      "roles": {
+        "actor": "Player who drowned",
+        "target": null
+      },
+      "placeholders": [],
+      "display": {
+        "channel": "combat_toast",
+        "priority": 85,
+        "cooldown_seconds": 0,
+        "duration_seconds": 3,
+        "title": "Drowned"
+      },
+      "notes": "",
+      "messages": {
+        "actor": [
+          {
+            "id": "drowning_death.actor.01",
+            "text": "The shortcut came with a breath test."
+          },
+          {
+            "id": "drowning_death.actor.02",
+            "text": "Next time, come up for air."
+          },
+          {
+            "id": "drowning_death.actor.03",
+            "text": "The pool won on lung capacity."
+          },
+          {
+            "id": "drowning_death.actor.04",
+            "text": "Respawn includes a fresh supply of air."
+          }
+        ],
+        "target": []
+      }
+    },
+    {
       "id": "environmental_death",
       "category": "misadventures",
       "label": "Killed by the Map",

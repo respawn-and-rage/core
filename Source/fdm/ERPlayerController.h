@@ -141,6 +141,7 @@ public:
     bool bMenuOpen = false;
     virtual void BeginPlay() override;
     virtual void PlayerTick(float DeltaTime) override;
+    virtual void UpdateCameraManager(float DeltaSeconds) override;
     virtual void TickActor(float DeltaSeconds,ELevelTick TickType,FActorTickFunction& ThisTickFunction) override;
     virtual void OnPossess(APawn* PossessedPawn) override;
     void HoldForBlockMap(class AERBlockRoom* Room,bool Reposition=false);
@@ -204,6 +205,9 @@ public:
     // HE structural profile (400/25/200/^2) 10cm before the aimed surface.
     UFUNCTION(Exec) void ERBlockGrenade();
 private:
+    void SetUnderwaterAudio(bool Submerged);
+    UPROPERTY(Transient) TObjectPtr<class USubmixEffectSubmixEQPreset> UnderwaterEQ;
+    UPROPERTY(Transient) TObjectPtr<class USoundSubmix> UnderwaterMix;
     UPROPERTY(Transient) TObjectPtr<UInputMappingContext> LocalGameplayMapping;
     TMap<int32, FKey> RawControlKeys;
     void ApplyControlBindings();

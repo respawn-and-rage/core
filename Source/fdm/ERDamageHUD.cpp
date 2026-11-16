@@ -42,7 +42,8 @@ void AERHUD::DrawInflictedDamage()
 
 void AERHUD::DrawDamageFeedback(const AERCharacter* Character)
 {
-    if(!Character || Character->Health->bDead || PlayerOwner->GetViewTarget()!=Character)return;
+    if (!Character || PlayerOwner->GetViewTarget() != Character) return;
+    const bool bDead = Character->Health->bDead;
     const auto& Events=Character->GetDamageVisuals();
     if(Events.IsEmpty())return;
     const float W=Canvas->SizeX,H=Canvas->SizeY,Scale=FERHUDLayout(FVector2D(W,H)).Scale;
@@ -60,9 +61,11 @@ void AERHUD::DrawDamageFeedback(const AERCharacter* Character)
     float Flash=0;
     for(const auto& E:Events)
     {
+        if (bDead && !E.bShowAfterDeath) continue;
         const float Fade=FMath::Square(FMath::Clamp(1.f-float(Now-E.LocalTime)/.45f,0.f,1.f));
         Flash=FMath::Max(Flash,E.Strength*Fade);
     }
+    if (Flash <= 0 && bDead) return;
     // A feathered rectangular ring keeps the center clear at every aspect ratio.
     const FLinearColor Edge(.72f,.002f,.001f,Flash),Clear(.72f,.002f,.001f,0);
     auto Boundary=[&](float Angle)
@@ -80,9 +83,10 @@ void AERHUD::DrawDamageFeedback(const AERCharacter* Character)
     const FVector Forward=Facing.Vector(),Right=FRotationMatrix(Facing).GetUnitAxis(EAxis::Y);
     for(const auto& E:Events)
     {
+        if (bDead) break;
         const float Alpha=FMath::Square(FMath::Clamp(1.f-float(Now-E.LocalTime)/.65f,0.f,1.f));
         const FVector Source=E.ToAttacker.GetSafeNormal2D();
-        if(Alpha<=0 || Source.IsNearlyZero())continue; // Falls have no compass bearing.
+        if(Alpha<=0 || Source.IsNearlyZero())continue; // Environmental damage has no compass bearing.
         const float Angle=FMath::Atan2(FVector::DotProduct(Source,Right),FVector::DotProduct(Source,Forward))-PI*.5f;
         // Front above, right to the right, rear below; rotates with current view.
         const float Radius=720.f*.17f*Scale;

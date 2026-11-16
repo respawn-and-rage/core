@@ -261,7 +261,7 @@ void AERNetworkProbe::Tick(float DeltaTime)
             Check(FirstCorpse.IsValid() && FirstCorpse->Body->IsSimulatingPhysics(), TEXT("Death_corpse_ragdoll_created"));
             Check(FirstCorpse.IsValid() && FirstCorpse->GetTeamAppearance().Matches(FirstCorpse->Body, true), TEXT("Team_omega_corpse_matches_live_character"));
             Check(FirstCorpse.IsValid() && FirstCorpse->HasValidRagdollPose(), TEXT("Death_omega_limbs_and_hidden_accessories_during_physics"));
-            Check(GetWorld()->GetSubsystem<UERGameplayMessages>()->CatalogSize() == 72, TEXT("Messages_complete_catalog_loaded"));
+            Check(GetWorld()->GetSubsystem<UERGameplayMessages>()->CatalogSize() == 73, TEXT("Messages_complete_catalog_loaded"));
             Check(!Host->KillConfirmations.IsEmpty() && Host->KillConfirmations.Last().Title.Contains(TEXT("KILLED ·")) &&
                 !Host->KillConfirmations.Last().Body.IsEmpty(), TEXT("Messages_killer_always_receives_confirmation"));
             Check(C->bHasDeathFocus && C->DeathFocus == H, TEXT("Messages_death_focus_is_actual_killer"));

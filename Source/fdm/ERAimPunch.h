@@ -58,4 +58,5 @@ struct FERDamageVisual
     FVector ToAttacker = FVector::ZeroVector;
     double LocalTime = -100;
     float Strength = 0;
+    bool bShowAfterDeath = false;
 };

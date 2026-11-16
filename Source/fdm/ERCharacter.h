@@ -187,7 +187,8 @@ public:
     virtual float TakeDamage(float Damage, const FDamageEvent& Event, AController* Killer, AActor* Causer) override;
     virtual bool CanJumpInternal_Implementation() const override;
     virtual void Landed(const FHitResult& Hit) override;
-    static float FallDamage(float DownSpeed,float Gravity);
+    static float FallDamage(float DownSpeed, float Gravity, float WaterDepth = 0,
+        float SafeHeight = 300, float LethalHeight = 1100);
     // Weapon remains the selected inventory item while automatically stowed.
     bool CanHoldWeaponOnLadder() const;
     bool IsWeaponStowed() const;
@@ -217,6 +218,10 @@ public:
     void ApplyDeathVisuals();
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 private:
+    void UpdateDrowning();
+    UFUNCTION(Client, Reliable) void ClientDrowningFeedback(float Amount, bool bLethal);
+    void AddDamageVisual(float Amount, const FVector& ToAttacker, bool bShowAfterDeath = false);
+    double NextDrowningDamageAt = -1;
     UPROPERTY(Replicated) bool bWeaponLightOn = false;
     UPROPERTY(Transient) TObjectPtr<class USpotLightComponent> WeaponLight;
     void UpdateWeaponLight(bool bStowed);

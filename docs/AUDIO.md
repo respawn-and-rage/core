@@ -51,6 +51,10 @@ The ring uses a single playback of Freesound 377205 by tnturner (CC0). Import
 through Unreal on macOS with `scripts/setup_blast_ringing_audio.py` and
 `ER_BLAST_RINGING_WAV` set to the original WAV.
 
+**Underwater:** The local camera detects immersion in a generated body of water. The master
+submix sounds quieter with reduced high frequencies while immersed and returns to normal at
+the surface. Blast ringing continues to manage its separate world submix.
+
 Regenerate with `scripts/prepare_audio_pass.py` then `setup_audio_pass.py`; per-sound scripts
 (`setup_shotgun_audio.py`, ...) are reapplied by it. Headless runs never prove listening quality.
 

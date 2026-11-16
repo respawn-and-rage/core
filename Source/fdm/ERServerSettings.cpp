@@ -217,7 +217,8 @@ const TArray<FERServerSetting>& ERServer::Settings()
             if(FString(Id)==TEXT("HE") || FString(Id)==TEXT("Smoke") || FString(Id)==TEXT("Launcher"))
             {
                 WeaponField(Id,*Group,TEXT("FuseDuration"),TEXT("Fuse duration"),TEXT("s"),.1f,20);
-                WeaponField(Id,*Group,TEXT("ProjectileSpeed"),TEXT("Launch speed"),TEXT("m/s"),1,100,true,false,100);
+                WeaponField(Id,*Group,TEXT("ProjectileSpeed"),TEXT("Launch speed"),TEXT("m/s"),1,100,true,false,100,
+                    Name==TEXT("Launcher") ? TOptional<float>() : TOptional<float>(12.f));
                 WeaponField(Id,*Group,TEXT("LaunchRangeMultiplier"),TEXT("Horizontal launch multiplier"),TEXT("×"),.1f,4,true);
                 if(FString(Id)==TEXT("Launcher"))WeaponField(Id,*Group,TEXT("ScopedLaunchRangeMultiplier"),TEXT("Aimed horizontal launch multiplier"),TEXT("×"),.1f,4,true);
                 if(FString(Id)!=TEXT("Smoke"))

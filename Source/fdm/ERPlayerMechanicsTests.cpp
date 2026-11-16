@@ -28,11 +28,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FERFallTest,"EclipseRecoil.Player.FallDamage",E
 bool FERFallTest::RunTest(const FString&)
 {
     const float Gravity=1764;
-    auto Damage=[&](float Height){return AERCharacter::FallDamage(FMath::Sqrt(2*Gravity*Height),Gravity);};
+    auto Damage=[&](float Height, float Depth = 0)
+    {return AERCharacter::FallDamage(FMath::Sqrt(2*Gravity*Height),Gravity,Depth);};
     TestEqual(TEXT("Normal jump is harmless"),Damage(60),0.f);
     TestTrue(TEXT("Three meters remains safe"),Damage(300)<.001f);
     TestTrue(TEXT("Six meter fall costs 37.5 HP"),FMath::IsNearlyEqual(Damage(600),37.5f,.001f));
     TestTrue(TEXT("Eleven meters is lethal"),FMath::IsNearlyEqual(Damage(1100),100.f,.001f));
+    TestTrue(TEXT("Shallow water reduces fall damage"), FMath::IsNearlyEqual(Damage(600,20),27.5f,.001f));
+    TestEqual(TEXT("A deep pool absorbs a six metre fall"), Damage(600,210),0.f);
+    TestTrue(TEXT("Deep water softens an eleven metre fall"), Damage(1100,210)<.001f);
+    TestTrue(TEXT("A very high fall is still lethal in deep water"), FMath::IsNearlyEqual(Damage(2100,210),100.f,.001f));
     TestEqual(TEXT("Upward velocity never damages"),AERCharacter::FallDamage(-2000,Gravity),0.f);
     TestEqual(TEXT("Invalid gravity never damages"),AERCharacter::FallDamage(2000,0),0.f);
     return true;

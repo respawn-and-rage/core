@@ -22,7 +22,7 @@ bool FERGameplayMessagesTest::RunTest(const FString&)
     if (!TestNotNull(TEXT("Test world"), World)) return false;
     GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
     auto* Messages = World->GetSubsystem<UERGameplayMessages>();
-    TestEqual(TEXT("All events retained"), Messages->CatalogSize(), 72);
+    TestEqual(TEXT("All events retained"), Messages->CatalogSize(), 73);
     TestEqual(TEXT("Ordinary notifications allow six seconds to read"), Messages->Events[TEXT("kill")].Duration, 6.f);
     TestEqual(TEXT("Longer result notifications allow ten seconds to read"), Messages->Events[TEXT("team_victory")].Duration, 10.f);
     auto* Player = World->SpawnActor<AERPlayerState>();
@@ -39,6 +39,14 @@ bool FERGameplayMessagesTest::RunTest(const FString&)
         Drawn.Add(Last);
     }
     TestNotEqual(TEXT("No repeat across bag boundary"), Messages->Select(Player,TEXT("kill"),false,Context), Last);
+    TSet<FString> DrowningLines;
+    for (int32 Variant = 0; Variant < 4; ++Variant)
+    {
+        const FString Line = Messages->Select(Player, TEXT("drowning_death"), false, Context);
+        TestFalse(TEXT("Drowning variant contains text"), Line.IsEmpty());
+        DrowningLines.Add(Line);
+    }
+    TestEqual(TEXT("Drowning has four distinct variants"), DrowningLines.Num(), 4);
     FERMessageEvent Missing;
     Missing.Actor = {TEXT("Unknown {missing}"), TEXT("Safe {actor}")};
     Messages->Events.Add(TEXT("missing"), Missing);

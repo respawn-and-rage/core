@@ -32,14 +32,15 @@ Every storey declares its lounge beside the entrance, the side room and the seco
 [interior kit](../MAPS.md#shared-rules) as living rooms, kitchens, bedrooms, dining rooms or
 studies; outbuildings become stores, kitchens or offices. The hall spine and stairwell stay clear.
 
-Some open central-hill layouts have one wide central pool; other central-hill layouts can have two mirrored recessed courtyard pools. Their solid concrete
-floors are 20cm below the water at both ends and 90cm below it in the centre.
-The clear water surface has no collision, so players walk on the basin floor.
-Water detection stays within 105cm below the surface, excluding rooms beneath roof pools.
-Wading reduces movement speed progressively from 90% near the surface to 50% at 100cm depth.
-The wall separator extends below the local terrain grade so its underside stays hidden on slopes.
+Some central-hill layouts have a single courtyard pool across Y=0. The concrete basin is
+210cm deep, with exit stairs at both ends. In divided layouts the wall or railing spans
+the pool at the waterline, so a player can walk fully submerged beneath the intact separator.
+The water surface has no collision, and wading speed drops to half at 100cm depth.
+An immersed camera applies blue-green color grading to the whole scene. See
+[gameplay](../GAMEPLAY.md) for drowning and [audio](../AUDIO.md) for underwater sound.
+The wall separator on dry ground extends below the local terrain grade to hide its underside.
 `setup_pool_water.py` creates the owned translucent water material in Unreal.
-Open layouts on the central hill can have a compact roof pool even in 1v1. Its waterline is flush with the roof, its basin extends 100cm into the slab, and five square treads in a corner of each mirrored half lead from the rim to the floor. The 120cm roof assembly keeps a 300cm interior ceiling under the basin. The interior stairwell extends five treads to the raised roof beside the pool.
+Open central-hill layouts without a courtyard pool can have a compact roof pool even in 1v1. Its waterline is flush with the roof, its basin extends 100cm into the slab, and five square treads in a corner of each mirrored half lead from the rim to the floor. The 120cm roof assembly keeps a 300cm interior ceiling under the basin. The interior stairwell extends five treads to the raised roof beside the pool.
 
 - Open: connected ground routes, with no central separator.
 - Wall division: 340cm exterior Brick separator, above the default jump and climb

@@ -473,6 +473,7 @@ void AERPlayerController::PlayerTick(float DeltaTime)
 }
 void AERPlayerController::EndPlay(const EEndPlayReason::Type Reason)
 {
+    SetUnderwaterAudio(false);
     FScreenshotRequest::OnScreenshotRequestProcessed().Remove(ScreenshotProcessedHandle);
     ScreenshotProcessedHandle.Reset();
     if (ScreenshotCamera) { ScreenshotCamera->Destroy(); ScreenshotCamera = nullptr; }

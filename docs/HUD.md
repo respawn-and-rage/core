@@ -46,6 +46,7 @@ without pixel caps, recomputed from the live viewport. Font: Teko SemiBold throu
 - **Inflicted damage**: red HP and green AP text under the reticle, up to five rows, 1s hold,
   .2s fade, attacker only. Rejected, zero and self damage are not shown.
 - Damage arcs and edge flashes: see [WEAPON_TUNING.md](WEAPON_TUNING.md).
+  Each drowning hit uses the red edge flash, including the fatal hit.
 
 ## Minimap
 

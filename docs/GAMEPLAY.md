@@ -60,7 +60,8 @@ does not affect bot vision. Stationary targets keep team, skin and start across 
 | Stamina | 15s of sprint, 20s full recovery from empty, also while running |
 | Auto step / vault / climb | 30 / 80 / 150 cm above current feet |
 | Crouch / prone transition | 0.4s / 1.1s |
-| Fall damage | safe ≤3m, lethal from 11m; bypasses armor, authority only |
+| Fall damage | On dry ground, safe through 3m and lethal from 11m by default. Each metre of water depth at impact subtracts 4m from the effective fall height. Damage bypasses armor and is applied by the server. |
+| Drowning | after 30 seconds with eyes submerged, lose 10% of maximum health each second. Surfacing resets the timer. Damage bypasses armor and is applied by the server. |
 
 Sprint: double-tap W within 300ms and hold, or hold E with W. Holding both keys
 through the countdown or respawn starts a sprint as soon as forward movement is allowed. Partial stamina can be
@@ -130,7 +131,8 @@ Menus, HUD and labels are English; the language is forced at GameInstance init.
 
 ## Server settings
 
-**Start Server → Gameplay settings**: categories, basic/advanced fields, per-value
+**Gameplay settings**, available before starting a local match or hosting a server:
+categories, basic/advanced fields, per-value
 resets, Standard reset and named presets. Saved in GameUserSettings under
 `RespawnAndRage.ServerRules`, `.ServerPresets`, `.ServerPreset.<name>`. Dedicated and
 direct launches can set `[RespawnAndRage.ServerRules]` in Game.ini:
@@ -139,6 +141,8 @@ direct launches can set `[RespawnAndRage.ServerRules]` in Game.ini:
 Move.Sprint=24
 Smoke.Radius=6
 Weapon.HE.ExplosionRadius=6
+Weapon.HE.ProjectileSpeed=12
+Weapon.Smoke.ProjectileSpeed=12
 Kit.rifleman.offense.HE=3
 ```
 

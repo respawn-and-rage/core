@@ -48,7 +48,9 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
     constexpr float FloorThickness=5;
     const float Grade=L.CentralHill ? L.HillHeight:0;
     const float Base=Grade+FloorThickness;
-    const bool RoofPool=L.CrossingRule==EERCrossingRule::OpenYard && L.CentralHill;
+    const bool CourtyardPool=L.CentralHill && Radius>=2900 &&
+        (HashCombineFast(uint32(Choice),0x504f4f4cu)&4)!=0;
+    const bool RoofPool=L.CrossingRule==EERCrossingRule::OpenYard && L.CentralHill && !CourtyardPool;
     const float RoofPoolHalfX=L.BuildingFloors==2 ? 120.f:150.f;
     const float RoofPoolHalfY=L.BuildingFloors==2 ? 180.f:250.f;
     const float RoofPoolLocalX=HallX+130.f;
@@ -497,40 +499,27 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
         for(float LocalY:{-D*.5f+45,-Band-45})
             Box({West+45,LocalY,-45},{65,65,90},EERBlockMaterial::Concrete,true);
     }
-    // Recessed courtyard basins: 20cm at either entrance, 80cm in the centre.
-    // The terrain is carved below the solid floor; the water has no collision.
-    const FVector2D PoolCenter(BuildingX-W*.5f-650,-650);
-    const bool Pools=L.CentralHill && Radius>=2900 &&
-        (HashCombineFast(uint32(Choice),0x504f4f4cu)&4)!=0;
-    if(Pools)
+    // One basin on the symmetry seam, with enough water to cover a standing pawn.
+    const float PoolX=BuildingX-W*.5f-650;
+    constexpr float PoolHalfX=220,PoolHalfY=1040,PoolRim=185,PoolDepth=210;
+    if(CourtyardPool)
     {
-        const bool SinglePool=L.CrossingRule==EERCrossingRule::OpenYard && (uint32(Choice)%7u)<3u;
-        if(SinglePool)
+        const float Bed=Grade-PoolDepth;
+        L.PoolWater.Emplace(FVector(PoolX-PoolHalfX,-PoolHalfY,Bed),FVector(PoolX+PoolHalfX,PoolHalfY,Grade));
+        L.FeatureNames.Add(TEXT("VillaPoolSingle"));
+        L.TerrainPads.Emplace(FVector(PoolX-PoolHalfX-PoolRim-100,-PoolHalfY-PoolRim-100,Grade),
+                              FVector(PoolX+PoolHalfX+PoolRim+100,PoolHalfY+PoolRim+100,Grade));
+        Box({PoolX,0,Bed-10},{2*PoolHalfX,2*PoolHalfY,20},EERBlockMaterial::Concrete,true,false,true);
+        for(float Side:{-1.f,1.f})
+            Box({PoolX+Side*(PoolHalfX+PoolRim*.5f),0,Grade-PoolDepth*.5f},
+                {PoolRim,2*(PoolHalfY+PoolRim),PoolDepth},EERBlockMaterial::Concrete,true,false,true);
+        Box({PoolX,-PoolHalfY-PoolRim*.5f,Grade-PoolDepth*.5f},
+            {2*PoolHalfX,PoolRim,PoolDepth},EERBlockMaterial::Concrete,true,true,true);
+        for(int32 Step=0;Step<10;++Step)
         {
-            const FVector Center(PoolCenter.X,0,Grade),WaterHalf(220,700,0);
-            L.PoolWater.Emplace(Center-WaterHalf,Center+WaterHalf);
-            Box({Center.X,0,Grade-100},{480,1460,20},EERBlockMaterial::Concrete,true,false,true);
-            for(float Side:{-1.f,1.f})
-                Box({Center.X+Side*230,0,Grade-30},{20,1460,120},EERBlockMaterial::Concrete,true,false);
-            Box({Center.X,-710,Grade-30},{440,20,120},EERBlockMaterial::Concrete,true,true);
-            Box({Center.X,-600,Grade-55},{440,200,70},EERBlockMaterial::Concrete,true,true,true);
-            L.FeatureNames.Add(TEXT("VillaPoolSingle"));
-        }
-        else
-        {
-            for(float Side:{-1.f,1.f})
-            {
-                const FVector Center(PoolCenter.X,Side*PoolCenter.Y,Grade),WaterHalf(220,390,0);
-                L.PoolWater.Emplace(Center-WaterHalf,Center+WaterHalf);
-            }
-            Box(FVector(PoolCenter,Grade-100),{480,820,20},EERBlockMaterial::Concrete,true,true,true);
-            for(float Side:{-1.f,1.f})
-            {
-                Box(FVector(PoolCenter+FVector2D(Side*230,0),Grade-30),{20,820,120},EERBlockMaterial::Concrete,true);
-                Box(FVector(PoolCenter+FVector2D(0,Side*400),Grade-30),{440,20,120},EERBlockMaterial::Concrete,true);
-                Box(FVector(PoolCenter+FVector2D(0,Side*290),Grade-55),{440,190,70},EERBlockMaterial::Concrete,true,true,true);
-            }
-            L.FeatureNames.Add(TEXT("VillaPools"));
+            const float Height=20.f*(Step+1);
+            Box({PoolX,-PoolHalfY+285-30.f*Step,Bed+Height*.5f},
+                {2*PoolHalfX,30,Height},EERBlockMaterial::Concrete,true,true,true);
         }
     }
     // The roof slab wraps a recessed basin; the interior stair reaches it.
@@ -594,7 +583,7 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
         if((OutsideX<450 && OutsideY<450) ||
            FMath::Square(P.X/(RadiusX-EdgeMargin))+FMath::Square(P.Y/(RadiusY-EdgeMargin))>1 ||
            FMath::Abs(P.X-FlankX)<PadHalf+235)continue;
-        if(Pools && FMath::Abs(P.X-PoolCenter.X)<850 && FMath::Abs(P.Y-PoolCenter.Y)<1000)continue;
+        if(CourtyardPool && FMath::Abs(P.X-PoolX)<850 && FMath::Abs(P.Y)<1650)continue;
         if(Waterfront && P.X<WaterfrontShoreX+450)continue;
         if(ExteriorAccess.bIsValid && ExteriorAccess.ExpandBy(PadHalf+90).IsInside(P))continue;
         bool Clear=true;for(const auto& S:L.SecondaryStructures)Clear&=FMath::Abs(P.X-S.Frame.GetLocation().X)>S.Size.X*.5+650 || FMath::Abs(P.Y-S.Frame.GetLocation().Y)>S.Size.Y*.5+650;
@@ -658,6 +647,8 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
         const bool Railing=L.CrossingRule==EERCrossingRule::FencedCrossings;
         TArray<float> Cuts{-RadiusX+30,BuildingX+MinI,BuildingX+MinI+20,BuildingX+MaxI-20,BuildingX+MaxI,RadiusX-30};
         if(Railing){Cuts.Add(FlankX-AnnexHalfWidth);Cuts.Add(FlankX+AnnexHalfWidth);}
+        const float PoolWest=PoolX-PoolHalfX-PoolRim,PoolEast=PoolX+PoolHalfX+PoolRim;
+        if(CourtyardPool){Cuts.Add(PoolWest);Cuts.Add(PoolEast);}
         Cuts.Sort();
         for(int32 I=1;I<Cuts.Num();++I)
         {
@@ -672,16 +663,17 @@ bool BuildCircularCentralBuilding(const UERMapTemplate& T,int32 Seed,TArray<FERM
                 const float H=FMath::Max3(CentralGroundHeight(L,{Lo,0}),CentralGroundHeight(L,{Hi,0}),CentralGroundHeight(L,{CX,0}));
                 const bool InsideVilla=CX>BuildingX+MinI && CX<BuildingX+MaxI;
                 if(InsideVilla)continue;
-                const float DividerBase=FMath::Min3(CentralGroundHeight(L,{Lo,0}),CentralGroundHeight(L,{Hi,0}),CentralGroundHeight(L,{CX,0}))-80;
-                const float DividerTop=H+WallHeight;
+                const bool OverPool=CourtyardPool && CX>PoolWest && CX<PoolEast;
+                const float DividerBase=OverPool ? Grade:FMath::Min3(CentralGroundHeight(L,{Lo,0}),CentralGroundHeight(L,{Hi,0}),CentralGroundHeight(L,{CX,0}))-80;
+                const float DividerTop=(OverPool ? Grade:H)+WallHeight;
                 if(Railing)
                 {
-                    const float Foundation=H;
+                    const float Foundation=OverPool ? Grade:H;
                     Box({CX,0,Foundation+ERIndustrialFence::PlinthHeightCm*.5f},{Hi-Lo,12,ERIndustrialFence::PlinthHeightCm},EERBlockMaterial::Concrete,true,false);
                     Box({CX,0,Foundation+ERIndustrialFence::PlinthHeightCm+ERIndustrialFence::ModuleHeightCm*.5f},{Hi-Lo,12,ERIndustrialFence::ModuleHeightCm},EERBlockMaterial::Metal,true,false).PawnBarrier=true;
                 }
                 else
-                    Box({CX,0,(DividerBase+DividerTop)*.5f},{Hi-Lo,40,DividerTop-DividerBase},EERBlockMaterial::Brick,false,false);
+                    Box({CX,0,(DividerBase+DividerTop)*.5f},{Hi-Lo,40,DividerTop-DividerBase},EERBlockMaterial::Brick,false,false).Anchored=OverPool;
             }
         }
     }

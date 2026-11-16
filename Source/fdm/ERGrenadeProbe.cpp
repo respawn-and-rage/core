@@ -105,8 +105,8 @@ void AERGrenadeProbe::Tick(float DeltaSeconds)
         if(GShaderCompilingManager && GShaderCompilingManager->IsCompiling()) return;
         int32 Players=0;for(FConstPlayerControllerIterator It=GetWorld()->GetPlayerControllerIterator();It;++It) ++Players;
         if(Players<2) return;
-        Check(C->ReferenceArsenal.Num()==10 && FMath::IsNearlyEqual(C->ReferenceArsenal[7]->ProjectileSpeed,1750.f),TEXT("milkor_launch_speed_reduced_again"));
-        Check(C->ReferenceArsenal.Num()==10 && FMath::IsNearlyEqual(C->ReferenceArsenal[8]->ProjectileSpeed,880.f) && FMath::IsNearlyEqual(C->ReferenceArsenal[9]->ProjectileSpeed,880.f),TEXT("hand_grenade_launch_speed_reduced_twenty_percent"));
+        Check(C->Inventory.Num()==10 && FMath::IsNearlyEqual(C->Inventory[7]->Tuned()->ProjectileSpeed,1750.f),TEXT("standard_launcher_speed"));
+        Check(C->Inventory.Num()==10 && FMath::IsNearlyEqual(C->Inventory[8]->Tuned()->ProjectileSpeed,1200.f) && FMath::IsNearlyEqual(C->Inventory[9]->Tuned()->ProjectileSpeed,1200.f),TEXT("standard_hand_grenade_speed"));
         Check(C->ReferenceArsenal[8]->LaunchRangeMultiplier==1.2f && C->ReferenceArsenal[9]->LaunchRangeMultiplier==1.2f,TEXT("hand_range_bonus_twenty_percent"));
         Check(C->Inventory.Num()==10 && C->Inventory[8]->MagazineAmmo==10 && C->Inventory[9]->MagazineAmmo==10,TEXT("ten_he_and_ten_smoke_for_testing"));
         if(auto* Defaults=C->Weapon->ProjectileClass->GetDefaultObject<AERProjectile>();Defaults->GrenadeExplosionClass)

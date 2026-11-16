@@ -103,9 +103,9 @@ void AERGrenadeProbe::TickCombat(float DeltaSeconds)
             const FVector Offset=CookProjectile->ReleasedFrom-Local->Camera->GetComponentLocation();
             Check(FVector::DotProduct(Offset,FRotator(0,90,0).Vector())<0 && Offset.Z>=-5 && Offset.Z<=0,TEXT("throw_starts_just_above_shoulder_below_eye"));
             Check(CookProjectile->ReleasedVelocity.Z>200,TEXT("overarm_throw_has_upward_ballistic_arc"));
-            const FVector OldThrow=FVector(0,1,.35f).GetSafeNormal()*880.f;
-            Check(FMath::IsNearlyEqual(CookProjectile->ReleasedVelocity.Size2D(),OldThrow.Size2D()*1.2f,1.f) &&
-                FMath::IsNearlyEqual(CookProjectile->ReleasedVelocity.Z,OldThrow.Z,1.f),TEXT("level_aim_preserves_original_hand_throw_speed_and_arc"));
+            const FVector StandardThrow=FVector(0,1,.35f).GetSafeNormal()*1200.f;
+            Check(FMath::IsNearlyEqual(CookProjectile->ReleasedVelocity.Size2D(),StandardThrow.Size2D()*1.2f,1.f) &&
+                FMath::IsNearlyEqual(CookProjectile->ReleasedVelocity.Z,StandardThrow.Z,1.f),TEXT("level_aim_uses_standard_hand_throw_speed_and_arc"));
         }
         Capture(TEXT("Cook02_Released.png"));
         Advance(4,FMath::Max(.1,OriginalFuseEnd-Now+.5));

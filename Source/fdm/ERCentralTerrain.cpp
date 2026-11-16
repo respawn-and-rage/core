@@ -90,14 +90,13 @@ float Field(const FERProceduralLayout& L,FVector2D P)
         if(Distance<0) return -90.f+70.f*Smooth(float((Distance+230)/130));
         if(Distance<100) return -20.f+20.f*Smooth(float(Distance/100));
     }
-    else for(const auto& Water:L.PoolWater)
+    else if(L.FeatureNames.Contains(TEXT("VillaPoolSingle")))
     {
-        if(Water.Max.Z>600)continue; // Rooftop basins must not carve the ground below.
-        const FVector Center=Water.GetCenter();
-        // Keep terrain below the solid pool floor, including triangle edges.
-        if(FMath::Abs(P.X-Center.X)<Water.GetExtent().X+45 &&
-           FMath::Abs(P.Y-Center.Y)<Water.GetExtent().Y+45)
-            return float(Center.Z-100);
+        const auto& Water=L.PoolWater[0];
+        // Carve past the rim's inner edge so no terrain triangle projects into the basin.
+        if(FMath::Abs(P.X-Water.GetCenter().X)<Water.GetExtent().X+90 &&
+           FMath::Abs(P.Y)<Water.GetExtent().Y+90)
+            return float(Water.Min.Z-10);
     }
     const FVector2D Building(L.CentralBuildingCenter);
     const FVector2D Half(L.CentralBuildingSize.X*.5+180,L.CentralBuildingSize.Y*.5+180);

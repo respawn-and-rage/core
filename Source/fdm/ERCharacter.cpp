@@ -13,6 +13,7 @@
 #include "ERWeapon.h"
 #include "ERWeaponBallistics.h"
 #include "ERMovement.h"
+#include "ERProceduralMap.h"
 #include "ERPlayerController.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -556,6 +557,7 @@ void AERCharacter::Tick(float DeltaTime)
     Super::Tick(DeltaTime);
     if (BlastRinging) UpdateBlastRinging();
     Cast<UERMovement>(GetCharacterMovement())->ApplyPosturePresentation();
+    if (HasAuthority()) UpdateDrowning();
     if(HasAuthority())for(auto Item:Inventory)if(Item)Item->UpdateAccuracyRecovery();
     if(HasAuthority())UpdateFireAcknowledgement();
     UpdateWeaponPresentation();
@@ -1089,36 +1091,47 @@ void AERCharacter::ClientDamageFeedback_Implementation(float Amount, FVector_Net
         }
         LethalPunchTime=GetWorld()->GetTimeSeconds();
     }
-    if(!Health->bDead)
-    {
-        if(DamageVisuals.Num()>=4)DamageVisuals.RemoveAt(0);
-        DamageVisuals.Add({-FVector(Direction),GetWorld()->GetTimeSeconds(),FMath::Clamp(.30f+Amount/100.f,.35f,.75f)});
-    }
+    if (!Health->bDead) AddDamageVisual(Amount, -FVector(Direction));
     if(!bBullet)CosmeticDamagePitch=(CosmeticDamagePitch+FVector(Direction)*FMath::Clamp(Amount/25.f,.5f,1.2f)).GetClampedToMaxSize(1.5f);
     DamageViewKick = (DamageViewKick + FVector(Direction) * FMath::Clamp(Amount / 25.f, .5f, 1.2f)).GetClampedToMaxSize(1.5f);
     if (HitSound) UGameplayStatics::PlaySoundAtLocation(this, HitSound,
         Camera->GetComponentLocation() - FVector(Direction) * 140.f, bLethal ? 1.f : .65f, 1.f, 0.f, HitAttenuation);
     UE_LOG(LogTemp, Display, TEXT("ER_DAMAGE_FEEDBACK amount=%.1f direction=%s sound=%d"), Amount, *FVector(Direction).ToString(), HitSound != nullptr);
 }
+void AERCharacter::AddDamageVisual(float Amount, const FVector& ToAttacker, bool bShowAfterDeath)
+{
+    if (DamageVisuals.Num() >= 4) DamageVisuals.RemoveAt(0);
+    const float Strength = FMath::Clamp(.30f + Amount / 100.f, .35f, .75f);
+    DamageVisuals.Add({ToAttacker, GetWorld()->GetTimeSeconds(), Strength, bShowAfterDeath});
+}
 bool AERCharacter::CanJumpInternal_Implementation() const
 {return Cast<UERMovement>(GetCharacterMovement())->IsOnLadder() || Super::CanJumpInternal_Implementation();}
-float AERCharacter::FallDamage(float DownSpeed,float Gravity)
+float AERCharacter::FallDamage(float DownSpeed, float Gravity, float WaterDepth, float SafeHeight, float LethalHeight)
 {
-    if(!FMath::IsFinite(DownSpeed) || !FMath::IsFinite(Gravity) || DownSpeed<=0 || Gravity<=0)return 0;
-    // Equivalent free-fall height: safe through 3m, lethal at 11m, no armor absorption.
-    const float Height=DownSpeed*DownSpeed/(2*Gravity);
-    return FMath::Clamp((Height-300.f)/8.f,0.f,100.f);
+    if (!FMath::IsFinite(DownSpeed) || !FMath::IsFinite(Gravity) || DownSpeed <= 0 || Gravity <= 0) return 0;
+    // Each metre of water absorbs the impact energy of four metres of free fall.
+    const float ImpactHeight = DownSpeed * DownSpeed / (2 * Gravity) - 4.f * FMath::Max(0.f, WaterDepth);
+    return 100.f * FMath::Clamp((ImpactHeight - SafeHeight) / FMath::Max(1.f, LethalHeight - SafeHeight), 0.f, 1.f);
 }
 void AERCharacter::Landed(const FHitResult& Hit)
 {
-    const float DownSpeed=Cast<UERMovement>(GetCharacterMovement())->LandingSpeed();
-    const float Gravity=FMath::Abs(GetCharacterMovement()->GetGravityZ());
-    const float Height=Gravity>0?DownSpeed*DownSpeed/(2*Gravity):0;
-    const float Safe=ERServer::Get(GetWorld(),"Damage.FallSafe")*100,Lethal=ERServer::Get(GetWorld(),"Damage.FallLethal")*100;
-    const float Damage=FMath::Clamp((Height-Safe)/FMath::Max(1.f,Lethal-Safe),0.f,1.f)*ERServer::Get(GetWorld(),"Health.Max")*ERServer::Get(GetWorld(),"Damage.Fall");
-    if(HasAuthority())for(auto Item:Inventory)if(Item)Item->NotifyAccuracyLanding(DownSpeed);
+    const float DownSpeed = Cast<UERMovement>(GetCharacterMovement())->LandingSpeed();
+    float Damage = 0;
+    if (HasAuthority())
+    {
+        for (auto Item : Inventory) if (Item) Item->NotifyAccuracyLanding(DownSpeed);
+        float WaterDepth = 0;
+        for (TActorIterator<AERProceduralMap> Map(GetWorld()); Map; ++Map)
+            if (Map->IsMapReady()) WaterDepth = FMath::Max(WaterDepth, Map->WaterDepthAt(Hit.ImpactPoint));
+
+        const float Gravity = FMath::Abs(GetCharacterMovement()->GetGravityZ());
+        const float Safe = ERServer::Get(GetWorld(), "Damage.FallSafe") * 100;
+        const float Lethal = ERServer::Get(GetWorld(), "Damage.FallLethal") * 100;
+        const float DamageFraction = FallDamage(DownSpeed, Gravity, WaterDepth, Safe, Lethal) * .01f;
+        Damage = DamageFraction * ERServer::Get(GetWorld(), "Health.Max") * ERServer::Get(GetWorld(), "Damage.Fall");
+    }
     Super::Landed(Hit);
-    if(HasAuthority() && Damage>0)
+    if (Damage > 0)
     {
         FERMessageDamage Facts; Facts.Fall = true;
         const float Applied=Health->ReceiveDamage(Damage,nullptr,2.f,Facts);
