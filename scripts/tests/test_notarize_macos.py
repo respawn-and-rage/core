@@ -148,11 +148,18 @@ class XcodeNotarizationGate(unittest.TestCase):
             scratch.mkdir()
             calls = []
             exports = []
+            distribution_temporaries = []
             receipt = {}
 
             def fake(*args, **kwargs):
                 command = list(map(str, args))
                 calls.append(command)
+                if command[0] == 'xcodebuild':
+                    temporary = Path(kwargs['env']['TMPDIR'])
+                    self.assertEqual(temporary.parent, scratch)
+                    self.assertTrue(temporary.is_dir())
+                    (temporary / 'staged-app.zip').touch()
+                    distribution_temporaries.append(temporary)
                 if command[0] == 'lipo':
                     return subprocess.CompletedProcess(command, 0, stdout='arm64 x86_64')
                 if '-exportArchive' in command:
@@ -204,6 +211,8 @@ class XcodeNotarizationGate(unittest.TestCase):
                     self.assertEqual((app / 'Contents/MacOS/Game').read_text(), 'notarized export')
                     self.assertEqual(receipt['submission']['status'], 'exported-notarized-app')
                     self.assertTrue(Path(receipt['submission']['archive']).is_dir())
+                self.assertTrue(distribution_temporaries)
+                self.assertTrue(all(not p.exists() for p in distribution_temporaries))
                 if pending:
                     sleep.assert_called_once_with(15)
                 return calls

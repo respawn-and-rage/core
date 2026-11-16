@@ -106,6 +106,14 @@ def xcode_failure(stage, diagnostic, archive):
     return RuntimeError(message + '\nArchive retained at ' + str(archive) + '\n' + diagnostic[-3000:])
 
 
+def run_xcode_distribution(scratch, *args):
+    # Xcode can leave full copies of the app and submission ZIP in TMPDIR.
+    # Give each invocation its own directory and reclaim it as soon as it exits.
+    with tempfile.TemporaryDirectory(prefix='xcode-dist-', dir=scratch) as temporary:
+        return run('xcodebuild', *args, env={**os.environ, 'TMPDIR': temporary + os.sep},
+                   capture_output=True, text=True, check=False)
+
+
 def notarize_with_xcode(app, identity, scratch, receipt, timeout):
     """Use Xcode's existing account through its supported archive distribution CLI."""
     info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
@@ -133,8 +141,8 @@ def notarize_with_xcode(app, identity, scratch, receipt, timeout):
         'signingStyle': 'manual', 'signingCertificate': identity, 'teamID': team[1],
         'stripSwiftSymbols': False, 'manageAppVersionAndBuildNumber': False}))
     receipt['submission'] = {'method': 'xcode', 'archive': str(archive), 'status': 'uploading'}
-    result = run('xcodebuild', '-exportArchive', '-archivePath', archive, '-exportOptionsPlist', options,
-                 '-allowProvisioningUpdates', capture_output=True, text=True, check=False)
+    result = run_xcode_distribution(scratch, '-exportArchive', '-archivePath', archive,
+                                    '-exportOptionsPlist', options, '-allowProvisioningUpdates')
     if result.stdout:
         print(result.stdout, end='', flush=True)
     if result.stderr:
@@ -147,8 +155,8 @@ def notarize_with_xcode(app, identity, scratch, receipt, timeout):
     while True:
         if exported.exists():
             shutil.rmtree(exported)
-        result = run('xcodebuild', '-exportNotarizedApp', '-archivePath', archive,
-                     '-exportPath', exported, capture_output=True, text=True, check=False)
+        result = run_xcode_distribution(scratch, '-exportNotarizedApp', '-archivePath', archive,
+                                        '-exportPath', exported)
         if result.returncode == 0:
             break
         diagnostic = (result.stdout or '') + (result.stderr or '')

@@ -1,6 +1,9 @@
 """Remove completed Mac build payloads before measuring free disk space."""
 import json
 from pathlib import Path
+import re
+import stat
+import sys
 import shutil
 import time
 
@@ -63,7 +66,7 @@ def build_roots(workspace, project):
 def remove_uploaded_build(run, project):
     """Remove only the selected successful run, including its logs and receipts."""
     run, project = Path(run), Path(project).resolve()
-    if run.is_symlink():
+    if run.is_symlink() or getattr(run.lstat(), 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
         raise ValueError('Refusing a symlinked build directory: ' + str(run))
     resolved = run.resolve()
     if resolved.is_relative_to(project) or project.is_relative_to(resolved):
@@ -80,9 +83,34 @@ def remove_uploaded_build(run, project):
     shutil.rmtree(run)
 
 
+def cleanup_uploaded_desktop_runs(root, project):
+    """Remove old timestamped runs with a successful whole-run summary."""
+    root = Path(root)
+    if not root.is_dir():
+        return
+    for run in sorted(root.iterdir()):
+        if not re.fullmatch(r'[0-9]{8}-[0-9]{6}-[0-9a-f]{8}', run.name):
+            continue
+        summary = run / 'summary.json'
+        if not summary.is_file() or summary.is_symlink():
+            continue
+        try:
+            data = json.loads(summary.read_text(encoding='utf-8-sig'))
+            if isinstance(data, dict) and data.get('status') == 'uploaded':
+                remove_uploaded_build(run, project)
+        except (OSError, ValueError) as error:
+            print(f'Warning: could not clean desktop run {run}: {error}', file=sys.stderr)
+
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Remove a successfully uploaded build and all its artifacts.')
-    parser.add_argument('--uploaded-run', type=Path, required=True)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--uploaded-run', type=Path)
+    group.add_argument('--uploaded-desktop-runs', type=Path)
     args = parser.parse_args()
-    remove_uploaded_build(args.uploaded_run, Path(__file__).resolve().parents[1])
+    project = Path(__file__).resolve().parents[1]
+    if args.uploaded_run:
+        remove_uploaded_build(args.uploaded_run, project)
+    else:
+        cleanup_uploaded_desktop_runs(args.uploaded_desktop_runs, project)

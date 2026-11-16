@@ -309,6 +309,30 @@ def push(docker, credentials, image_tags, run=subprocess.run):
         run([docker, 'logout'], capture_output=True, env=env)
 
 
+def image_id(docker, tag, run=subprocess.run):
+    result = run([docker, 'image', 'inspect', '--format', '{{.Id}}', tag],
+                 capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def remove_published_tags(docker, image_tags, expected_id, run=subprocess.run):
+    if not expected_id:
+        print('Warning: could not identify the published image for local cleanup.', file=sys.stderr)
+        return
+    for tag in image_tags:
+        try:
+            if image_id(docker, tag, run) != expected_id:
+                continue
+            result = run([docker, 'image', 'rm', tag], capture_output=True, text=True)
+            if result.returncode:
+                print(f'Warning: could not remove local Docker tag {tag}: {result.stderr.strip()}',
+                      file=sys.stderr)
+            else:
+                print('SERVER_IMAGE_LOCAL_TAG_REMOVED: ' + tag)
+        except OSError as error:
+            print(f'Warning: could not remove local Docker tag {tag}: {error}', file=sys.stderr)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest='command', required=True)
@@ -354,9 +378,14 @@ def main(argv=None):
             docker_cli = check_docker(args.docker)
             check_hub(credentials)
             image_tags = build(docker_cli, args.archive, credentials['repository'], args.version, args.commit)
+            try:
+                published_id = image_id(docker_cli, image_tags[0])
+            except OSError:
+                published_id = None
             push(docker_cli, credentials, image_tags)
             for tag in image_tags:
                 print('SERVER_IMAGE_PUSHED: ' + tag)
+            remove_published_tags(docker_cli, image_tags, published_id)
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
         print(str(error), file=sys.stderr)
         return 1

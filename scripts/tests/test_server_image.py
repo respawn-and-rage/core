@@ -226,6 +226,21 @@ class StageAndDockerTests(unittest.TestCase):
             self.assertIn('org.opencontainers.image.revision=c0ffee', command)
             self.assertEqual(command[-1], str(package))
 
+    def test_local_cleanup_preserves_latest_when_it_points_to_another_image(self):
+        versioned, latest = image.tags('rr/server', VERSION)
+        commands = []
+
+        def run(command, **kwargs):
+            commands.append(command)
+            if command[2] == 'inspect':
+                image_id = 'sha256:original' if command[-1] == versioned else 'sha256:newer'
+                return subprocess.CompletedProcess(command, 0, stdout=image_id, stderr='')
+            return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+        image.remove_published_tags('docker', (versioned, latest), 'sha256:original', run)
+        self.assertEqual([command for command in commands if command[2] == 'rm'],
+                         [['docker', 'image', 'rm', versioned]])
+
     def test_push_uses_stdin_and_a_temporary_config(self):
         run = Recorder({('context', 'inspect'): (0, 'npipe:////./pipe/dockerDesktopLinuxEngine\n')})
         credentials = {'username': 'rr', 'token': TOKEN, 'repository': 'rr/server'}

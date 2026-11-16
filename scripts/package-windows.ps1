@@ -835,7 +835,10 @@ try {
         $summary['finished'] = (Get-Date).ToString('o')
         $summary | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $summaryFile -Encoding UTF8
     }
-    if ($summary.status -eq 'uploaded') { Remove-UploadedBuild $runDirectory }
+    if ($summary.status -eq 'uploaded') {
+        Remove-UploadedBuild $runDirectory
+        Invoke-Native 'python.exe' @((Join-Path $PSScriptRoot 'build_cleanup.py'), '--uploaded-desktop-runs', $OutputRoot)
+    }
 } catch {
     Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
     if ($logFile) { Write-Host "Build log: $logFile" }

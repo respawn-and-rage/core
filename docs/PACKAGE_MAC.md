@@ -79,7 +79,8 @@ never in files or chat, and never bypass Gatekeeper.
 
 Space: 30 GiB universal, 25 GiB one architecture on APFS, 45 GiB ordinary copies, plus
 5 GiB on the source and home volumes. Xcode's archive route needs twice the app size
-plus 1 GiB. Failed runs keep their directory; a successful upload removes the whole
+plus 1 GiB. Each Xcode distribution command uses a private temporary directory
+that is removed when the command exits. Failed runs keep their directory; a successful upload removes the whole
 release directory. `scripts/notarize-macos.py` runs signing and notarization alone
 (`--check`, `--sign-only`, `--method xcode`). If `xcodebuild` reports `No Accounts`, sign
 in again in Xcode Settings → Accounts and use `--resume`; never extract its tokens.

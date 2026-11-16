@@ -53,7 +53,9 @@ to `../builds/desktop/<timestamp>-<id>/{windows,linux}/` with `build.log`, `rece
 and `upload.log`. Linux must produce a real ELF x86_64 executable and pushes with
 `--fix-permissions`. A failed platform is recorded separately while the other can
 finish; any failure returns exit code 1. Successful uploads delete their attempt
-directory, and the whole run once all platforms have uploaded.
+directory, and the whole run once all platforms have uploaded. A successful new run also
+removes older timestamped runs under the same output root whose summary is `uploaded`.
+Failed and local-only builds are kept.
 
 ### Dedicated server image
 
@@ -94,7 +96,9 @@ Docker Hub API and requires the repository to **exist and be public**: the serve
 is published publicly, and a push to a missing repository would take the account's
 default visibility. The push logs in through stdin
 inside a temporary Docker config, so the token never reaches arguments, logs, receipts
-or your own `docker login`. Built images stay in the local Docker daemon; prune them there.
+or your own `docker login`. After both Docker Hub tags are pushed, the script removes
+the matching local version and `latest` tags without forcing removal. Images from
+`-NoUpload`, failed pushes, unrelated images and BuildKit caches are kept.
 
 By default the container advertises itself in the Internet server browser as a
 **Community** server, using the public Community EOS client built into the launcher (see

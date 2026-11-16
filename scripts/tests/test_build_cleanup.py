@@ -71,6 +71,24 @@ class CleanupTests(unittest.TestCase):
                 self.assertFalse(run.exists())
                 self.assertTrue((project / 'important').exists())
 
+    def test_desktop_sweep_requires_uploaded_whole_run_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / 'core'
+            project.mkdir()
+            output = root / 'desktop'
+            output.mkdir()
+            runs = {}
+            for index, status in enumerate(('uploaded', 'failed', 'packaged')):
+                run = output / f'20261116-17010{index}-12345678'
+                run.mkdir()
+                (run / 'summary.json').write_text(json.dumps({'status': status}), encoding='utf-8-sig')
+                runs[status] = run
+            module.cleanup_uploaded_desktop_runs(output, project)
+            self.assertFalse(runs['uploaded'].exists())
+            self.assertTrue(runs['failed'].exists())
+            self.assertTrue(runs['packaged'].exists())
+
     def test_unpublished_and_source_paths_cannot_be_removed(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
