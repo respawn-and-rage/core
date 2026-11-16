@@ -149,7 +149,7 @@ void AERMovementProbe::Tick(float DeltaTime)
             Send(.05f,Key,IE_Pressed); Send(.12f,Key,IE_Released);
             if (Phase != 42) { Send(.22f,Key,IE_Pressed); Send(Phase==40 ? 1.f : .3f,Key,IE_Released); }
         }
-        if (PC && Phase >= 48 && Phase <= 54)
+        if (PC && Phase >= 48 && Phase <= 55)
         {
             if (LocalPhase!=Phase) { LocalPhase=Phase; Elapsed=0; Peak=0; PC->SetControlRotation(FRotator::ZeroRotator); }
             const float Previous=Elapsed; Elapsed+=DeltaTime;
@@ -188,6 +188,18 @@ void AERMovementProbe::Tick(float DeltaTime)
                 Send(.4f,EKeys::E,IE_Pressed);
                 Send(.7f,EKeys::E,IE_Released);
                 Send(1.f,EKeys::E,IE_Pressed);
+                Send(1.3f,EKeys::SpaceBar,IE_Pressed);
+                Send(1.4f,EKeys::SpaceBar,IE_Released);
+            }
+            if (Phase==55)
+            {
+                Send(.05f,EKeys::E,IE_Released);
+                Send(.05f,EKeys::W,IE_Released);
+                Send(.45f,EKeys::W,IE_Pressed);
+                Send(.52f,EKeys::W,IE_Released);
+                Send(.62f,EKeys::W,IE_Pressed);
+                Send(1.3f,EKeys::SpaceBar,IE_Pressed);
+                Send(1.4f,EKeys::SpaceBar,IE_Released);
             }
             if ((Phase==48 || Phase==50 || Phase==52) && Peak==0 && Elapsed>(Phase==48?2.7f:1.2f))
             {
@@ -510,13 +522,13 @@ void AERMovementProbe::Tick(float DeltaTime)
         }
         return;
     }
-    if (Phase>=48 && Phase<=54)
+    if (Phase>=48 && Phase<=55)
     {
         auto* Remote=Cast<UERMovement>(Client->GetCharacterMovement());
         if (LocalPhase!=Phase)
         {
             LocalPhase=Phase;
-            if (Phase==48 || Phase==50 || Phase==51 || Phase==52 || Phase==54)
+            if (Phase==48 || Phase==50 || Phase==51 || Phase==52 || Phase==54 || Phase==55)
                 Client->TeleportTo(FVector(-900,1900,Remote->Locomotion.HalfHeight+2.1f),FRotator::ZeroRotator);
         }
         if (Phase==51 && Peak==0 && Elapsed>.5f)
@@ -528,6 +540,45 @@ void AERMovementProbe::Tick(float DeltaTime)
             Check(!Remote->IsSprinting(), TEXT("releasing Sprint ends the sprint before the next press"));
             Peak=1;
         }
+        if (Phase==54)
+        {
+            if (Peak==1 && Remote->IsFalling())
+            {
+                SprintStartedAt = Remote->Locomotion.SprintUntil;
+                Peak=2;
+            }
+            if (Elapsed>2.4f)
+            {
+                Check(Peak==2 && Remote->IsMovingOnGround() && Remote->IsSprinting() &&
+                    Remote->Locomotion.SprintUntil==SprintStartedAt,
+                    TEXT("remote sprint survives jump and landing without refreshing stamina"));
+                Advance();
+            }
+            return;
+        }
+        if (Phase==55)
+        {
+            if (Peak==0 && Elapsed>.35f)
+            {
+                Check(!Remote->IsSprinting() && !Remote->bSprintHeld,
+                    TEXT("remote sprint input clears before the W-only gesture"));
+                Peak=1;
+            }
+            if (Peak==1 && Elapsed>.45f && Remote->IsMovingOnGround() && Remote->IsSprinting())
+            {
+                SprintStartedAt = Remote->Locomotion.SprintUntil;
+                Peak=2;
+            }
+            if (Peak==2 && Remote->IsFalling() && Remote->IsSprinting()) SawTraversal=true;
+            if (Elapsed>2.4f)
+            {
+                Check(Peak==2 && SawTraversal && Remote->IsMovingOnGround() && Remote->IsSprinting() &&
+                    Remote->Locomotion.SprintUntil==SprintStartedAt,
+                    TEXT("remote double-W sprint survives jump and landing with E released"));
+                Advance();
+            }
+            return;
+        }
         if (Elapsed>(Phase==48?3.f:(Phase==49 || Phase==53?.6f:1.5f)))
         {
             const bool Sprint=Phase!=49 && Phase!=53;
@@ -537,7 +588,6 @@ void AERMovementProbe::Tick(float DeltaTime)
                 Phase==50?TEXT("InputKey E held before W starts sprint after gesture window"):
                 Phase==51?TEXT("InputKey forward resumes sprint while E remains held"):
                 Phase==52?TEXT("InputKey releasing E preserves simultaneous double-W sprint"):
-                Phase==54?TEXT("pressing Sprint again restarts sprint without releasing Forward"):
                 TEXT("InputKey releasing both sprint controls clears intent"));
             Advance();
         }

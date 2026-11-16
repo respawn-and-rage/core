@@ -2,6 +2,7 @@
 #include "CoreMinimal.h"
 #include "ERServerSettings.h"
 #include "ERLoadout.h"
+#include "EROutdoorBackdrop.h"
 #include "GameFramework/GameMode.h"
 #include "GameFramework/GameState.h"
 #include "GameFramework/PlayerState.h"
@@ -80,8 +81,8 @@ protected:
     virtual void OnRep_ReplicatedWorldTimeSecondsDouble() override;
 private:
     double AimClockReceiptTime = -1;
-    UPROPERTY(ReplicatedUsing=OnRep_DepotSkySeed) uint32 DepotSkySeed=0;
-    UFUNCTION() void OnRep_DepotSkySeed();
+    UPROPERTY(ReplicatedUsing=OnRep_DepotLighting) FEROutdoorLighting DepotLighting;
+    UFUNCTION() void OnRep_DepotLighting();
 public:
     UPROPERTY(ReplicatedUsing=OnRep_ServerRules) FERServerRules ServerRules;
     UFUNCTION() void OnRep_ServerRules();
@@ -123,6 +124,7 @@ class FDM_API AERGameMode : public AGameMode
     GENERATED_BODY()
 public:
     AERGameMode();
+    const FEROutdoorLighting& GetOutdoorLighting() const { return OutdoorLighting; }
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Recon") TSubclassOf<class AERReconDirector> ReconClass;
     UPROPERTY(EditDefaultsOnly, Category="Skull Hunt") TSubclassOf<class AERSkull> SkullClass;
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite) int32 ScoreLimit = 50;
@@ -151,6 +153,7 @@ public:
     void CheckLobby();
     static FString SanitizeName(const FString& Name);
 private:
+    FEROutdoorLighting OutdoorLighting;
     friend class AERSkull;
     void DropSkull(const AERCharacter& Victim, EERTeam Team);
     void CollectSkull(AERPlayerState& Collector);

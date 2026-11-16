@@ -3,8 +3,8 @@
 
 namespace ERNetworkProtocol
 {
-// Rock climbing movement mode on Rocky.
-constexpr uint32 Version=3;
+// Replicated outdoor lighting includes the selected sky.
+constexpr uint32 Version=4;
 inline FString BuildSignature(const FString& Build){return FString::Printf(TEXT("%s-net%u"),*Build,Version);}
 }
 

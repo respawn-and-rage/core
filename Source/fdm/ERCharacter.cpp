@@ -814,7 +814,9 @@ void AERCharacter::ResetAimPunch()
 void AERCharacter::PossessedBy(AController* NewController)
 {
     Super::PossessedBy(NewController);
-    bWeaponLightOn = NewController && NewController->IsPlayerController() && EROutdoorBackdrop::IsNight(*GetWorld());
+    const auto* Mode = GetWorld()->GetAuthGameMode<AERGameMode>();
+    bWeaponLightOn = NewController && NewController->IsPlayerController() && Mode
+        && EROutdoorBackdrop::IsNight(Mode->GetOutdoorLighting().SkyChoice);
     ResetAimPunch();
 }
 void AERCharacter::UnPossessed()

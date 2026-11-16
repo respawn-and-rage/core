@@ -97,6 +97,9 @@ https://ambientcg.com
 https://creativecommons.org/publicdomain/zero/1.0/
 
 AUDIO & MUSIC
+Collect_Point_00.wav — LittleRobotSoundFactory. Creative Commons Attribution 4.0. Converted to 16-bit PCM for skull pickups.
+https://freesound.org/people/LittleRobotSoundFactory/sounds/270304/
+https://creativecommons.org/licenses/by/4.0/
 tinnitus.wav — tnturner. CC0 1.0. Converted to 16-bit PCM for blast ringing.
 https://freesound.org/s/377205/
 https://creativecommons.org/publicdomain/zero/1.0/

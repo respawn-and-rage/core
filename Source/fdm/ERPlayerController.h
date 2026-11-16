@@ -111,6 +111,7 @@ public:
     FKey ControlKey(const FKey& DefaultKey) const;
     struct FDamageNotice { float Health=0, Armor=0; double Time=0; };
     TArray<FDamageNotice> DamageNotices;
+    UFUNCTION(Client, Reliable) void ClientPlaySkullPickup(class USoundBase* Sound);
     UFUNCTION(Client, Reliable) void ClientInflictedDamage(float HealthDamage, float ArmorDamage);
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<class UERReconComponent> Recon;
     UPROPERTY(Replicated, BlueprintReadOnly) bool bAwaitingRespawn = false;

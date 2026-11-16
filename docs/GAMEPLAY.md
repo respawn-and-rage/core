@@ -16,7 +16,8 @@ for keys, units and ranges. Numbers below describe Standard values.
   drops a skull in the victim's team colour. Crossing an enemy skull adds one team point
   and one skull to the collector's stats. Crossing a friendly skull removes it. The
   server clears drops at round end and each uncollected skull expires after six turns.
-  `ERSkull` owns the pickup size, clearance and timing.
+  `ERSkull` sets the 72 cm diameter for the mesh and pickup sphere, preserves ground
+  clearance, and sends the collector the pickup sound after confirming collection.
 - Pre-match countdown (`Match.Countdown`, 10s): once the map is ready and a player is
   present, the server sets `AERGameState::CountdownEndServerTime` and stays in
   `WaitingToStart`. Players spawn but `UERMovement` freezes travel, sprint, jump, ladder
@@ -64,6 +65,8 @@ does not affect bot vision. Stationary targets keep team, skin and start across 
 Sprint: double-tap W within 300ms and hold, or hold E with W. Holding both keys
 through the countdown or respawn starts a sprint as soon as forward movement is allowed. Partial stamina can be
 spent by a fresh gesture, including releasing and pressing Sprint again while holding forward.
+An active sprint continues through a jump and landing while forward and sprint intent
+are held and stamina remains.
 Holding Walk or Crouch through the countdown or respawn applies that input when play resumes.
 Hold Ctrl/C to crouch, double
 tap to latch prone, press again to rise; prone entry passes through crouch before
@@ -109,7 +112,7 @@ to zero and can be adjusted in the menu. Saved mouse preferences are preserved.
 Defaults: WASD, mouse, left click fire, right click scope, Space jump/climb/respawn, Shift walk,
 double-tap W or hold E sprint, Ctrl/C crouch and prone, R reload, 1–8 / F / G / H or
 wheel select (the wheel has a 250ms quiet period), Tab scoreboard, Esc menu, P screenshots,
-X weapon flashlight. It starts on when a player spawns in an offline night match. The narrow
+X weapon flashlight. It starts on when a player spawns in a night match. The narrow
 20m cone follows the equipped firearm, pauses while the weapon is stowed and has no dynamic shadows.
 P saves the current viewport (including HUD) plus front, right, left, back and top
 views of the possessed character as PNGs at the viewport resolution. The screen is
@@ -144,6 +147,9 @@ ServerRules` replicates. Weapons derive private effective copies through `Tuned(
 authored assets stay untouched. Kit values are final carried quantities. Client saved
 preferences never apply to another server. Configuration exposes existing mechanics
 only; it adds no slots or systems. Material rules travel in the cell descriptor.
+
+Hosted and dedicated servers roll the lighting when loading an outdoor map. See
+[MAPS.md](MAPS.md#outdoor-backdrop) for the probabilities.
 
 `Map.ExpectedTeamSize` (1–16, default 3) is fixed at creation and shown read-only in
 the lobby. See [MAPS.md](MAPS.md).

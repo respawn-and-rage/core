@@ -75,7 +75,7 @@ at acquisition. Keep per-asset provenance in each private repository and in-game
 | Sketchfab weapons | Nine listings | Mostly CC BY 4.0; **Milkor CC BY-NC 4.0**, grenades Sketchfab free standard. Check before commercial use. |
 | Sketchfab textures, sand, houses, fence, Village, drones | Listed in Credits | CC BY 4.0, private sources. |
 | CC0 textures | Poly Haven, ambientCG | CC0, private sources. |
-| Audio | Free Firearm Library, Freesound, congusbongus pack | CC0 or CC BY 3.0 with credits. Sonniss GDC 2024: no receipt verified. Tabasco pack not imported: its page and included licence conflict. |
+| Audio | Free Firearm Library, Freesound, congusbongus pack | CC0, CC BY 3.0 or CC BY 4.0 with credits. Sonniss GDC 2024: no receipt verified. Tabasco pack not imported: its page and included licence conflict. |
 | Menu music, graffiti, decals, HUD art, branding | Owner | Supplied for this game; no separate redistribution licence. |
 
 ## Maintenance

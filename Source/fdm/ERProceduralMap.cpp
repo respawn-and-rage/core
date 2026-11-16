@@ -527,7 +527,7 @@ bool AERProceduralMap::GenerateLogicalWorld()
     TArray<FERMapLightZone> NextLightZones;
     if (const auto* Recipe = LayoutConfig.TemplateAsset.Get())
         ERMapLighting::Build(Next, *Recipe, CellSettings.CellSize, MapLampSurface,
-            EROutdoorBackdrop::IsNight(*GetWorld()), NextLamps, NextLightZones);
+            EROutdoorBackdrop::IsNight(LayoutConfig.OutdoorLighting.SkyChoice), NextLamps, NextLightZones);
     if (Next.RockyCoverOnly) ERProcedural::BuildRockDamagePanels(Next, CellSettings.CellSize);
     if (!BuildCellWorld(Next.Panels)) return false;
     MapLamps = MoveTemp(NextLamps);
@@ -763,7 +763,7 @@ void AERProceduralMap::ConfigureTemplateFloors()
             HorizonSurface=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/EclipseRecoil/Art/OutdoorBackdrop/M_OutdoorGrass.M_OutdoorGrass"));
         }
         else if(Template->Archetype==EERMapArchetype::MiddleEasternAlleys || GroundName.Contains(TEXT("Sand")))Tint=FLinearColor(.39f,.29f,.17f);
-        OutdoorSky=EROutdoorBackdrop::Apply(*this,uint32(LayoutConfig.Seed),Tint,HorizonSurface,LayoutConfig.OutdoorLightingSeed);
+        OutdoorSky=EROutdoorBackdrop::Apply(*this,uint32(LayoutConfig.Seed),Tint,HorizonSurface,LayoutConfig.OutdoorLighting);
         break;
     }
     default: break;

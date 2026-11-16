@@ -38,7 +38,7 @@ inline bool FactoryPaletteMatches(AERProceduralMap& Map)
         TArray<FERMapLamp> Lamps;
         TArray<FERMapLightZone> Zones;
         ERMapLighting::Build(AuthoredLayout, *T, Map.CellSettings.CellSize, LampSurface,
-            EROutdoorBackdrop::IsNight(*Map.GetWorld()), Lamps, Zones);
+            EROutdoorBackdrop::IsNight(Map.LayoutConfig.OutdoorLighting.SkyChoice), Lamps, Zones);
     }
     TMap<FString,UMaterialInterface*> Expected;
     for(const auto& P:Map.GetCellWorld().GetPanels())

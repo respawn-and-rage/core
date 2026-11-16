@@ -5,14 +5,17 @@
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
 #include "ERCharacter.h"
+#include "ERPlayerController.h"
 #include "ERRecon.h"
+#include "Sound/SoundBase.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 
 namespace
 {
     constexpr float SkullLifetime = 63.f;
-    constexpr float SkullDiameter = 24.f;
+    constexpr float SkullScale = 3.f;
+    constexpr float SkullDiameter = 24.f * SkullScale;
     constexpr float GroundClearance = 10.f;
     constexpr double PickupInterval = .05;
 
@@ -34,6 +37,7 @@ AERSkull::AERSkull()
     SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Root")));
     Coin = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Coin"));
     Coin->SetupAttachment(GetRootComponent());
+    Coin->SetRelativeScale3D(FVector(SkullScale));
     Coin->SetMobility(EComponentMobility::Movable);
     Coin->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Coin->SetCanEverAffectNavigation(false);
@@ -80,7 +84,12 @@ void AERSkull::Tick(float DeltaSeconds)
         if (!PS || PS->Team == EERTeam::None) continue;
         // The collection radius can intersect a capsule on the other side of thin cover.
         if (GetWorld()->LineTraceTestByObjectType(Location, Character->GetActorLocation(), FCollisionObjectQueryParams(ECC_WorldStatic))) continue;
-        if (Destroy() && PS->Team != VictimTeam) Mode->CollectSkull(*PS);
+        if (Destroy())
+        {
+            if (auto* CollectorController = Cast<AERPlayerController>(Character->GetController()); CollectorController && PickupSound)
+                CollectorController->ClientPlaySkullPickup(PickupSound);
+            if (PS->Team != VictimTeam) Mode->CollectSkull(*PS);
+        }
         return;
     }
 }

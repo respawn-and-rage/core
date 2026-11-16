@@ -83,23 +83,26 @@ void AERGameState::BeginPlay()
     Super::BeginPlay();
     if(HasAuthority() && UGameplayStatics::GetCurrentLevelName(this)==TEXT("L_Depot"))
     {
-        DepotSkySeed=EROutdoorBackdrop::RollLightingSeed();
-        OnRep_DepotSkySeed();
-        if (EROutdoorBackdrop::IsNight(*GetWorld()))
+        const auto* Mode = GetWorld()->GetAuthGameMode<AERGameMode>();
+        if (!Mode) return;
+        DepotLighting = Mode->GetOutdoorLighting();
+        OnRep_DepotLighting();
+        if (EROutdoorBackdrop::IsNight(DepotLighting.SkyChoice))
             GetWorld()->SpawnActor<AERDepotNight>();
     }
 }
 
-void AERGameState::OnRep_DepotSkySeed()
+void AERGameState::OnRep_DepotLighting()
 {
-    if(DepotSkySeed!=0)EROutdoorBackdrop::Apply(*this,DepotSkySeed,FLinearColor(.20f,.19f,.16f),nullptr,DepotSkySeed);
+    if (DepotLighting.Seed != 0)
+        EROutdoorBackdrop::Apply(*this, DepotLighting.Seed, FLinearColor(.20f,.19f,.16f), nullptr, DepotLighting);
 }
 
 void AERGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(AERGameState, ServerRules);
-    DOREPLIFETIME(AERGameState, DepotSkySeed);
+    DOREPLIFETIME(AERGameState, DepotLighting);
     DOREPLIFETIME(AERGameState, LoadoutCatalog);
     DOREPLIFETIME(AERGameState, ServerMaxPlayers);
     DOREPLIFETIME(AERGameState, bOnline);
@@ -157,10 +160,10 @@ void AERGameMode::InitGame(const FString& MapName, const FString& Options, FStri
     if (GameSession) GameSession->MaxPlayers = MaxHumanPlayers;
     // -EROnlineServer: advertise this dedicated server through EOS (idempotent across travel).
     if (GetNetMode() == NM_DedicatedServer) GetGameInstance()->GetSubsystem<UEROnline>()->StartDedicated(MaxHumanPlayers, MapName);
-    const uint32 LightingSeed = EROutdoorBackdrop::IsOutdoorMap(*GetWorld()) ? EROutdoorBackdrop::RollLightingSeed() : 0;
+    OutdoorLighting = EROutdoorBackdrop::ChooseLighting(*GetWorld());
     for (TActorIterator<AERProceduralMap> It(GetWorld()); It; ++It)
         {
-            It->LayoutConfig.OutdoorLightingSeed=LightingSeed;
+            It->LayoutConfig.OutdoorLighting=OutdoorLighting;
             It->LayoutConfig.ExpectedTeamSize=FMath::RoundToInt(Rules.Get("Map.ExpectedTeamSize"));
             It->LayoutConfig.Seed = UGameplayStatics::GetIntOption(Options, TEXT("MapSeed"), Rules.Get("Map.FixedSeed")>0?int32(Rules.Get("Map.Seed")):It->LayoutConfig.Seed);
             FParse::Value(FCommandLine::Get(), TEXT("ERMapSeed="), It->LayoutConfig.Seed);

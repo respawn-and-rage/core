@@ -356,6 +356,11 @@ void UERGameInstance::TravelFailure(UWorld* World, ETravelFailure::Type Type, co
     GetSubsystem<UEROnline>()->Leave();
     if (World->GetNetMode() != NM_Standalone || !UGameplayStatics::GetCurrentLevelName(World).Contains(TEXT("L_MainMenu"))) ReturnToMenu();
 }
+void AERPlayerController::ClientPlaySkullPickup_Implementation(USoundBase* Sound)
+{
+    if (IsLocalController() && Sound) UGameplayStatics::PlaySound2D(this, Sound);
+}
+
 bool AERPlayerController::IsMenuLevel() const { return UGameplayStatics::GetCurrentLevelName(GetWorld()).Contains(TEXT("L_MainMenu")); }
 AERPlayerController::AERPlayerController()
 {

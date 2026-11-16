@@ -41,7 +41,7 @@ constexpr const TCHAR* NightSkies[] = {TEXT("17"), TEXT("77"), TEXT("85"), TEXT(
 constexpr int32 FirstNightChoice = PanoramaCount + UE_ARRAY_COUNT(SunsetSkies) + 1;
 constexpr int32 SkyChoiceCount = FirstNightChoice + UE_ARRAY_COUNT(NightSkies) - 1;
 
-int32 SelectedSky(const UWorld& World)
+int32 SelectedOfflineSky(const UWorld& World)
 {
     if (World.GetNetMode() != NM_Standalone) return 0;
     const int32 Choice = FCString::Atoi(World.URL.GetOption(TEXT("EROfflineSky="), TEXT("0")));
@@ -147,9 +147,9 @@ bool EROutdoorBackdrop::IsOutdoorMap(const FString& Name)
         Name.EndsWith(TEXT("L_Town")) || Name.EndsWith(TEXT("L_Rocky"));
 }
 
-bool EROutdoorBackdrop::IsNight(const UWorld& World)
+bool EROutdoorBackdrop::IsNight(int32 SkyChoice)
 {
-    return IsOutdoorMap(World) && SelectedSky(World) >= FirstNightChoice;
+    return SkyChoice >= FirstNightChoice && SkyChoice <= SkyChoiceCount;
 }
 
 TArray<FString> EROutdoorBackdrop::OfflineSkyLabels()
@@ -173,7 +173,7 @@ UTexture2D* EROutdoorBackdrop::LoadOfflineSkyPreview(int32 Choice, FVector2D& Si
     return LoadSkyTexture(FString(SunsetSkies[Choice - PanoramaCount - 1].Texture) + TEXT("_Preview"), LOAD_NoWarn);
 }
 
-uint32 EROutdoorBackdrop::RollLightingSeed()
+static uint32 RollLightingSeed()
 {
 #if !UE_BUILD_SHIPPING
     uint32 TestSeed = 0;
@@ -183,7 +183,31 @@ uint32 EROutdoorBackdrop::RollLightingSeed()
     return FGuid::NewGuid().A | 2u;
 }
 
-bool EROutdoorBackdrop::Apply(AActor& Host, uint32 Seed, const FLinearColor& GroundTint, UMaterialInterface* GroundSurface, uint32 LightingSeed)
+FEROutdoorLighting EROutdoorBackdrop::ChooseLighting(const UWorld& World)
+{
+    FEROutdoorLighting Lighting;
+    if (World.GetNetMode() == NM_Client || !IsOutdoorMap(World)) return Lighting;
+    Lighting.Seed = RollLightingSeed();
+    if (World.GetNetMode() == NM_Standalone)
+    {
+        Lighting.SkyChoice = SelectedOfflineSky(World);
+        return Lighting;
+    }
+
+    FRandomStream SkyRandom(int32(Lighting.Seed));
+    const int32 Roll = SkyRandom.RandHelper(100);
+    constexpr int32 DayPercent = 58;
+    constexpr int32 SunsetPercent = 28;
+    if (Roll < DayPercent)
+        Lighting.SkyChoice = SkyRandom.RandRange(1, PanoramaCount);
+    else if (Roll < DayPercent + SunsetPercent)
+        Lighting.SkyChoice = SkyRandom.RandRange(PanoramaCount + 1, FirstNightChoice - 1);
+    else
+        Lighting.SkyChoice = SkyRandom.RandRange(FirstNightChoice, SkyChoiceCount);
+    return Lighting;
+}
+
+bool EROutdoorBackdrop::Apply(AActor& Host, uint32 Seed, const FLinearColor& GroundTint, UMaterialInterface* GroundSurface, const FEROutdoorLighting& Lighting)
 {
     if(!Host.GetWorld()->IsGameWorld() || Host.GetNetMode()==NM_DedicatedServer || !FApp::CanEverRender())return false;
 
@@ -229,8 +253,9 @@ bool EROutdoorBackdrop::Apply(AActor& Host, uint32 Seed, const FLinearColor& Gro
     auto* SkyFinish=Sky ? Cast<UMaterialInstanceDynamic>(Sky->GetMaterial(0)) : nullptr;
     if(!SkyFinish)return false;
     FRandomStream Cosmetic(int32(HashCombineFast(Seed,0x534b5942u)));
-    const int32 SkyChoice = SelectedSky(*Host.GetWorld());
-    const bool bNight = SkyChoice >= FirstNightChoice;
+    const uint32 LightingSeed = Lighting.Seed;
+    const int32 SkyChoice = Lighting.SkyChoice;
+    const bool bNight = IsNight(SkyChoice);
     const bool bSunset = SkyChoice == 0 ? (LightingSeed & 1u) != 0 : SkyChoice > PanoramaCount && !bNight;
     const int32 StandardIndex = SkyChoice > 0 && SkyChoice <= PanoramaCount ? SkyChoice - 1 : Cosmetic.RandRange(0, PanoramaCount - 1);
     FString TextureName = StandardTextureName(StandardIndex);

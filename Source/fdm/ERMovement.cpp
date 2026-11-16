@@ -366,7 +366,9 @@ void UERMovement::UpdateSprint(bool bMovementLocked)
     // Ignore the held input while locked so it can start a fresh sprint at unlock.
     const bool bSprintRequested = bSprintHeld && !bMovementLocked;
     const auto* C = Cast<AERCharacter>(CharacterOwner);
-    const bool Allowed = C && !C->Health->bDead && IsMovingOnGround() && !IsTraversing() &&
+    const bool bOnGround = IsMovingOnGround();
+    // A jump keeps the current sprint and its stamina deadline; only ground movement can start one.
+    const bool Allowed = C && !C->Health->bDead && (bOnGround || IsFalling()) && !IsTraversing() &&
         !bWalkHeld && !bWantsToCrouch && !bProneWanted && Locomotion.HalfHeight >= 92.f &&
         FVector::DotProduct(Acceleration.GetSafeNormal2D(), C->GetActorForwardVector()) > .5f;
 #if !UE_BUILD_SHIPPING
@@ -379,7 +381,7 @@ void UERMovement::UpdateSprint(bool bMovementLocked)
     if (bSprintRequested && !bPreviousSprintHeld && GetStaminaFraction() > .001f) SprintRequestUntil = Now + .25;
     if (!bSprintRequested) SprintRequestUntil = 0;
     // The gesture can arrive one saved move before its forward acceleration.
-    if (bSprintRequested && SprintRequestUntil > Now && Allowed && GetStaminaFraction() > .001f)
+    if (bSprintRequested && SprintRequestUntil > Now && bOnGround && Allowed && GetStaminaFraction() > .001f)
     {
         Locomotion.SprintUntil = Now + SprintDuration() * GetStaminaFraction();
         Locomotion.RecoverUntil = Locomotion.SprintUntil + RecoveryDuration();

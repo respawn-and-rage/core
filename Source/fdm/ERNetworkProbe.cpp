@@ -206,7 +206,10 @@ void AERNetworkProbe::Tick(float DeltaTime)
             auto* PC = Cast<AERPlayerController>(It->Get()); if (!PC) continue;
             if (PC->IsLocalController()) Host = PC; else Client = PC;
         }
-        if (!Host || !Client || !Host->GetPawn() || !Client->GetPawn() || !Mode->IsMatchInProgress()) return;
+        const auto* HostPawn = Host ? Cast<AERCharacter>(Host->GetPawn()) : nullptr;
+        const auto* ClientPawn = Client ? Cast<AERCharacter>(Client->GetPawn()) : nullptr;
+        // A night match on Depot has destructible floodlights to synchronize before positioning the players.
+        if (!HostPawn || !ClientPawn || !HostPawn->bNetworkReady || !ClientPawn->bNetworkReady || !Mode->IsMatchInProgress()) return;
         if (FParse::Param(FCommandLine::Get(),TEXT("ERMessagesGallery")))
         {
             // Let both Metal windows finish startup before movement corrections and timed shots.

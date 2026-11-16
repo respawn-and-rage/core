@@ -154,16 +154,17 @@ geometry or layout is imported. What each template should tend to:
 
 ## Outdoor backdrop
 
-Central Building, Alleys, Village, Town, Rocky and Depot roll a cosmetic lighting seed
-on the authority at the start of each match. The seed gives standard lighting and
-sunset equal chances. It is replicated to peers and persists through arena
-regeneration. Standard lighting uses the authored lights and the full Atmospheric
+When a hosted or dedicated server loads Central Building, Alleys, Village, Town,
+Rocky or Depot, it chooses standard daylight (58%), sunset (28%) or night (14%),
+then picks a panorama from that group. The choice replicates to joining clients
+and persists through arena regeneration. Standard lighting uses the authored lights and the full Atmospheric
 Skybox palette. Sunset picks a FreeStylized panorama, with warm direct light at
 19.25° elevation, cool skylight and a dedicated fill for the first-person rig.
 Checkouts without those textures fall back to the Atmospheric Skybox sunset palette.
 Play Offline offers a named sky picker with previews for outdoor maps. It has 15
 standard panoramas, six sunset panoramas and four night panoramas. Every sunset uses the same 19.25°
 lighting and rotates the panorama to align its sun or brightest opening in azimuth.
+The offline Random option gives standard daylight and sunset equal chances.
 Central Building also exposes its three crossing variants.
 Each panorama rotates toward the strongest directional light using an approximate sun azimuth.
 Overcast images use their brightest opening. The backdrop uses

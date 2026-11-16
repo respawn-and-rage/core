@@ -18,6 +18,7 @@ private:
     friend class AERGameMode;
 
     UPROPERTY(VisibleAnywhere) TObjectPtr<class UStaticMeshComponent> Coin;
+    UPROPERTY(EditDefaultsOnly, Category="Skull Hunt") TObjectPtr<class USoundBase> PickupSound;
     UPROPERTY(Replicated) EERTeam VictimTeam = EERTeam::None;
     UPROPERTY(Replicated) double SpawnTime = 0;
 };

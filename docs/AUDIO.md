@@ -17,6 +17,12 @@ Owner plays centred 2D; others spatial (300cm inner, 3700cm falloff). 24 per own
 | Launcher | One existing Epic sample: never claim more takes |
 | Empty trigger | Freesound 387482, CosmicEmbers (CC BY 3.0): owner-only, server-checked, 400ms limit, firearms only |
 
+**Skull Hunt:** A confirmed pickup plays a 2D one-shot for the collector, whether it
+scores a point or clears a friendly skull. [Collect_Point_00.wav by LittleRobotSoundFactory](https://freesound.org/people/LittleRobotSoundFactory/sounds/270304/)
+is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+The imported copy is converted to 16-bit PCM. Import it with
+`scripts/setup_skull_pickup_audio.py` and `ER_SKULL_PICKUP_WAV` set to the original WAV.
+
 **Footsteps:** `UERFootsteps` emits authority-driven transient multicasts from real travel:
 In pools, two trimmed takes from Freesound 560886 by jakubp.jp replace dry steps. The first moving contact plays immediately and resets the stride interval. Water steps and bullet impacts use distance attenuation at their world positions; a dedicated Niagara spray accompanies projectile impacts on submerged surfaces. Freesound 519008 by Sheyvan replaces the ordinary grenade sound only when the detonation point is underwater; a separate Niagara water crown replaces the dry flash and debris. Nearby dry detonations retain the normal sound and effect.
 stride 95/130/150cm at 5/10/18 km/h, 80 low, 65 prone, 220ms safety interval, no landing sound.
@@ -51,5 +57,7 @@ Regenerate with `scripts/prepare_audio_pass.py` then `setup_audio_pass.py`; per-
 ## Verify
 
 `test-audio.py` (`--network --render`), `test-network.py --shot-feedback`. Native: `EclipseRecoil.Audio.*`.
+For Skull Hunt, check the pickup sound on the host and a remote collector, including
+a friendly skull. Other players should hear no pickup sound.
 For blast ringing, listen on both the host and remote client after a survived blast.
 Check the start against the explosion, silence during sustain, the recovery fade, and cleanup on death.
