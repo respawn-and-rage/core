@@ -715,10 +715,10 @@ void AERPlayerController::ToggleWeaponLight()
 void AERPlayerController::PostProcessInput(float DeltaTime, bool bGamePaused)
 {
     Super::PostProcessInput(DeltaTime, bGamePaused);
-    auto* Character = Cast<AERCharacter>(GetPawn());
-    if (bGamePaused || bMenuOpen || !Character || Character->Health->bDead) return;
+    auto* PlayerCharacter = Cast<AERCharacter>(GetPawn());
+    if (bGamePaused || bMenuOpen || !PlayerCharacter || PlayerCharacter->Health->bDead) return;
 
-    auto* Movement = CastChecked<UERMovement>(Character->GetCharacterMovement());
+    auto* Movement = CastChecked<UERMovement>(PlayerCharacter->GetCharacterMovement());
     // A held key may have started on the previous pawn. Restore its hold
     // without calling CrouchPressed, which would count it as a tap for prone.
     if (IsInputKeyDown(ControlKey(EKeys::LeftShift)) || IsInputKeyDown(ControlKey(EKeys::RightShift)))
@@ -726,7 +726,7 @@ void AERPlayerController::PostProcessInput(float DeltaTime, bool bGamePaused)
     if (!Movement->bWantsToCrouch && !Movement->bProneWanted && !Movement->IsTraversing() && Movement->IsMovingOnGround()
         && (IsInputKeyDown(ControlKey(EKeys::C)) || IsInputKeyDown(ControlKey(EKeys::LeftControl))))
     {
-        Character->Crouch();
+        PlayerCharacter->Crouch();
         bForwardSprintHeld = false;
         UpdateSprintInput();
     }
