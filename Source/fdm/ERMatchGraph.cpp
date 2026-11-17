@@ -27,8 +27,8 @@
 
 namespace
 {
-const FLinearColor Alpha(.34f, .65f, 1.f);
-const FLinearColor Omega(1.f, .52f, .26f);
+const FLinearColor MatchGraphAlphaTeamColor(.34f, .65f, 1.f);
+const FLinearColor MatchGraphOmegaTeamColor(1.f, .52f, .26f);
 const FLinearColor Muted(.62f, .69f, .77f);
 
 const FLinearColor Positive = FLinearColor::FromSRGBColor(FColor(0, 128, 0));
@@ -472,7 +472,7 @@ private:
             Player.Name = Row.GetStringField(TEXT("name"));
             if (Row.GetBoolField(TEXT("bot"))) Player.Name += TEXT(" · BOT");
             Player.Team = Row.GetStringField(TEXT("team"));
-            Player.Color = Player.Team == TEXT("alpha") ? Alpha : Player.Team == TEXT("omega") ? Omega : Muted;
+            Player.Color = Player.Team == TEXT("alpha") ? MatchGraphAlphaTeamColor : Player.Team == TEXT("omega") ? MatchGraphOmegaTeamColor : Muted;
             Player.Kills = Row.GetIntegerField(TEXT("kills"));
             Player.Deaths = Row.GetIntegerField(TEXT("deaths"));
             Player.TeamKills = Row.GetIntegerField(TEXT("team_kills"));
