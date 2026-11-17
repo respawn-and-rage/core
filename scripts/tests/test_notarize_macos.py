@@ -133,6 +133,32 @@ class NotarizationGate(unittest.TestCase):
 
 
 class XcodeNotarizationGate(unittest.TestCase):
+    def test_xcode_staging_outside_tmpdir_is_cleaned_only_for_this_archive(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            scratch = root / 'scratch'
+            scratch.mkdir()
+            archive = root / 'Current Release.xcarchive'
+            own = root / 'XcodeDistPipeline.~~~local1'
+            other = root / 'XcodeDistPipeline.~~~other2'
+
+            def export(*args, **kwargs):
+                self.assertEqual(Path(kwargs['env']['TMPDIR']).parent, scratch)
+                for directory, source, name in ((own, archive, 'new'), (other, root / 'Other.xcarchive', 'other')):
+                    directory.mkdir()
+                    logs = root / f'Game_{name}.xcdistributionlogs'
+                    logs.mkdir()
+                    (logs / 'IDEDistributionPipeline.log').write_text(
+                        f"Running /usr/bin/ditto '-V' '{source}/Products/Applications/Game.app' "
+                        f"'{directory}/Root/Applications/Game.app'\n")
+                return subprocess.CompletedProcess(args, 0, stdout='', stderr='')
+
+            with patch.object(module.tempfile, 'gettempdir', return_value=str(root)), \
+                    patch.object(module, 'run', side_effect=export):
+                module.run_xcode_distribution(scratch, archive, 'Game.app', '-exportArchive')
+            self.assertFalse(own.exists())
+            self.assertTrue(other.exists())
+
     def exercise(self, failure=None, pending=False):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

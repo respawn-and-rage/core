@@ -1,0 +1,173 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Start the standalone Respawn & Rage Fargate task from Google Chat.
+Parameters:
+  ClusterName:
+    Type: String
+    AllowedPattern: '[A-Za-z0-9_-]+'
+  LegacyServiceName:
+    Type: String
+    AllowedPattern: '[A-Za-z0-9_-]+'
+  TaskDefinitionArn:
+    Type: String
+    AllowedPattern: 'arn:[^:]+:ecs:[^:]+:[0-9]{12}:task-definition/[A-Za-z0-9_-]+:[0-9]+'
+  ExecutionRoleArn:
+    Type: String
+    AllowedPattern: 'arn:[^:]+:iam::[0-9]{12}:role/.+'
+  Subnets:
+    Type: List<AWS::EC2::Subnet::Id>
+  SecurityGroups:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+  AllowedUsers:
+    Type: String
+    Default: 'none'
+    AllowedPattern: 'none|users/[0-9]+(,users/[0-9]+)*'
+    Description: Comma-separated Google Chat users/ IDs. none disables individual exceptions.
+  AllowedDomainId:
+    Type: String
+    Default: ''
+    Description: Google Chat domainId for the permitted Workspace domain. Empty disables domain access.
+Resources:
+  TaskState:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+  BotLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-bot'
+      RetentionInDays: 14
+  BotRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RunGameTask
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Ref TaskDefinitionArn
+                Condition:
+                  ArnEquals:
+                    'ecs:cluster': !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
+              - Effect: Allow
+                Action: [ecs:DescribeTasks, ecs:StopTask]
+                Resource: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/${ClusterName}/*'
+              - Effect: Allow
+                Action: ecs:DescribeServices
+                Resource: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:service/${ClusterName}/${LegacyServiceName}'
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !Ref ExecutionRoleArn
+                Condition:
+                  StringEquals:
+                    'iam:PassedToService': ecs-tasks.amazonaws.com
+              # DescribeNetworkInterfaces does not support resource-level permissions.
+              - Effect: Allow
+                Action: ec2:DescribeNetworkInterfaces
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'aws:RequestedRegion': !Ref AWS::Region
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt TaskState.Arn
+                Condition:
+                  ForAllValues:StringEquals:
+                    'dynamodb:LeadingKeys': [game-server]
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt BotLogs.Arn
+  Bot:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-bot'
+      Runtime: python3.13
+      Handler: index.handler
+      Role: !GetAtt BotRole.Arn
+      Timeout: 24
+      MemorySize: 256
+      Code:
+        ZipFile: !!LAMBDA_SOURCE!!
+      Environment:
+        Variables:
+          CLUSTER: !Ref ClusterName
+          LEGACY_SERVICE: !Ref LegacyServiceName
+          TASK_DEFINITION: !Ref TaskDefinitionArn
+          SUBNETS: !Join [',', !Ref Subnets]
+          SECURITY_GROUPS: !Join [',', !Ref SecurityGroups]
+          STATE_TABLE: !Ref TaskState
+          ALLOWED_USERS: !Ref AllowedUsers
+          ALLOWED_DOMAIN_ID: !Ref AllowedDomainId
+  ChatApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Ref AWS::StackName
+      ProtocolType: HTTP
+  ChatJwt:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref ChatApi
+      Name: GoogleChat
+      AuthorizerType: JWT
+      IdentitySource: ['$request.header.Authorization']
+      JwtConfiguration:
+        Issuer: https://accounts.google.com
+        Audience: [!Sub '${ChatApi.ApiEndpoint}/chat']
+  ChatIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ChatApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt Bot.Arn
+      PayloadFormatVersion: '2.0'
+      TimeoutInMillis: 25000
+  ChatRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ChatApi
+      RouteKey: POST /chat
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ChatJwt
+      Target: !Sub 'integrations/${ChatIntegration}'
+  ChatStage:
+    Type: AWS::ApiGatewayV2::Stage
+    DependsOn: ChatRoute
+    Properties:
+      ApiId: !Ref ChatApi
+      StageName: '$default'
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 8
+        ThrottlingRateLimit: 4
+  AllowApiInvoke:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Bot
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ChatApi}/*/POST/chat'
+Outputs:
+  ChatEndpoint:
+    Value: !Sub '${ChatApi.ApiEndpoint}/chat'
+  StateTable:
+    Value: !Ref TaskState

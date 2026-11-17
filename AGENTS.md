@@ -46,6 +46,7 @@ as `ERCharacter.cpp` by range.
 | Setup, compile, versions | [BUILD](docs/BUILD.md) |
 | macOS package or release | [PACKAGE_MAC](docs/PACKAGE_MAC.md) |
 | Windows or Linux package, dedicated server image | [PACKAGE_DESKTOP](docs/PACKAGE_DESKTOP.md) |
+| Google Chat app, on-demand dedicated server on Fargate | [SERVER_CHAT](docs/SERVER_CHAT.md) |
 | Submodules, licences, cleanup, publication | [ASSETS](docs/ASSETS.md) |
 | Unsure what a test proves | [TESTING](docs/TESTING.md) |
 

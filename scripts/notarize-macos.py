@@ -12,6 +12,7 @@ from pathlib import Path
 import plistlib
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -106,12 +107,52 @@ def xcode_failure(stage, diagnostic, archive):
     return RuntimeError(message + '\nArchive retained at ' + str(archive) + '\n' + diagnostic[-3000:])
 
 
-def run_xcode_distribution(scratch, *args):
-    # Xcode can leave full copies of the app and submission ZIP in TMPDIR.
-    # Give each invocation its own directory and reclaim it as soon as it exits.
+def cleanup_xcode_staging(temp_root, log_bundle, archive, app_name):
+    """Find the staging directory Xcode recorded for this exact archive."""
+    if log_bundle.is_symlink():
+        return
+    pipeline_log = log_bundle / 'IDEDistributionPipeline.log'
+    if not pipeline_log.is_file() or pipeline_log.is_symlink():
+        return
+    product = archive / 'Products/Applications' / app_name
+    marker = "Running /usr/bin/ditto "
+    with pipeline_log.open(encoding='utf-8', errors='replace') as stream:
+        for line in stream:
+            if marker not in line or str(product) not in line:
+                continue
+            try:
+                arguments = shlex.split(line.split(marker, 1)[1])
+            except ValueError:
+                continue
+            if len(arguments) < 2 or Path(arguments[-2]) != product:
+                continue
+            destination = Path(arguments[-1])
+            staging = destination.parents[2] if len(destination.parents) >= 3 else None
+            if (staging is None or
+                    destination != staging / 'Root/Applications' / app_name or
+                    staging.parent.resolve() != temp_root or
+                    not re.fullmatch(r'XcodeDistPipeline[.]~{3}[A-Za-z0-9]+', staging.name)):
+                continue
+            if staging.is_dir() and not staging.is_symlink() and staging.stat().st_uid == os.getuid():
+                shutil.rmtree(staging)
+                print('Removed Xcode distribution staging directory: ' + str(staging), flush=True)
+
+
+def run_xcode_distribution(scratch, archive, app_name, action, *args):
+    # Xcode may use the system temp directory despite TMPDIR.
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    pattern = Path(app_name).stem + '_*.xcdistributionlogs'
+    existing_logs = set(temp_root.glob(pattern))
     with tempfile.TemporaryDirectory(prefix='xcode-dist-', dir=scratch) as temporary:
-        return run('xcodebuild', *args, env={**os.environ, 'TMPDIR': temporary + os.sep},
-                   capture_output=True, text=True, check=False)
+        result = run('xcodebuild', action, '-archivePath', archive, *args,
+                     env={**os.environ, 'TMPDIR': temporary + os.sep},
+                     capture_output=True, text=True, check=False)
+        for log_bundle in set(temp_root.glob(pattern)) - existing_logs:
+            try:
+                cleanup_xcode_staging(temp_root, log_bundle, archive, app_name)
+            except OSError as error:
+                print(f'Warning: could not clean Xcode distribution staging: {error}', file=sys.stderr)
+        return result
 
 
 def notarize_with_xcode(app, identity, scratch, receipt, timeout):
@@ -141,7 +182,7 @@ def notarize_with_xcode(app, identity, scratch, receipt, timeout):
         'signingStyle': 'manual', 'signingCertificate': identity, 'teamID': team[1],
         'stripSwiftSymbols': False, 'manageAppVersionAndBuildNumber': False}))
     receipt['submission'] = {'method': 'xcode', 'archive': str(archive), 'status': 'uploading'}
-    result = run_xcode_distribution(scratch, '-exportArchive', '-archivePath', archive,
+    result = run_xcode_distribution(scratch, archive, app.name, '-exportArchive',
                                     '-exportOptionsPlist', options, '-allowProvisioningUpdates')
     if result.stdout:
         print(result.stdout, end='', flush=True)
@@ -155,7 +196,7 @@ def notarize_with_xcode(app, identity, scratch, receipt, timeout):
     while True:
         if exported.exists():
             shutil.rmtree(exported)
-        result = run_xcode_distribution(scratch, '-exportNotarizedApp', '-archivePath', archive,
+        result = run_xcode_distribution(scratch, archive, app.name, '-exportNotarizedApp',
                                         '-exportPath', exported)
         if result.returncode == 0:
             break
