@@ -27,6 +27,8 @@ PUBLIC_GAMEPLAY_TEXT = {
     'Config/GameplayMessages/respawn-and-rage-gameplay-messages.en-US.json',
     'Config/GameplayMessages/README.md',
 }
+# This parameterized deployment template contains no environment configuration.
+PUBLIC_SERVER_CHAT_TEMPLATE = 'scripts/server-chat/stack.yaml'
 # Exact text paths approved alongside the menu font and credits. Do not allow
 # the whole Branding tree: licensed game assets still belong in submodules.
 PUBLIC_BRANDING_TEXT = {
@@ -137,7 +139,7 @@ def verify(root):
                         count += 1
                         continue
                     allowed = (name in ROOT_FILES or name in PUBLIC_BRANDING_TEXT or name in PUBLIC_GAMEPLAY_TEXT or
-                               name in PUBLIC_EOS_GUEST_TEXT or
+                               name in PUBLIC_EOS_GUEST_TEXT or name == PUBLIC_SERVER_CHAT_TEMPLATE or
                                (path.parts[0] in EXTENSIONS and path.suffix in EXTENSIONS[path.parts[0]]))
                     if kind != 'blob' or mode not in ('100644', '100755') or not allowed:
                         failures.append(revision[:8] + ': forbidden path/mode ' + name)

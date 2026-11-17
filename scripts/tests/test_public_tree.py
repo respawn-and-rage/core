@@ -119,6 +119,29 @@ class PublicTreeTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'forbidden path/mode'):
                     module.verify(root)
 
+    def test_server_chat_template_exception_is_exact_and_text_only(self):
+        template = 'scripts/server-chat/stack.yaml'
+        cases = [
+            (template, (module.ROOT / template).read_bytes(), None),
+            (template, b'private\0asset', 'binary/LFS'),
+            (template, b'version https://git-lfs.github.com/spec/v1\n', 'binary/LFS'),
+            ('scripts/server-chat/deployment.yaml', b'Private: configuration\n', 'forbidden path/mode'),
+        ]
+        for name, content, error in cases:
+            with self.subTest(name=name, error=error), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.fixture(root)
+                target = root / name
+                target.parent.mkdir(parents=True)
+                target.write_bytes(content)
+                self.git(root, 'add', '.')
+                self.git(root, 'commit', '-m', 'Add deployment file')
+                if error:
+                    with self.assertRaisesRegex(RuntimeError, error):
+                        module.verify(root)
+                else:
+                    self.assertEqual(module.verify(root)[0], 2)
+
     def test_powershell_source_allowed_but_binary_in_script_rejected(self):
         for content, allowed in ((b'Write-Host "Windows build"\n', True), (b'binary\0payload', False)):
             with self.subTest(allowed=allowed), tempfile.TemporaryDirectory() as directory:
