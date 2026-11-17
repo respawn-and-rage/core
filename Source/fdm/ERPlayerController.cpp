@@ -1,4 +1,5 @@
 #include "ERPlayerController.h"
+#include "ERMatchGraph.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/SceneCapture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
@@ -413,6 +414,14 @@ void AERPlayerController::BeginPlay()
             .ShadowColorAndOpacity(FLinearColor::Black).Text_Lambda([this]() { return GetFrameRateText(); })];
     FrameRateWidget->SetVisibility(EVisibility::HitTestInvisible);
     GetWorld()->GetGameViewport()->AddViewportWidgetContent(FrameRateWidget.ToSharedRef(), 30);
+#if !UE_BUILD_SHIPPING
+    if (FParse::Param(FCommandLine::Get(), TEXT("ERMatchGraphProbe")))
+        FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateWeakLambda(this, [this](float)
+        {
+            OpenMenuPage(ERMatchGraph::MenuPage);
+            return false;
+        }), 2.f);
+#endif
 }
 void AERPlayerController::ClientGameplayMessage_Implementation(const FString& Event, const FString& Title, const FString& Body,
     int32 Priority, float Duration, bool Confirmation)
@@ -686,6 +695,7 @@ void AERPlayerController::SetupInputComponent()
         RawControlKeys.Add(Index, Chord.Key);
         Chord.Key = ControlKey(Chord.Key);
     }
+    InputComponent->BindKey(EKeys::F2, IE_Pressed, this, &AERPlayerController::OpenMatchGraph);
     if (auto* Input = Cast<UEnhancedInputComponent>(InputComponent))
     {
         if (WalkAction)
@@ -881,6 +891,10 @@ void AERPlayerController::CrouchReleased() { if (auto* C = Cast<AERCharacter>(Ge
 void AERPlayerController::ReloadPressed() { if (!bMenuOpen) if (auto* PlayerCharacter = Cast<AERCharacter>(GetPawn())) { PlayerCharacter->SetFireInputHeld(false);PlayerCharacter->ServerReload(); } }
 void AERPlayerController::ScoreboardPressed() { bShowScoreboard = true; }
 void AERPlayerController::ScoreboardReleased() { bShowScoreboard = false; }
+void AERPlayerController::OpenMatchGraph()
+{
+    if (!bMenuOpen) OpenMenuPage(ERMatchGraph::MenuPage);
+}
 void AERPlayerController::MenuPressed()
 {
     if (IsMenuLevel()) { if (MenuPage != 0) { GetGameInstance<UERGameInstance>()->CancelLANSearch(); GetGameInstance()->GetSubsystem<UEROnline>()->Cancel(); OpenMenuPage(0); } }

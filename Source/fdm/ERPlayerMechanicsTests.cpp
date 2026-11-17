@@ -10,17 +10,31 @@ bool FERResolutionTest::RunTest(const FString&)
     for(float Dt:{1.f/30,1.f/60,1.f/144})
     {
         FERResolutionPolicy P;
-        auto Run=[&](float Seconds,float Ms){for(int32 I=0;I<FMath::RoundToInt(Seconds/Dt);++I)P.Update(Dt,Ms);};
+        float SecondsSinceChange=1.f;
+        bool ChangesAreSpaced=true;
+        auto Update=[&](float Ms)
+        {
+            const float Before=P.Fraction;
+            SecondsSinceChange+=Dt;
+            P.Update(Dt,Ms);
+            if(P.Fraction!=Before)
+            {
+                ChangesAreSpaced &= SecondsSinceChange>=.130f;
+                SecondsSinceChange=0;
+            }
+        };
+        auto Run=[&](float Seconds,float Ms){for(int32 I=0;I<FMath::RoundToInt(Seconds/Dt);++I)Update(Ms);};
         Run(15,1000.f/59);TestEqual(TEXT("59 FPS stays at full quality"),P.Fraction,1.f);
         Run(1,30);Run(3,1000.f/60);TestEqual(TEXT("Brief dip does not trigger adjustment"),P.Fraction,1.f);
         Run(2,25);TestEqual(TEXT("Sustained load waits three seconds"),P.Fraction,1.f);
         Run(2,25);TestTrue(TEXT("Sustained overload starts bounded adaptation"),P.Fraction<1 && P.Fraction>.8f);
-        for(int32 I=0;I<int32(20/Dt);++I)P.Update(Dt,25*P.Fraction*P.Fraction);
+        for(int32 I=0;I<int32(20/Dt);++I)Update(25*P.Fraction*P.Fraction);
         TestTrue(TEXT("Quality converges then holds"),P.Direction==0 && P.Fraction>.75f && P.Fraction<.87f);
         const float Held=P.Fraction;P.HoldSeconds=4;
         Run(3.5,10);TestEqual(TEXT("Cooldown freezes quality even with spare GPU budget"),P.Fraction,Held);
         Run(2,10);TestEqual(TEXT("Recovery waits after cooldown"),P.Fraction,Held);
-        Run(3,10);TestTrue(TEXT("Sustained headroom restores quality continuously"),P.Fraction>Held && P.Fraction<=1);
+        Run(3,10);TestTrue(TEXT("Sustained headroom restores quality gradually"),P.Fraction>Held && P.Fraction<=1);
+        TestTrue(TEXT("Automatic scale changes are at least 130 ms apart"),ChangesAreSpaced);
     }
     return true;
 }

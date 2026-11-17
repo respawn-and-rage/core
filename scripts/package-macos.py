@@ -139,6 +139,8 @@ subprocess.run([sys.executable, str(project / 'scripts/prepare-eos-guest.py'),
 # Older resumable snapshots may predate the cooked-animation verifier.
 if not (snapshot / 'scripts/bake_cooked_first_person.py').is_file():
     shutil.copy2(project / 'scripts/bake_cooked_first_person.py', snapshot / 'scripts/bake_cooked_first_person.py')
+if not (snapshot / 'scripts/export-match-stats.py').is_file():
+    shutil.copy2(project / 'scripts/export-match-stats.py', snapshot / 'scripts/export-match-stats.py')
 uproject = snapshot / 'RespawnAndRage.uproject'
 archive = run_dir / 'dist'
 logs = run_dir / 'build.log'
@@ -246,6 +248,10 @@ try:
         packaged_version = app / 'Contents/UE/RespawnAndRage/Build/GameVersion.txt'
         if not packaged_version.is_file() or packaged_version.read_text().strip() != (snapshot / 'Build/GameVersion.txt').read_text().strip():
             raise RuntimeError('Packaged game version is missing or differs from the build stamp')
+        subprocess.run([sys.executable, str(Path(__file__).with_name('stage-match-stats.py')),
+                        '--archive', str(app),
+                        *(arg for arch in arches.split('+') for arg in ('--target', f'mac-{arch}'))],
+                       check=True)
         binary = app / 'Contents/MacOS' / executable
         actual = subprocess.check_output(['lipo', '-archs', str(binary)], text=True).strip()
         for required in arches.split('+'):

@@ -97,7 +97,8 @@ def main():
         for name in ('RespawnAndRage.uproject', 'Config', 'Content', 'Source', 'Build', 'Plugins'):
             if (project / name).exists():
                 archive.add(project / name, arcname=name, filter=source_only)
-        archive.add(project / 'scripts/stamp-build-version.py', arcname='scripts/stamp-build-version.py')
+        for name in ('stamp-build-version.py', 'export-match-stats.py', 'stage-match-stats.py'):
+            archive.add(project / 'scripts' / name, arcname='scripts/' + name)
         add_bytes('Build/SourceCommit.txt', commit + '\n')
         commit_date = subprocess.check_output(['git', '-C', str(project), 'show', '-s', '--format=%cI', 'HEAD'], text=True).strip()
         add_bytes('Build/SourceCommitDate.txt', commit_date + '\n')

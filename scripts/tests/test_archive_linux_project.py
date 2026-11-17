@@ -1,5 +1,6 @@
 """Verify a Linux snapshot carries plugin source instead of host binaries."""
 import importlib.util
+from importlib.machinery import SourceFileLoader
 import io
 import json
 from pathlib import Path
@@ -15,6 +16,19 @@ spec.loader.exec_module(module)
 
 
 class LinuxPluginSnapshot(unittest.TestCase):
+    def setUp(self):
+        load = SourceFileLoader.exec_module
+
+        def load_fixture(loader, loaded):
+            if loaded.__name__ == 'eos_guest':
+                loaded.prepare = lambda project, engine: None
+            else:
+                load(loader, loaded)
+
+        patcher = patch.object(SourceFileLoader, 'exec_module', load_fixture)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_marketplace_dependency_is_rebuilt_in_disposable_project(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -27,7 +41,10 @@ class LinuxPluginSnapshot(unittest.TestCase):
                 (plugin / name / 'fixture').write_text('fixture')
             descriptor = plugin / 'PCGEx.uplugin'
             descriptor.write_text(json.dumps({'Installed': True, 'VersionName': 'fixture'}))
-            for name in ('scripts/stamp-build-version.py', 'Branding/icon.png', 'Branding/background.jpg', 'Branding/Credits.txt', 'Branding/Fonts/Teko/ThirdPartyLicenses/Teko-OFL.txt', 'Branding/Fonts/Teko/Fonts/Teko-SemiBold.ttf'):
+            for name in ('scripts/stamp-build-version.py', 'scripts/export-match-stats.py',
+                         'scripts/stage-match-stats.py', 'Branding/icon.png', 'Branding/background.jpg',
+                         'Branding/Credits.txt', 'Branding/Fonts/Teko/ThirdPartyLicenses/Teko-OFL.txt',
+                         'Branding/Fonts/Teko/Fonts/Teko-SemiBold.ttf'):
                 path = project / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text('fixture')
@@ -41,6 +58,8 @@ class LinuxPluginSnapshot(unittest.TestCase):
                 self.assertIn('Branding/Fonts/Teko/Fonts/Teko-SemiBold.ttf', names)
                 self.assertIn('Branding/Fonts/Teko/ThirdPartyLicenses/Teko-OFL.txt', names)
                 self.assertIn('Branding/Credits.txt', names)
+                self.assertIn('scripts/export-match-stats.py', names)
+                self.assertIn('scripts/stage-match-stats.py', names)
                 self.assertFalse(any('Binaries' in n or 'Intermediate' in n for n in names))
                 self.assertFalse(json.load(archive.extractfile('Plugins/PCGEx/PCGEx.uplugin'))['Installed'])
             self.assertTrue(json.loads(descriptor.read_text())['Installed'])

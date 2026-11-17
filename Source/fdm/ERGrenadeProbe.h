@@ -24,6 +24,14 @@ private:
     bool bFixture=false,bFailed=false,bRemoteSpin=false;
     FQuat RemoteRotation=FQuat::Identity;
     TWeakObjectPtr<class AERProjectile> RemoteGrenade;
+    struct FFlightSample
+    {
+        bool bHasSample=false;
+        bool bMovedBetweenUpdates=false;
+        FTransform RootTransform=FTransform::Identity;
+        FVector MeshPosition=FVector::ZeroVector;
+    };
+    FFlightSample RemoteFlight[2];
     void Check(bool Value,const TCHAR* Label);
     void Fixture();
     void Advance(int32 Next,float Delay);

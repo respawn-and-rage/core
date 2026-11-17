@@ -37,6 +37,8 @@ try:
     checks={
         'gameplay_probe':host.returncode==0 and 'ER_GRENADE_TEST_COMPLETE result=PASS' in server and 'ER_GRENADE_TEST_FAIL' not in server,
         'remote_tumble':'ER_GRENADE_REMOTE_TUMBLE' in remote,
+        'remote_hand_interpolation':'ER_GRENADE_REMOTE_INTERPOLATED kind=hand' in remote,
+        'remote_launcher_interpolation':'ER_GRENADE_REMOTE_INTERPOLATED kind=launcher' in remote,
         'remote_team_colors':'ER_SMOKE_REMOTE_TEAM alpha=1 omega=0' in remote and 'ER_SMOKE_REMOTE_TEAM alpha=0 omega=1' in remote,
         'remote_both_fuses':remote.count('ER_GRENADE_BURST system=P_ER_CompactHE')>=2,
         'remote_hemisphere':'ER_SMOKE_CLOUD shape=hemisphere' in remote,

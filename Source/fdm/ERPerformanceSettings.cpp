@@ -148,11 +148,11 @@ void FSettings::ApplyPreset(EPreset Preset)
         Shadows=Effects=Textures=PostProcess=1; FrameCap=1;
         break;
     case EPreset::Balanced:
-        AA=0; GI=1; HardwareRT=LumenQuality=0; Reflections=1;
+        GI=1; HardwareRT=LumenQuality=0; Reflections=1;
         Shadows=Effects=Textures=PostProcess=2; FrameCap=1;
         break;
     case EPreset::Quality:
-        AA=0; GI=HardwareRT=LumenQuality=1; Reflections=2;
+        GI=HardwareRT=LumenQuality=1; Reflections=2;
         Shadows=Effects=Textures=PostProcess=3; FrameCap=1;
         break;
     }

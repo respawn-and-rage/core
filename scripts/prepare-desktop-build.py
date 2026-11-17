@@ -42,7 +42,8 @@ def prepare(project, engine, destination):
         shutil.copy2(project / 'Branding' / name, branding / name)
     shutil.copytree(project / 'Branding/Fonts', branding / 'Fonts', ignore=ignore)
     (destination / 'scripts').mkdir()
-    shutil.copy2(project / 'scripts/stamp-build-version.py', destination / 'scripts')
+    for name in ('stamp-build-version.py', 'export-match-stats.py'):
+        shutil.copy2(project / 'scripts' / name, destination / 'scripts')
     (destination / 'Build').mkdir(exist_ok=True)
     (destination / 'Build/SourceCommit.txt').write_text(commit + '\n')
     (destination / 'Build/SourceCommitDate.txt').write_text(commit_date + '\n')

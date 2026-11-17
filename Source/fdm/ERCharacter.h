@@ -42,7 +42,9 @@ public:
     UPROPERTY(ReplicatedUsing=OnRep_Dead, BlueprintReadOnly) bool bDead = false;
     UPROPERTY(Replicated, BlueprintReadOnly) double ProtectionEndServerTime = 0;
     bool IsProtected() const;
-    float ReceiveDamage(float Amount, AController* Killer, float ArmorRatio = 2, const FERMessageDamage& Facts = FERMessageDamage(), const FHitResult* BulletHit = nullptr);
+    float ReceiveDamage(float Amount, AController* Killer, float ArmorRatio = 2,
+        const FERMessageDamage& Facts = FERMessageDamage(), const FHitResult* BulletHit = nullptr,
+        const FHitResult* Impact = nullptr);
     UFUNCTION() void OnRep_Dead();
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 };

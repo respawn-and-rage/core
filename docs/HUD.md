@@ -43,6 +43,8 @@ without pixel caps, recomputed from the live viewport. Font: Teko SemiBold throu
   columns and rows sorted by kills then fewest deaths. Skull Hunt adds SKULLS and sorts by
   enemy skulls collected before the standard tie-breakers. The local player row is tinted, bots are
   tagged, and overflow collapses into "+N more".
+- **Combat graph** (F2 or the main and pause menus) shows archived match results and
+  interactions between players. See [Match statistics](MATCH_STATS.md).
 - **Inflicted damage**: red HP and green AP text under the reticle, up to five rows, 1s hold,
   .2s fade, attacker only. Rejected, zero and self damage are not shown.
 - Damage arcs and edge flashes: see [WEAPON_TUNING.md](WEAPON_TUNING.md).

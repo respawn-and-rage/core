@@ -8,6 +8,9 @@ struct FERMessageDamage
 {
     bool Headshot = false, Grenade = false, Explosion = false, Melee = false, Fall = false;
     bool Drowning = false, LastBullet = false, HasSourceLife = false;
+    bool Bullet = false, Projectile = false, OutOfWorld = false;
+    FName DamageWeapon;
+    int32 StatsAttacker = INDEX_NONE;
     float DistanceMeters = -1;
     int32 WeaponKey = -1; // ERLoadouts::WeaponAssetName index for the kill feed icon.
     TWeakObjectPtr<class APawn> SourceLife;

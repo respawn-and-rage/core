@@ -3,6 +3,7 @@
 #include "ERServerSettings.h"
 #include "ERLoadout.h"
 #include "EROutdoorBackdrop.h"
+#include "ERMatchStats.h"
 #include "GameFramework/GameMode.h"
 #include "GameFramework/GameState.h"
 #include "GameFramework/PlayerState.h"
@@ -142,6 +143,12 @@ public:
     virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
     virtual void RestartPlayer(AController* Player) override;
     virtual void HandleMatchHasStarted() override;
+    int32 RememberMatchAttacker(const AERPlayerState* State) { return MatchStats.RememberAttacker(State); }
+    void RecordMatchDamage(const AERCharacter& Victim, const AController* Attacker,
+        const FERMessageDamage& Facts, const FHitResult* Hit, float HealthLost, float ArmorLost)
+    {
+        MatchStats.Record(Victim, Attacker, Facts, Hit, HealthLost, ArmorLost);
+    }
     void RecordDeath(class AERCharacter* Victim, AController* Killer, const struct FERMessageDamage* Facts = nullptr);
     float PreMatchCountdownSeconds() const;
     void RequestRespawn(AController* Player);
@@ -153,6 +160,7 @@ public:
     void CheckLobby();
     static FString SanitizeName(const FString& Name);
 private:
+    FERMatchStats MatchStats;
     FEROutdoorLighting OutdoorLighting;
     friend class AERSkull;
     void DropSkull(const AERCharacter& Victim, EERTeam Team);

@@ -232,6 +232,8 @@ public:
     UPROPERTY(VisibleAnywhere) TObjectPtr<class UProjectileMovementComponent> Movement;
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Presentation") TObjectPtr<class UMaterialInterface> ImpactDecalMaterial;
     float Damage = 36;
+    FName DamageWeapon;
+    int32 StatsAttacker = INDEX_NONE;
     UPROPERTY(Replicated) EERPayload Payload = EERPayload::Bullet;
     UPROPERTY(Replicated) TObjectPtr<class USkeletalMesh> ThrownMesh;
     UPROPERTY(VisibleAnywhere) TObjectPtr<class USkeletalMeshComponent> Visual;
@@ -265,6 +267,7 @@ public:
     UFUNCTION(NetMulticast, Unreliable) void MulticastImpact(FVector_NetQuantize Position, FVector_NetQuantizeNormal Normal, float Roll);
     UFUNCTION(NetMulticast, Reliable) void MulticastDetonate(FVector_NetQuantize Position, EERPayload Kind);
 private:
+    virtual void PostNetReceiveLocationAndRotation() override;
     TWeakObjectPtr<AController> DamageController;
     bool bImpacted = false;
     bool bChainPending = false;

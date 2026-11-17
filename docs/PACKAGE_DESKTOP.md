@@ -79,11 +79,13 @@ Development with `MapsToCook`. `server-image.py stage` then applies the same pac
 validation as the native Linux helper below (ELF, `.pak`, Server target receipt), adds
 `run-server-linux.py`, `server-settings.json` and a generated `Dockerfile`, and checks
 that the staged `GameVersion.txt` matches. The image is `debian:bookworm-slim` with
-Python and tini, runs as uid/gid 10001 (Unreal refuses root), exposes `7777/udp`, omits
+Python, PyArrow and tini, runs as uid/gid 10001 (Unreal refuses root), exposes `7777/udp`, omits
 `*.debug` symbols and uses `run-server-linux.py` as entry point. The Server target never
 stages `EOS.local.ini`, and `stage`/`validate` refuse a package that contains one: the
 image is public. It is built for
 `linux/amd64` and tagged `<repository>:<GameVersion>` and `:latest`.
+For a mounted statistics directory, set `RR_MATCH_STATS_DIR` to its path inside the
+container. See [Match statistics](MATCH_STATS.md).
 
 Credentials live in the ignored `core/.secrets/dockerhub.json` (never commit it):
 

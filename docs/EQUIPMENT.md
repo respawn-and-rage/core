@@ -33,6 +33,9 @@ catalog, and Apply affects the next spawn only. `?ERLegacyArsenal=1` and
   tumble (server bounce .18–.25, friction .4). Cooking can detonate in hand; death drops
   live ordnance. Launcher fires `AERWeapon::LauncherLobDegrees` (12°) above aim, 1750cm/s; scope multiplies horizontal
   speed ×1.5. Contact with a pawn: launched HE deals 25% base damage once per target.
+  Remote clients interpolate the visible grenade's position and tumble between
+  replicated updates. The replicated root and shot target stay at the received
+  position; flight, collisions and fuse timing are simulated on the server.
 - Hand throw (`ERGrenadeBallistics`): `normalize(aim+Z*.35)*ProjectileSpeed`
   with horizontal ×1.2, scaled by `1+.2*clamp(pitch/45,-1,1)`, then character velocity
   added. Origin is yaw-relative `(-14,24,-4)` from the eye, swept against cover.

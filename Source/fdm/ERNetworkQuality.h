@@ -3,8 +3,8 @@
 
 namespace ERNetworkProtocol
 {
-// Replicated outdoor lighting includes the selected sky.
-constexpr uint32 Version=4;
+// Player controllers can request and receive completed match graphs.
+constexpr uint32 Version=5;
 inline FString BuildSignature(const FString& Build){return FString::Printf(TEXT("%s-net%u"),*Build,Version);}
 }
 

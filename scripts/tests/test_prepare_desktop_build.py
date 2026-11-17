@@ -1,4 +1,5 @@
 import importlib.util
+from importlib.machinery import SourceFileLoader
 import json
 import os
 from pathlib import Path
@@ -12,10 +13,24 @@ spec.loader.exec_module(module)
 
 
 class DesktopWorkspaceTests(unittest.TestCase):
+    def setUp(self):
+        load = SourceFileLoader.exec_module
+
+        def load_fixture(loader, loaded):
+            if loaded.__name__ == 'eos_guest':
+                loaded.prepare = lambda project, engine: None
+            else:
+                load(loader, loaded)
+
+        patcher = patch.object(SourceFileLoader, 'exec_module', load_fixture)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def fixture(self, root):
         project, engine = root / 'core', root / 'engine'
         for name in ('RespawnAndRage.uproject', 'Source/game.cpp', 'Config/DefaultGame.ini',
-                     'Build/GameVersion.txt', 'scripts/stamp-build-version.py', 'Content/map.uasset',
+                     'Build/GameVersion.txt', 'scripts/stamp-build-version.py', 'scripts/export-match-stats.py',
+                     'Content/map.uasset',
                      'Branding/icon.png', 'Branding/background.jpg', 'Branding/Credits.txt',
                      'Branding/Fonts/Teko/Fonts/Teko-SemiBold.ttf'):
             path = project / name
@@ -52,6 +67,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
             self.assertEqual((project / 'Source/game.cpp').read_text(), 'fixture')
             self.assertTrue((workspace / 'Branding/Fonts/Teko/Fonts/Teko-SemiBold.ttf').is_file())
             self.assertTrue((workspace / 'scripts/stamp-build-version.py').is_file())
+            self.assertTrue((workspace / 'scripts/export-match-stats.py').is_file())
 
     def test_existing_or_nested_workspace_is_rejected_before_writes(self):
         with tempfile.TemporaryDirectory() as temporary:

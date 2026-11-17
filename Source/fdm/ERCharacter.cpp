@@ -264,7 +264,8 @@ bool UERHealthComponent::IsProtected() const
     const auto* State = GetWorld()->GetGameState<AERGameState>();
     return State && State->GetServerWorldTimeSeconds() < ProtectionEndServerTime;
 }
-float UERHealthComponent::ReceiveDamage(float Amount, AController* Killer, float ArmorRatio, const FERMessageDamage& Facts, const FHitResult* BulletHit)
+float UERHealthComponent::ReceiveDamage(float Amount, AController* Killer, float ArmorRatio,
+    const FERMessageDamage& Facts, const FHitResult* BulletHit, const FHitResult* Impact)
 {
     auto* Character = Cast<AERCharacter>(GetOwner());
     auto* Mode = GetWorld()->GetAuthGameMode<AERGameMode>();
@@ -284,6 +285,8 @@ float UERHealthComponent::ReceiveDamage(float Amount, AController* Killer, float
     const float Before = Health;
     Health = FMath::Clamp(Health - Amount, 0.f, ERServer::Get(GetWorld(),"Health.Max"));
     const float HealthLost=Before-Health, ArmorLost=ArmorBefore-Armor;
+    if (HealthLost > 0 || ArmorLost > 0)
+        Mode->RecordMatchDamage(*Character, Killer, Facts, Impact, HealthLost, ArmorLost);
     if (BulletHit && (HealthLost>0 || ArmorLost>0)) Character->Wounds->Record(Character->GetMesh(),*BulletHit,HealthLost<=0 && ArmorLost>0);
     if ((HealthLost>0 || ArmorLost>0) && Killer && Killer!=Character->Controller)
         if (auto* Shooter=Cast<AERPlayerController>(Killer)) Shooter->ClientInflictedDamage(HealthLost,ArmorLost);
@@ -954,6 +957,8 @@ float AERCharacter::TakeDamage(float Damage, const FDamageEvent& Event, AControl
     float Ratio = 2.f;
     if (const auto* Gun = Cast<AERWeapon>(Causer); Gun && Gun->Data)
     {
+        Facts.DamageWeapon = Gun->Data->GetFName();
+        Facts.Bullet = Gun->Data->Payload == EERPayload::Bullet;
         Ratio = Gun->Tuned()->ArmorRatio;
         Facts.HasSourceLife = true;
         Facts.SourceLife = Cast<APawn>(Gun->GetOwner());
@@ -1000,6 +1005,9 @@ float AERCharacter::TakeDamage(float Damage, const FDamageEvent& Event, AControl
     { Ratio=Mine->ArmorRatio;Facts.Explosion=true; }
     if (const auto* Projectile = Cast<AERProjectile>(Causer))
     {
+        Facts.Projectile = true;
+        Facts.DamageWeapon = Projectile->DamageWeapon;
+        Facts.StatsAttacker = Projectile->StatsAttacker;
         Facts.HasSourceLife = true;
         Facts.SourceLife = Projectile->GetInstigator();
         Facts.Explosion = Projectile->HasDetonated() && (Projectile->Payload == EERPayload::HE ||
@@ -1023,7 +1031,11 @@ float AERCharacter::TakeDamage(float Damage, const FDamageEvent& Event, AControl
         if(SourceCharacter && SourceGun->Data->bUseBodyHitZones)
             CastChecked<UERPostureMesh>(GetMesh())->ShotHistory.ProjectToCurrent(GetMesh(),WoundHit,ERShotTrace::BulletTime(SourceCharacter));
     }
-    Health->ReceiveDamage(Damage, Killer, Ratio, Facts, bBullet ? &WoundHit : nullptr);
+    if (Facts.DamageWeapon.IsNone() && Facts.WeaponKey >= 0)
+        Facts.DamageWeapon = ERLoadouts::WeaponAssetName(Facts.WeaponKey);
+    const FHitResult* Impact = !Facts.Explosion && Event.IsOfType(FPointDamageEvent::ClassID)
+        ? &static_cast<const FPointDamageEvent&>(Event).HitInfo : nullptr;
+    Health->ReceiveDamage(Damage, Killer, Ratio, Facts, bBullet ? &WoundHit : nullptr, Impact);
     const float Applied=Before-Health->Health;
     if (Facts.Explosion && !Health->bDead && (Applied > 0 || Health->Armor < ArmorBefore)
         && Controller && Controller->IsPlayerController())
@@ -1134,7 +1146,7 @@ void AERCharacter::Landed(const FHitResult& Hit)
     if (Damage > 0)
     {
         FERMessageDamage Facts; Facts.Fall = true;
-        const float Applied=Health->ReceiveDamage(Damage,nullptr,2.f,Facts);
+        const float Applied=Health->ReceiveDamage(Damage,nullptr,2.f,Facts,nullptr,&Hit);
         if(Applied>0){++AuthorityPunch.Sequence;ClientDamageFeedback(Applied,FVector(0,0,-1),AuthorityPunch,false,Health->bDead);}
         UE_LOG(LogTemp,Display,TEXT("ER_FALL_DAMAGE amount=%.2f applied=%.2f hp=%.2f"),Damage,Applied,Health->Health);
     }
@@ -1144,7 +1156,9 @@ void AERCharacter::FellOutOfWorld(const UDamageType& Type)
     if (HasAuthority() && !Health->bDead)
     {
         Health->ProtectionEndServerTime = 0;
-        Health->ReceiveDamage(Health->Health+2*Health->Armor, nullptr);
+        FERMessageDamage Facts;
+        Facts.OutOfWorld = true;
+        Health->ReceiveDamage(Health->Health+2*Health->Armor, nullptr, 2.f, Facts);
     }
 }
 void AERCharacter::ApplyDeathVisuals()

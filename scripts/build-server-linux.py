@@ -249,6 +249,8 @@ def execute(project, engine, output, plan):
         target_receipt = output / 'project/Binaries/Linux/RespawnAndRageServer.target'
         package, digest = finalize_package(output / 'archive', target_receipt,
                                            plan['maps_to_cook'], plan['default_map'])
+        subprocess.run([sys.executable, str(Path(__file__).with_name('stage-match-stats.py')),
+                        '--archive', str(package), '--target', 'linux-x64'], check=True)
         plan.update(packaged=True, package=str(package), binary_sha256=digest, runtime_verified=False)
     except Exception as error:
         plan.update(error=str(error))

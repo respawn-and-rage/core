@@ -3,6 +3,7 @@
 #include "ERPerformanceSettings.h"
 #include "EROnline.h"
 #include "ERMatch.h"
+#include "ERMatchGraph.h"
 #include "ERCharacter.h"
 #include "ERMenuPreview.h"
 #include "ERInterfaceStyle.h"
@@ -186,6 +187,7 @@ TSharedRef<SWidget> Button(const FString& Label, TFunction<FReply()> Action, boo
         .SetNormalPadding(FMargin(0))
         .SetPressedPadding(FMargin(4, 2, -4, -2));
     auto Entry = Text(Label, 54);
+    Entry->SetAutoWrapText(false);
     Entry->SetColorAndOpacity(FSlateColor::UseForeground());
     return SNew(SButton).ButtonStyle(&MainStyle).Cursor(EMouseCursor::Hand)
         .ContentPadding(FMargin(12, 9)).OnClicked_Lambda(MoveTemp(Action))[Entry];
@@ -226,7 +228,7 @@ void Choice(TSharedRef<SVerticalBox> Panel, const FString& Title, TArray<FString
         .MenuContent()[SNew(SBox).MaxDesiredHeight(420)[SNew(SScrollBox) + SScrollBox::Slot()[Items]]]);
 }
 }
-void AERPlayerController::ERMenu(int32 Page) { OpenMenuPage(FMath::Clamp(Page, 0, 11)); }
+void AERPlayerController::ERMenu(int32 Page) { OpenMenuPage(FMath::Clamp(Page, 0, ERMatchGraph::MenuPage)); }
 void AERPlayerController::OpenMenuPage(int32 Page)
 {
     if(Page==10 && MenuPage!=10)ServerRulesParent=MenuPage;
@@ -260,6 +262,34 @@ void AERPlayerController::ShowMenu(bool bShow)
     bPendingWindowInput = true;
     if (!bShow) { ApplyWindowInputMode(); return; }
     auto* GI = GetGameInstance<UERGameInstance>(); if (!GI) return;
+    if (MenuPage == ERMatchGraph::MenuPage)
+    {
+        const auto BackButton = SNew(SButton).ContentPadding(FMargin(14, 3))
+            .OnClicked_Lambda([this] { OpenMenuPage(0); return FReply::Handled(); })
+            [Text(TEXT("Back"), 16)];
+        MenuWidget = SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
+            .BorderBackgroundColor(FLinearColor(.011f, .017f, .025f, .98f)).Padding(16)
+            [
+                SNew(SScaleBox).Stretch(EStretch::ScaleToFit)
+                [
+                    SNew(SBox).WidthOverride(1210).HeightOverride(665)
+                    [
+                        SNew(SVerticalBox)
+                        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
+                        [
+                            SNew(SHorizontalBox)
+                            + SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center)[Text(TEXT("COMBAT GRAPH"), 24)]
+                            + SHorizontalBox::Slot().AutoWidth()[BackButton]
+                        ]
+                        + SVerticalBox::Slot().FillHeight(1)[ERMatchGraph::Create(this)]
+                    ]
+                ]
+            ];
+        GetWorld()->GetGameViewport()->AddViewportWidgetContent(MenuWidget.ToSharedRef(), 20);
+        MenuFocusWidget = BackButton;
+        ApplyWindowInputMode();
+        return;
+    }
     const bool Main = IsMenuLevel();
     const bool Lobby = bShowingLobby;
     if (Lobby) GI->LastError.Empty();
@@ -294,6 +324,7 @@ void AERPlayerController::ShowMenu(bool bShow)
             Add(Panel, Button(TEXT("Main Menu"), [GI]() { GI->ReturnToMenu(); return FReply::Handled(); }, true));
         }
         if(Main)Add(Panel, Button(TEXT("Player"), Go(6), true));
+        Add(Panel, Button(TEXT("Combat Graph"), Go(ERMatchGraph::MenuPage), true));
         Add(Panel, Button(TEXT("Setup"), Go(4), true));
         Add(Panel, Button(TEXT("Credits"), Go(7), true));
         Add(Panel, Button(TEXT("Exit Game"), [GI]() { GI->QuitGame(); return FReply::Handled(); }, true));
@@ -883,7 +914,12 @@ void AERPlayerController::ShowMenu(bool bShow)
     auto Overlay = SNew(SOverlay);
     if (Main) Overlay->AddSlot()[SNew(SScaleBox).Stretch(EStretch::ScaleToFill).Clipping(EWidgetClipping::ClipToBounds).Visibility(EVisibility::HitTestInvisible)[SNew(SImage).Image(&Background)]];
     if (Home)
-        Overlay->AddSlot().HAlign(HAlign_Right).VAlign(VAlign_Center).Padding(24,30,70,30)[SNew(SBox).WidthOverride(360)[Panel]];
+        Overlay->AddSlot().Padding(24, 30, 70, 56)
+        [
+            SNew(SScaleBox).Stretch(EStretch::ScaleToFit).StretchDirection(EStretchDirection::DownOnly)
+            .HAlign(HAlign_Right).VAlign(VAlign_Center)
+            [SNew(SBox).MinDesiredWidth(360)[Panel]]
+        ];
     else
     {
         TSharedRef<SWidget> Content = SNew(SScrollBox) + SScrollBox::Slot()[Panel];

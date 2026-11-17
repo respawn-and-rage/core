@@ -7,6 +7,7 @@
 #include "ERPlayerController.h"
 #include "Camera/CameraActor.h"
 #include "Engine/StaticMeshActor.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -18,7 +19,7 @@
 #include "ShaderCompiler.h"
 
 AERGrenadeProbe::AERGrenadeProbe()
-{ bReplicates=true;bAlwaysRelevant=true;PrimaryActorTick.bCanEverTick=true; }
+{ bReplicates=true;bAlwaysRelevant=true;PrimaryActorTick.bCanEverTick=true;PrimaryActorTick.TickGroup=TG_PostUpdateWork; }
 void AERGrenadeProbe::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 { Super::GetLifetimeReplicatedProps(OutLifetimeProps);DOREPLIFETIME(AERGrenadeProbe,Phase); }
 void AERGrenadeProbe::Check(bool Value,const TCHAR* Label)
@@ -68,8 +69,27 @@ void AERGrenadeProbe::Tick(float DeltaSeconds)
     const double Now=GetWorld()->GetTimeSeconds();
     if(!HasAuthority())
     {
-        if(!bRemoteSpin) for(TActorIterator<AERProjectile> It(GetWorld());It;++It)
-            if(It->GetActorLocation().Z>4900 && AERProjectile::UsesFuse(It->Payload))
+        for(TActorIterator<AERProjectile> It(GetWorld());It;++It)
+        {
+            const FVector RootPosition=It->GetActorLocation();
+            if (RootPosition.Z>5050 && !It->HasDetonated() &&
+                (It->Payload==EERPayload::HE || It->Payload==EERPayload::LaunchedHE))
+            {
+                FFlightSample& Sample=RemoteFlight[It->Payload==EERPayload::LaunchedHE?1:0];
+                const FVector MeshPosition=It->Visual->GetComponentLocation();
+                // With no new position from the server, only the rendered mesh should advance.
+                if (!Sample.bMovedBetweenUpdates && Sample.bHasSample && It->GetActorTransform().Equals(Sample.RootTransform) &&
+                    !MeshPosition.Equals(Sample.MeshPosition,.1f))
+                {
+                    Sample.bMovedBetweenUpdates=true;
+                    UE_LOG(LogTemp,Display,TEXT("ER_GRENADE_REMOTE_INTERPOLATED kind=%s"),
+                        It->Payload==EERPayload::LaunchedHE?TEXT("launcher"):TEXT("hand"));
+                }
+                Sample.bHasSample=true;
+                Sample.RootTransform=It->GetActorTransform();
+                Sample.MeshPosition=MeshPosition;
+            }
+            if(!bRemoteSpin && RootPosition.Z>4900 && AERProjectile::UsesFuse(It->Payload))
             {
                 if(!RemoteGrenade.IsValid()) { RemoteGrenade=*It;RemoteRotation=It->GetActorQuat(); }
                 else if(RemoteGrenade.Get()==*It && !RemoteRotation.Equals(It->GetActorQuat(),.05f))
@@ -78,6 +98,7 @@ void AERGrenadeProbe::Tick(float DeltaSeconds)
                     UE_LOG(LogTemp,Display,TEXT("ER_GRENADE_REMOTE_TUMBLE kind=%d"),int32(It->Payload));
                 }
             }
+        }
         if(Phase>=6 && SeenPhase<6)
         {
             if(Seal.IsValid()) Seal->Destroy();
@@ -124,6 +145,7 @@ void AERGrenadeProbe::Tick(float DeltaSeconds)
             P->Payload=I?EERPayload::LaunchedHE:EERPayload::HE;P->Damage=0;P->FuseDuration=2.4f;
             P->ThrownMesh=I?C->Arsenal[7]->ProjectileMesh:C->Arsenal[8]->Mesh;
             P->Movement->InitialSpeed=P->Movement->MaxSpeed=1000;P->Movement->Velocity=FVector(1000,0,-100);
+            P->SetNetUpdateFrequency(15); // Leave client frames between snapshots to measure visual motion.
             UGameplayStatics::FinishSpawningActor(P,T);Grenades.Add(P);InitialRotations.Add(P->GetActorQuat());
         }
         Advance(1,.85f);
@@ -223,14 +245,16 @@ void AERGrenadeProbe::Tick(float DeltaSeconds)
     }
     else if(Phase==9)
     {
-        Check(!Cloud.IsValid(),TEXT("replicated_smoke_expires_after_twelve_seconds"));
+        Check(!Cloud.IsValid(),TEXT("replicated_smoke_expires_after_configured_duration"));
         UE_LOG(LogTemp,Display,TEXT("ER_GRENADE_TEST_COMPLETE result=%s"),bFailed?TEXT("FAIL"):TEXT("PASS"));
         FPlatformMisc::RequestExitWithStatus(false,bFailed?1:0);Advance(10,1000);
     }
     else if(Phase==10)
     {
         Check(Cloud.IsValid() && Cloud->GetActiveBlastRadius()>=380.f,TEXT("he_displaced_smoke_barely_regenerates_after_three_seconds"));
-        Capture(TEXT("06_HE_Dispersed.png"));Advance(9,6.5f);
+        Capture(TEXT("06_HE_Dispersed.png"));
+        const double Expiry = Cloud.IsValid() ? Cloud->StartedAtServerTime + Cloud->Duration : Now;
+        Advance(9, static_cast<float>(FMath::Max(0.0, Expiry - Now) + .25));
     }
 #endif
 }

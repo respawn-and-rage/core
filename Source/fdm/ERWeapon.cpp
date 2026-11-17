@@ -394,6 +394,9 @@ void AERWeapon::ArmGrenade()
     const FTransform Transform(FRotator::ZeroRotator,AERProjectile::SafeHandPosition(Character,true));
     auto* P=GetWorld()->SpawnActorDeferred<AERProjectile>(ProjectileClass,Transform,this,Character,ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
     if(!P) { bWantsFire=false;return; }
+    P->DamageWeapon = Data->GetFName();
+    if (auto* GameMode = GetWorld()->GetAuthGameMode<AERGameMode>())
+        P->StatsAttacker = GameMode->RememberMatchAttacker(Character->GetPlayerState<AERPlayerState>());
     P->Payload=Tuned()->Payload;P->ThrownMesh=Tuned()->ProjectileMesh?Tuned()->ProjectileMesh:Tuned()->Mesh;
     P->Damage=Tuned()->Damage;P->ExplosionRadius=Tuned()->ExplosionRadius;P->ExplosionInnerRadius=Tuned()->ExplosionInnerRadius;P->BlockExplosion=Tuned()->BlockExplosion;
     P->BlastArmorRatio=ERWeaponBallistics::GrenadeArmorRatio(Tuned()->ArmorRatio);
@@ -625,6 +628,9 @@ void AERWeapon::TryFire()
         auto* Projectile = GetWorld()->SpawnActorDeferred<AERProjectile>(ProjectileClass, FTransform(LastShotDirection.Rotation(), LaunchPosition), this, Character, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
         if (Projectile)
         {
+            Projectile->DamageWeapon = Data->GetFName();
+            if (auto* GameMode = GetWorld()->GetAuthGameMode<AERGameMode>())
+                Projectile->StatsAttacker = GameMode->RememberMatchAttacker(Character->GetPlayerState<AERPlayerState>());
             Projectile->Damage = Tuned()->Damage;
             Projectile->Payload = Tuned()->Payload;
             Projectile->ThrownMesh = Tuned()->ProjectileMesh ? Tuned()->ProjectileMesh : (Tuned()->bOneHanded ? Tuned()->Mesh : nullptr);
@@ -790,8 +796,35 @@ void AERProjectile::BeginPlay()
     SetActorTickEnabled(HasAuthority() && UsesFuse(Payload));
     Collision->SetCollisionResponseToChannel(ECC_GameTraceChannel1,Payload==EERPayload::Bullet?ECR_Block:ECR_Ignore);
     if (HasAuthority()) { Collision->IgnoreActorWhenMoving(GetInstigator(), true); Collision->IgnoreActorWhenMoving(GetOwner(), true); }
-    else { Movement->Deactivate(); Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision); }
+    else
+    {
+        Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        if (UsesFuse(Payload))
+        {
+            // Keep the component ticking for presentation, but only the server simulates flight.
+            Movement->bSimulationEnabled = false;
+            Movement->bInterpMovement = Movement->bInterpRotation = true;
+            // No frame skipping or random throttle phase for the visible grenade.
+            Movement->bThrottleInterpolation = false;
+            Movement->ThrottleInterpolationSkipFramesRecent = 0;
+            Movement->SetInterpolatedComponent(Visual);
+            Movement->Activate(true);
+        }
+        else Movement->Deactivate();
+    }
     OnRep_Held();
+}
+void AERProjectile::PostNetReceiveLocationAndRotation()
+{
+    if (Movement->GetInterpolatedComponent() != Visual || bHeld || bImpacted || !Visual->IsVisible())
+    {
+        Super::PostNetReceiveLocationAndRotation();
+        return;
+    }
+    const FRepMovement& Update = GetReplicatedMovement();
+    // Advance the replicated root immediately; only its visual child eases to the new pose.
+    Movement->Velocity = Update.LinearVelocity; // Used only to select the interpolation rate.
+    Movement->MoveInterpolationTarget(FRepMovement::RebaseOntoLocalOrigin(Update.Location, this), Update.Rotation);
 }
 FVector AERProjectile::SafeHandPosition(AERCharacter* Character,bool bOverhead,const AActor* Ignore)
 {
@@ -810,8 +843,13 @@ void AERProjectile::OnRep_Held()
 {
     ShotTarget->SetSphereRadius(bHeld?12.f:6.f);
     ShotTarget->SetCollisionEnabled(UsesFuse(Payload) && !bImpacted ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+    if (Movement->GetInterpolatedComponent() == Visual) Movement->ResetInterpolation();
     Visual->SetVisibility(!bHeld && !bImpacted);
-    if(bHeld) { Movement->Deactivate();Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision); }
+    if(bHeld)
+    {
+        if (HasAuthority()) Movement->Deactivate();
+        Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
 }
 void AERProjectile::ReleaseHeld(const FVector& Position,const FVector& Velocity)
 {

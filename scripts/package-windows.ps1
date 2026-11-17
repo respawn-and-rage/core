@@ -796,7 +796,10 @@ try {
                         }
                     }
                     $expectedVersion = (Get-Content -LiteralPath (Join-Path $workspace 'Build\GameVersion.txt') -Raw).Trim()
-                    $null = Get-GamePackage $archive $expectedVersion $platform
+                    $package = Get-GamePackage $archive $expectedVersion $platform
+                    $statsTarget = if ($platform -eq 'Linux') { 'linux-x64' } else { 'windows-x64' }
+                    Invoke-Native 'python.exe' @((Join-Path $PSScriptRoot 'stage-match-stats.py'),
+                        '--archive', $package.Directory, '--target', $statsTarget)
                 }
                 $receipt.status = 'packaged'
                 $receipt['game_version'] = $expectedVersion

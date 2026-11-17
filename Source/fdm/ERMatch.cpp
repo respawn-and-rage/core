@@ -539,6 +539,7 @@ void AERGameMode::HandleMatchHasStarted()
             PS->KillStreak.Reset();
         }
     GetWorld()->GetSubsystem<UERGameplayMessages>()->MatchStarted();
+    MatchStats.Begin(*this);
     UE_LOG(LogTemp, Display, TEXT("ER_MATCH_STARTED players=%d duration=%.1f"), GetNumPlayers(), MatchDuration);
 }
 void AERGameMode::CheckMatch()
@@ -566,6 +567,7 @@ void AERGameMode::FinishRound()
     State->Winner = State->AlphaScore == State->OmegaScore ? EERTeam::None : (State->AlphaScore > State->OmegaScore ? EERTeam::Alpha : EERTeam::Omega);
     State->RestartServerTime = State->GetServerWorldTimeSeconds() + ERServer::Get(GetWorld(),"Match.Intermission");
     EndMatch();
+    MatchStats.Finish(*State);
     GetWorld()->GetSubsystem<UERGameplayMessages>()->MatchFinished();
     for (TActorIterator<AERWeapon> It(GetWorld()); It; ++It) It->Cancel();
     for (TActorIterator<AERProjectile> It(GetWorld()); It; ++It) It->Destroy();

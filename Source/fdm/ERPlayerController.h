@@ -138,6 +138,7 @@ public:
     FERGameplayToast GameplayToast;
     float FlashOpacity = 0;
     bool bShowScoreboard = false;
+    void RequestMatchGraph(const FString& Day, const FString& Match, TFunction<void(const FString&)> Complete);
     bool bMenuOpen = false;
     virtual void BeginPlay() override;
     virtual void PlayerTick(float DeltaTime) override;
@@ -231,6 +232,14 @@ private:
     bool bServerRulesAdvanced = false;
     FString ServerPresetName = TEXT("Custom");
     int32 MenuPage = 0; // home, offline, server, search, setup, character, loadout
+    uint32 MatchGraphRequest = 0;
+    double NextMatchGraphRead = 0;
+    bool bMatchGraphBusy = false;
+    FString MatchGraphJson;
+    TFunction<void(const FString&)> MatchGraphComplete;
+    UFUNCTION(Server, Reliable) void ServerRequestMatchGraph(uint32 Request, const FString& Day, const FString& Match);
+    UFUNCTION(Client, Reliable) void ClientMatchGraphChunk(uint32 Request, const FString& Chunk, bool bFinal);
+    void OpenMatchGraph();
     bool bShowingLobby = false;
     void OpenMenuPage(int32 Page);
     bool IsInLobby() const;

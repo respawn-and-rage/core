@@ -33,6 +33,7 @@ as `ERCharacter.cpp` by range.
 | Accuracy, recoil, aim punch | [WEAPON_TUNING](docs/WEAPON_TUNING.md) |
 | Loadouts, grenades, launcher, smoke, Claymore | [EQUIPMENT](docs/EQUIPMENT.md) |
 | Match rules, movement, bots, controls, server settings, messages | [GAMEPLAY](docs/GAMEPLAY.md) |
+| Combat telemetry, daily Parquet export | [MATCH_STATS](docs/MATCH_STATS.md) |
 | One map | [MAPS](docs/MAPS.md) + `docs/maps/<map>.md` |
 | Map sizing, themes, textures, new map | [MAPS](docs/MAPS.md) |
 | Map playability analysis, tactical graph, reports | [PROCEDURAL_MAP_PLAYABILITY](docs/PROCEDURAL_MAP_PLAYABILITY.md) |

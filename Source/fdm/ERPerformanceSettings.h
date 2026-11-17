@@ -7,7 +7,7 @@ enum class EPreset : uint8 { Competitive, Performance, Balanced, Quality };
 // Local graphics preferences only; never change gameplay smoke or destruction.
 struct FSettings
 {
-    int32 Defaults=0, Automatic=1, Scale=67, AA=0, GI=1, HardwareRT=0, Shadows=2,
+    int32 Defaults=0, Automatic=1, Scale=67, AA=2, GI=1, HardwareRT=0, Shadows=2,
         Reflections=1, MotionBlur=0, DepthOfField=0, Effects=2, Textures=2, PostProcess=2, LumenQuality=0, FrameCap=1;
     float ManualPrimary() const { return AA==1 ? 1.f:FMath::Max(.5f,Scale/100.f); }
     void Load();

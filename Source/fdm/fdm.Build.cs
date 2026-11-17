@@ -12,6 +12,7 @@ public class fdm : ModuleRules
         RuntimeDependencies.Add("$(ProjectDir)/Branding/Fonts/Teko/ThirdPartyLicenses/Teko-OFL.txt", StagedFileType.NonUFS);
         RuntimeDependencies.Add("$(ProjectDir)/Branding/Fonts/Teko/CREDITS.txt", StagedFileType.NonUFS);
         RuntimeDependencies.Add("$(ProjectDir)/Config/GameplayMessages/respawn-and-rage-gameplay-messages.en-US.json", StagedFileType.NonUFS);
+        RuntimeDependencies.Add("$(ProjectDir)/scripts/export-match-stats.py", StagedFileType.NonUFS);
         PrivateDependencyModuleNames.Add("Json");
         // Clients ship the untrusted P2P credential; the dedicated server gets its own credential from RR_EOS_* at runtime.
         if (Target.Type != TargetType.Server && System.IO.File.Exists(System.IO.Path.Combine(ModuleDirectory, "../../Config/EOS.local.ini")))

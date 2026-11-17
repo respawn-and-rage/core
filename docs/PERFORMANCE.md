@@ -9,8 +9,8 @@ applies the base profile for local and packaged runs; do not restore launcher ov
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Competitive | manual 67% | TAAU | off | off | off | minimum | low | medium | 144 |
 | Performance | auto | TAAU | off | off | low | low | medium | medium | 90 |
-| **Balanced** (default) | auto | TSR | Lumen medium | SSR | medium | medium | high | high | 90 |
-| Quality | auto | TSR | Lumen high + HW RT | Lumen | high | high | ultra | ultra | 90 |
+| **Balanced** (default) | auto | TAAU | Lumen medium | SSR | medium | medium | high | high | 90 |
+| Quality | auto | TAAU | Lumen high + HW RT | Lumen | high | high | ultra | ultra | 90 |
 
 Fresh profiles, `SetDefaults` and legacy `Defaults=1` select Balanced; saved custom choices stay.
 Lumen medium is the engine's group 1 (irradiance-volume final gather) and Lumen high its group 3.
@@ -20,7 +20,8 @@ keeps the standard resolution.
 skin patches whose root cause was never isolated. Do not claim it was.
 
 Automatic resolution uses `ERResolutionPolicy` on real RHI frame history: 60 FPS target, band
-56–66, 3s sustain, 4s hold, with a 1080p scene cap and UI at viewport resolution.
+56–66, 3s sustain, 4s hold, and at least 130 ms between scale changes. The scene is capped at 1080p
+and UI stays at viewport resolution.
 `-ERPerformanceAudit` logs it. Lower effect levels bound local debris, decals and block effects and
 disable cloth at minimum. Competitive stays manual because the governor would spend headroom on
 resolution. No FPS figures are guarantees.

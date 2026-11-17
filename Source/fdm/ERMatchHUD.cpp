@@ -248,6 +248,8 @@ void AERHUD::DrawScoreboard(const AERGameState* GS)
     if (bSkullHunt)
         DrawHUDTextAnchored(ERMatchModes::Label(GS->MatchMode), FVector2D(W * .5f, Top - 5.f * S),
             FLinearColor::White, .85f, FVector2D(.5f,1));
+    DrawHUDTextAnchored(TEXT("F2  COMBAT GRAPH"), FVector2D(W * .5f, Top - (bSkullHunt ? 30.f : 5.f) * S),
+        FLinearColor(.7f, .76f, .84f), .68f, FVector2D(.5f, 1));
     const float HeaderHeight = 46.f * S, ColumnHeight = 26.f * S, RowHeight = 29.f * S;
     for (const EERTeam Team : {EERTeam::Alpha, EERTeam::Omega})
     {

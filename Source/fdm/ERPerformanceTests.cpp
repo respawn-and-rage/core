@@ -17,11 +17,12 @@ bool FERPerformancePreferencesTest::RunTest(const FString&)
     TestEqual(TEXT("Fresh profile uses balanced scale"),S.Scale,67);
     TestEqual(TEXT("Fresh profile uses balanced frame cap"),S.FrameCap,1);
     TestEqual(TEXT("Fresh profile enables automatic resolution"),S.Automatic,1);
+    TestEqual(TEXT("Fresh profile selects TAAU"),S.AA,2);
     GConfig->SetInt(TEXT("EclipseRecoil.Performance"),TEXT("Defaults"),1,TestIni);
     S.Load();
     TestEqual(TEXT("Saved default choice follows balanced"),S.Effects,2);
     TestEqual(TEXT("Saved default choice enables automatic resolution"),S.Automatic,1);
-    S.Defaults=0; S.Automatic=0; S.Scale=1; S.AA=2; S.Textures=3; S.MotionBlur=1; S.DepthOfField=1;
+    S.Defaults=0; S.Automatic=0; S.Scale=1; S.AA=0; S.Textures=3; S.MotionBlur=1; S.DepthOfField=1;
     S.Save();
     if(!FParse::Param(FCommandLine::Get(),TEXT("Multiprocess")) || FParse::Param(FCommandLine::Get(),TEXT("MultiprocessSaveConfig")))
     {
@@ -32,7 +33,7 @@ bool FERPerformancePreferencesTest::RunTest(const FString&)
     ERPerformance::FSettings Loaded; Loaded.Load();
     TestEqual(TEXT("Manual mode survives restart"),Loaded.Automatic,0);
     TestEqual(TEXT("1 percent survives restart"),Loaded.Scale,1);
-    TestEqual(TEXT("Temporal method survives restart"),Loaded.AA,2);
+    TestEqual(TEXT("Custom TSR choice survives restart"),Loaded.AA,0);
     TestEqual(TEXT("Texture quality survives restart"),Loaded.Textures,3);
     TestEqual(TEXT("Post processing survives restart"),Loaded.DepthOfField,1);
     TestEqual(TEXT("Temporal scale stays in supported range"),Loaded.ManualPrimary(),.5f);
@@ -43,11 +44,13 @@ bool FERPerformancePreferencesTest::RunTest(const FString&)
     TestEqual(TEXT("Preset disables Lumen in renderer"),Value(TEXT("r.DynamicGlobalIlluminationMethod")),0);
     TestEqual(TEXT("Preset disables hardware RT in renderer"),Value(TEXT("r.RayTracing.ForceAllRayTracingEffects")),0);
     TestEqual(TEXT("Preset selects temporal AA"),Value(TEXT("r.AntiAliasingMethod")),2);
+    TestEqual(TEXT("Performance enables temporal upsampling"),Value(TEXT("r.TemporalAA.Upsampling")),1);
     TestEqual(TEXT("Preset disables motion blur"),Value(TEXT("r.MotionBlurQuality")),0);
     TestEqual(TEXT("Preset disables depth of field"),Value(TEXT("r.DepthOfFieldQuality")),0);
     ERPerformance::FSettings Preset; Preset.Load();
     TestEqual(TEXT("Preset is saved"),Preset.HardwareRT,0);
     Loaded.ApplyPreset(ERPerformance::EPreset::Competitive);
+    TestEqual(TEXT("Competitive selects TAAU"),Loaded.AA,2);
     TestEqual(TEXT("Competitive preset fixes resolution above the 60 FPS governor"),Loaded.Automatic,0);
     TestEqual(TEXT("Competitive preset raises the frame cap"),Value(TEXT("t.MaxFPS")),144);
     TestEqual(TEXT("Competitive retains authored material layers"),Value(TEXT("r.MaterialQualityLevel")),1);
@@ -57,9 +60,12 @@ bool FERPerformancePreferencesTest::RunTest(const FString&)
     Loaded.ApplyPreset(ERPerformance::EPreset::Quality);
     TestEqual(TEXT("Quality preset uses Lumen"),Value(TEXT("r.DynamicGlobalIlluminationMethod")),1);
     TestEqual(TEXT("Quality preset uses high Lumen group"),Value(TEXT("sg.GlobalIlluminationQuality")),3);
+    TestEqual(TEXT("Quality selects TAAU"),Loaded.AA,2);
     const auto* SunShadowBias=IConsoleManager::Get().FindConsoleVariable(TEXT("r.Shadow.Virtual.ResolutionLodBiasDirectional"));
     TestEqual(TEXT("Quality preset keeps the top sun shadow resolution"),SunShadowBias->GetFloat(),-1.5f);
     Loaded.SetDefaults();
+    TestEqual(TEXT("Balanced selects temporal AA"),Value(TEXT("r.AntiAliasingMethod")),2);
+    TestEqual(TEXT("Balanced enables temporal upsampling"),Value(TEXT("r.TemporalAA.Upsampling")),1);
     TestEqual(TEXT("Default uses the standard sun shadow resolution"),SunShadowBias->GetFloat(),0.f);
     TestEqual(TEXT("Default selects balanced frame cap"),Value(TEXT("t.MaxFPS")),90);
     TestEqual(TEXT("Default keeps authored material quality"),Value(TEXT("r.MaterialQualityLevel")),1);
@@ -71,6 +77,7 @@ bool FERPerformancePreferencesTest::RunTest(const FString&)
     TestEqual(TEXT("Default uses automatic resolution"),Restored.Automatic,1);
     TestEqual(TEXT("Default uses balanced scale"),Restored.Scale,67);
     TestEqual(TEXT("Default uses balanced effects"),Restored.Effects,2);
+    TestEqual(TEXT("Balanced TAAU choice is saved"),Restored.AA,2);
     GConfig->UnloadFile(TestIni);
     IFileManager::Get().Delete(*TestIni);
     return true;
