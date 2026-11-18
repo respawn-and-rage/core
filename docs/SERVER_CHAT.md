@@ -37,3 +37,13 @@ or launch in flight.
 With boto3 installed, run `python3 -m unittest discover -s scripts/server-chat`.
 In Chat, start a test task, check the address with `status`, then send `stop`
 and confirm ECS leaves the task stopped.
+
+## Statistics volume
+
+The game task uses an S3 Files access point backed by
+`rr-stats-010112784456-eu-south-1-an` in `eu-south-1`. Its `match-stats`
+directory is mounted read-write at `/data/match-stats`, with
+`RR_MATCH_STATS_DIR=/data/match-stats`. The access point enforces uid/gid 10001.
+NFS access is restricted to the game task security group. Preserve the task role,
+volume, mount and environment setting when registering new task revisions, and
+update the Chat stack's TaskDefinitionArn to that revision.
