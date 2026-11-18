@@ -128,11 +128,12 @@ def apply(settings=None):
     assets.set_metadata_tag(data,'ERKnifeManualGripApproved','1')
     if protected!={p:data.get_editor_property(p) for p in protected}:raise RuntimeError('Protected knife fields changed')
     if not assets.save_loaded_asset(data,False):raise RuntimeError('Cannot activate user grip')
+    runpy.run_path(str(root/'scripts/setup_knife_outer_fingers.py'))['apply']()
     if settings is not None:
         settings.update(idle_animation=ready,fire_animation=fire,first_person_palm_grip=data.first_person_palm_grip,
-                        first_person_grip_transform=new_frame,view_offset=data.view_offset,
+                        first_person_grip_transform=data.first_person_grip_transform,view_offset=data.view_offset,
                         weapon_idle_animation=data.weapon_idle_animation,weapon_fire_animation=data.weapon_fire_animation)
-    angles=expected_hand.rotation.rotator()
+    angles=bone(evaluate(ready),'hand_r',local).rotation.rotator()
     receipt=dict(manual_edit=True,changed_bones=changed,hand_local_rotation_degrees=dict(roll=angles.roll,pitch=angles.pitch,yaw=angles.yaw),knife_trajectory_error_cm=max_error,
                  idle=ready.get_path_name(),fire=fire.get_path_name(),range_cm=data.hitscan_range,seconds=fire.get_play_length())
     (private/'knife-manual-grip.json').write_text(json.dumps(receipt,indent=2)+'\n')

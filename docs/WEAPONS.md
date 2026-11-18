@@ -212,6 +212,11 @@ source poses. `open_pistol_grip_editor.py` and
 
 The knife uses a user-set manual pose (`ERKnifeManualGripApproved` metadata,
 `apply_manual_knife_grip.py`), FPS scale .65, and takes precedence over all automatic fitting.
+Its final pass, `setup_knife_outer_fingers.py`, shifts the right ring and little
+knuckles toward the pommel and relaxes their proximal joints on the shared FPS rig.
+It uses the baseline wrist and its matching palm attachment at rest and the archived
+wrist track through the stab, keeping the handle aligned to the palm. The final index
+joint is capped at 65 degrees from bind to avoid folding its tip over the glove.
 
 ## Rebuild
 
