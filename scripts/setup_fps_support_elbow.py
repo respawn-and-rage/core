@@ -61,6 +61,8 @@ for key in keys:
     for prop in ('fire_animation','reload_animation'):
         clip=data.get_editor_property(prop)
         if not clip:continue
+        if key=='Pistol' and assets.get_metadata_tag(data,'ERPistolSource'+('Reload' if prop=='reload_animation' else 'Fire'))=='1':
+            continue
         expected=f'A_{key}_Hands_'+('Fire' if prop=='fire_animation' else 'Reload')
         if clip.get_name()!=expected:raise RuntimeError('Unexpected clip '+clip.get_path_name())
         if key=='Pistol' and prop=='reload_animation' and assets.get_metadata_tag(clip,'ERPistolReloadArmRevision')=='1':

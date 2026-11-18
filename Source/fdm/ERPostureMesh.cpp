@@ -364,6 +364,7 @@ void UERPostureMesh::FinalizeBoneTransform()
             const FVector Right=GetComponentTransform().InverseTransformVectorNoScale(C ? C->GetActorRightVector():GetOwner()->GetActorRightVector()).GetSafeNormal();
             const FVector Up=GetComponentTransform().InverseTransformVectorNoScale(FVector::UpVector).GetSafeNormal();
             const bool Pistol=Data->bOneHanded && Data->Payload==EERPayload::Bullet;
+            const bool SourcePistolPose=Pistol && !Data->WorldPistolReadyOffset.IsNearlyZero();
             const FRotator BaseAim=C ? C->GetBaseAimRotation():GetOwner()->GetActorRotation();const float Pitch=FMath::Clamp(FRotator::NormalizeAxis(BaseAim.Pitch),-65.f,65.f);
             const FVector Aim=GetComponentTransform().InverseTransformVectorNoScale(FRotator(Pitch,BaseAim.Yaw,0).Vector()).GetSafeNormal();
             const FQuat GunRotation=FRotationMatrix::MakeFromXZ(Aim,Up).ToQuat();
@@ -376,7 +377,7 @@ void UERPostureMesh::FinalizeBoneTransform()
                 RotateBranch(Ref,Pose,TEXT("spine_01"),ChestTurn);
                 RotateBranch(Ref,Pose,TEXT("neck_01"),ChestTurn.Inverse());
             }
-            const float StandingShoulder=Pistol ? FMath::Lerp(40.f,45.f,WorldAimBlend):FMath::Lerp(25.f,30.f,WorldAimBlend);
+            const float StandingShoulder=SourcePistolPose ? 0.f : Pistol ? FMath::Lerp(40.f,45.f,WorldAimBlend):FMath::Lerp(25.f,30.f,WorldAimBlend);
             const FQuat ShoulderTurn(Up,FMath::DegreesToRadians(FMath::Lerp(StandingShoulder,Pistol ? 15.f:FMath::Lerp(8.f,12.f,WorldAimBlend),Blend)));
             RotateBranch(Ref,Pose,TEXT("clavicle_r"),ShoulderTurn);
             RotateBranch(Ref,Pose,TEXT("clavicle_l"),ShoulderTurn);
@@ -396,7 +397,24 @@ void UERPostureMesh::FinalizeBoneTransform()
             const FVector NeutralOrigin=Ready-Gun.TransformVector(StockXY);
             const FVector AimedPocket=Pose[ShoulderR].GetLocation()+Aim*(7.f*Unit)-Right*(3.f*Unit)+Up*(5.f*Unit);
             const FVector AimedOrigin=AimedPocket-Gun.TransformVector(Data->WorldStockContact);
-            Gun.SetLocation(Pistol ? (Pose[ShoulderR].GetLocation()+Pose[ShoulderL].GetLocation())*.5f+Aim*(36*Unit)-Up*(12*Unit*(1.f-Blend)):FMath::Lerp(NeutralOrigin,AimedOrigin,WorldAimBlend));
+            FVector PistolOrigin=ShoulderCentre+Aim*(36*Unit)-Up*(12*Unit*(1.f-Blend));
+            if (SourcePistolPose)
+            {
+                double ArmLengthSum=0.;
+                for (const bool LeftHand : {false,true})
+                {
+                    const int32 Shoulder=LeftHand ? ShoulderL : ShoulderR;
+                    const int32 Elbow=Ref.FindBoneIndex(LeftHand ? TEXT("lowerarm_l") : TEXT("lowerarm_r"));
+                    const int32 Wrist=Ref.FindBoneIndex(LeftHand ? TEXT("hand_l") : TEXT("hand_r"));
+                    ArmLengthSum+=Pose.IsValidIndex(Elbow) && Pose.IsValidIndex(Wrist)
+                        ? FVector::Distance(Pose[Shoulder].GetLocation(),Pose[Elbow].GetLocation())+
+                          FVector::Distance(Pose[Elbow].GetLocation(),Pose[Wrist].GetLocation())
+                        : 54.*Unit;
+                }
+                const FVector SourceOrigin=ShoulderCentre+GunRotation.RotateVector(Data->WorldPistolReadyOffset)*(ArmLengthSum*.5);
+                PistolOrigin=FMath::Lerp(SourceOrigin,PistolOrigin,Blend);
+            }
+            Gun.SetLocation(Pistol ? PistolOrigin : FMath::Lerp(NeutralOrigin,AimedOrigin,WorldAimBlend));
             const bool GroundedRifle=GroundedProne && !Pistol && Data->Payload==EERPayload::Bullet;
             if(GroundedRifle)
                 Gun.AddToTranslation((-Aim*5.f-Up*7.f)*(Blend*Unit));
@@ -413,6 +431,11 @@ void UERPostureMesh::FinalizeBoneTransform()
                 const FVector Wrist=Gun.TransformPosition(Contact)-Rotation.RotateVector(Socket->RelativeLocation*Pose[Hand].GetScale3D());
                 const int32 Upper=Ref.FindBoneIndex(LeftHand ? TEXT("upperarm_l"):TEXT("upperarm_r")),Lower=Ref.FindBoneIndex(LeftHand ? TEXT("lowerarm_l"):TEXT("lowerarm_r"));
                 FVector Bend=(LeftHand ? -Right:Right)*.65f-Up*.8f;
+                if (SourcePistolPose)
+                {
+                    const FVector SourceBend=LeftHand ? Data->WorldPistolLeftElbowPole : Data->WorldPistolRightElbowPole;
+                    Bend=FMath::Lerp(Gun.GetRotation().RotateVector(SourceBend),Bend,Blend);
+                }
                 if(GroundedProne && Pose.IsValidIndex(Upper) && Pose.IsValidIndex(Lower))
                     Bend=FMath::Lerp(Bend,GroundedArmPole(Pose[Upper].GetLocation(),Pose[Lower].GetLocation(),Pose[Hand].GetLocation(),Wrist,Up,LeftHand ? -Right:Right,GroundedRifle ? ElbowGround(LeftHand):ProneGround,C,GetComponentTransform(),ProneFloorZ),Blend);
                 FitLimb(Ref,Pose,LeftHand ? TEXT("upperarm_l"):TEXT("upperarm_r"),LeftHand ? TEXT("lowerarm_l"):TEXT("lowerarm_r"),LeftHand ? TEXT("hand_l"):TEXT("hand_r"),Wrist,Rotation,Bend);
@@ -424,7 +447,7 @@ void UERPostureMesh::FinalizeBoneTransform()
             const float ParentScale=BodyScale*(PalmR->GetSocketLocalTransform()*Pose[RH]).GetScale3D().X;
             Gun=ERWorldWeaponPose::Attachment(*Data,ParentScale)*PalmR->GetSocketLocalTransform()*Pose[RH];Gun.SetScale3D(FVector(Data->WorldWeaponScale*Unit));
             const FVector Contact=ERWorldWeaponPose::SupportContact(*Data,C ? C->GetTeamAppearance():PreviewAppearance);
-            const FQuat PalmRotation=Pistol ? FRotationMatrix::MakeFromXZ(FVector::ForwardVector,FVector::RightVector).ToQuat():Data->WorldLeftPalmRotation.Quaternion();
+            const FQuat PalmRotation=Pistol && !SourcePistolPose ? FRotationMatrix::MakeFromXZ(FVector::ForwardVector,FVector::RightVector).ToQuat():Data->WorldLeftPalmRotation.Quaternion();
             FitPalm(true,Contact,PalmRotation);
         }
     }

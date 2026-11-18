@@ -31,6 +31,9 @@ def digest(path):
 def apply():
     data = ue.load_asset(f'{asset_dir}/DA_Pistol')
     clip = data.get_editor_property('reload_animation')
+    if ue.EditorAssetLibrary.get_metadata_tag(data, 'ERPistolSourceReload') == '1':
+        ue.log('ER_PISTOL_RELOAD_ARM source reload preserved')
+        return
     if clip.get_path_name() != f'{asset_dir}/{clip_name}.{clip_name}':
         raise RuntimeError('Unexpected pistol reload clip')
     assets = ue.EditorAssetLibrary

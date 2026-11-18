@@ -87,11 +87,16 @@ for key,(scale,left_x) in profiles.items():
              # appears counterclockwise in the user's overhead screenshot.
              # Keep the palm upward and the same measured/seated anchor.
              world_left_palm_contact=left,world_left_palm_rotation=left_rotation)
+ if key=='Pistol' and a.get_metadata_tag(data,'ERPistolWorldSourcePose')=='1':
+  for prop in ('world_right_palm_contact','world_right_palm_rotation','world_left_palm_rotation'):
+   values.pop(prop)
  for p,v in values.items():data.set_editor_property(p,v)
  if before!={p:str(data.get_editor_property(p)) for p in protected}:raise RuntimeError('Protected weapon/FPS field changed')
  a.set_metadata_tag(data,'ERWorldReferencePoseRevision','9')
  if not a.save_loaded_asset(data,False):raise RuntimeError('Cannot save '+path)
- receipt.append(dict(key=key,scale=scale,length_cm=(max(v.x for v in vertices)-rear)*scale,stock=[stock.x,stock.y,stock.z],right_palm=[contact.x,contact.y,contact.z],left_palm=[left.x,left.y,left.z],before_sha256=hashlib.sha256(old.read_bytes()).hexdigest(),after_sha256=hashlib.sha256(file.read_bytes()).hexdigest(),protected=before))
+ right_palm=data.get_editor_property('world_right_palm_contact')
+ left_palm=data.get_editor_property('world_pistol_support_contact' if key=='Pistol' else 'world_left_palm_contact')
+ receipt.append(dict(key=key,scale=scale,length_cm=(max(v.x for v in vertices)-rear)*scale,stock=[stock.x,stock.y,stock.z],right_palm=[right_palm.x,right_palm.y,right_palm.z],left_palm=[left_palm.x,left_palm.y,left_palm.z],before_sha256=hashlib.sha256(old.read_bytes()).hexdigest(),after_sha256=hashlib.sha256(file.read_bytes()).hexdigest(),protected=before))
 ref=root/'Assets/characters/SourceAssets/WeaponPoseReferences/2026-10-26';ref.mkdir(parents=True,exist_ok=True)
 images=[]
 for stamp in ['09.16.17','09.16.34','09.16.23','09.20.59','09.21.06','09.16.43','09.16.51','09.17.03','09.19.28','09.21.13']:

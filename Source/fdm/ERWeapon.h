@@ -31,6 +31,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Presentation|World") FVector WorldLeftPalmContact=FVector::ZeroVector;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Presentation|World") FRotator WorldLeftPalmRotation=FRotator(0,90,0);
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Presentation|World") FVector WorldPistolSupportContact=FVector(-4,-3,-3);
+    // Weapon-local ready offset in units of the skin's mean arm length.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Presentation|World") FVector WorldPistolReadyOffset=FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Presentation|World") FVector WorldPistolRightElbowPole=FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Presentation|World") FVector WorldPistolLeftElbowPole=FVector::ZeroVector;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Presentation") bool bFitSupportHand = false;
     // Full-size weapon-local palm contact, before the socket attachment transform.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Presentation") FVector SupportHandOffset = FVector::ZeroVector;

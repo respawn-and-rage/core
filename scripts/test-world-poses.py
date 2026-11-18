@@ -10,7 +10,9 @@ from client_shutdown import settle_clients
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--prone',action='store_true',help='Check weapon and elbow floor clearance on all skins')
 parser.add_argument('--wall',action='store_true',help='Add thin cover ahead of the prone weapon')
-parser.add_argument('--knife',action='store_true',help='Check the knife and its authored grip on all 20 skins')
+item=parser.add_mutually_exclusive_group()
+item.add_argument('--knife',action='store_true',help='Check the knife and its authored grip on all 20 skins')
+item.add_argument('--pistol',action='store_true',help='Check the pistol and its authored grip on all 20 skins')
 parser.add_argument('--catalog-only',action='store_true',help='Check one rifle pose on each skin')
 parser.add_argument('--side-wall',action='store_true',help='Add a close side wall to check leg clearance')
 args=parser.parse_args()
@@ -21,14 +23,15 @@ engine=Path(os.environ.get('UE_ROOT','/Users/Shared/Epic Games/UE_5.8'))
 editor=engine/'Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor'
 logs=project/'Saved/Testing';logs.mkdir(parents=True,exist_ok=True)
 common=[str(editor),str(project/'RespawnAndRage.uproject'),'-game','-nullrhi','-nosound','-unattended','-NoSplash','-Multiprocess','-stdout','-FullStdOutLogOutput','-ExecCmds=t.MaxFPS 60']
-tag=('world-poses-prone-wall' if args.wall else 'world-poses-prone' if args.prone else 'world-poses-network')+('-knife' if args.knife else '')+('-side' if args.side_wall else '')
+tag=('world-poses-prone-wall' if args.wall else 'world-poses-prone' if args.prone else 'world-poses-network')+('-knife' if args.knife else '-pistol' if args.pistol else '')+('-side' if args.side_wall else '')
 hostlog=logs/(tag+'-host.log');clientlog=logs/(tag+'-client.log')
 if args.prone:common+=['-ERWorldPoseProne','-ini:Engine:[SystemSettings]:r.MeshStreaming=0']
 if args.wall:common.append('-ERWorldPoseWall')
 if args.side_wall:common.append('-ERWorldPoseSideWall')
 if args.catalog_only:common.append('-ERWorldPoseAllGallery')
 if args.knife:common+=['-ERWorldPoseItem=0','-ERWorldPoseAllGallery']
-expected=20 if args.knife or args.catalog_only else 260
+if args.pistol:common+=['-ERWorldPoseItem=1','-ERWorldPoseAllGallery']
+expected=20 if args.knife or args.pistol or args.catalog_only else 260
 processes=[];handles=[]
 try:
     handles.append(hostlog.open('w'))

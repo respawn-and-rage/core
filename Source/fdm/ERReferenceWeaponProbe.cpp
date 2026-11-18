@@ -127,6 +127,18 @@ void AERReferenceWeaponProbe::Tick(float DeltaTime)
             if(GetWorld()->GetTimeSeconds()-ReloadStartedAt>C->Weapon->Data->ReloadDuration*.45f && (!GShaderCompilingManager || !GShaderCompilingManager->IsCompiling()))
             {
                 CapturedReload=Phase;
+                if (Phase==40)
+                {
+                    auto* ArmsInstance=C->FirstPersonBody->GetSingleNodeInstance();
+                    auto* GunInstance=C->FirstPersonRifle->GetSingleNodeInstance();
+                    const FTransform Mag=C->FirstPersonRifle->GetSocketTransform(TEXT("P_mag"));
+                    const FVector Palm=C->FirstPersonBody->GetSocketLocation(TEXT("ER_Palm_L"));
+                    UE_LOG(LogTemp,Display,TEXT("ER_PISTOL_RELOAD_SAMPLE skin=%s arms=%s time=%.4f gun=%s time=%.4f palm_mag=%s"),
+                        *GetNameSafe(C->FirstPersonBody->GetSkeletalMeshAsset()),
+                        *GetNameSafe(ArmsInstance ? ArmsInstance->GetCurrentAsset() : nullptr), ArmsInstance ? ArmsInstance->GetCurrentTime() : -1.f,
+                        *GetNameSafe(GunInstance ? GunInstance->GetCurrentAsset() : nullptr), GunInstance ? GunInstance->GetCurrentTime() : -1.f,
+                        *Mag.InverseTransformPosition(Palm).ToString());
+                }
                 FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir()/FString::Printf(TEXT("Testing/ReferenceWeapons/Reload_%02d.png"),Phase-39),true,false);
                 UE_LOG(LogTemp,Display,TEXT("ER_REFERENCE_REMOTE_RELOAD slot=%d"),Phase-39);
                 ServerAcknowledgeSlot(Phase);
